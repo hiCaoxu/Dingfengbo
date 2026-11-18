@@ -11,6 +11,7 @@ dist/
 *.msi
 packaging/wix314/
 packaging/wix314-binaries.zip
+packaging/flet-windows.zip
 *.db
 *.db-wal
 *.db-shm
