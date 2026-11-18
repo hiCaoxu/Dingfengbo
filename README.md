@@ -39,6 +39,16 @@ python run_server.py
 - 接口：`POST /api/sync/pull`、`POST /api/sync/push`、`GET /api/sync/check`，Bearer token 鉴权并按用户隔离。
 - 冲突：按 `updated_at` 最后写入获胜；删除使用软删除，同步完成后物理清理。
 
+## Docker 部署同步服务
+
+```powershell
+.\docker\deploy.ps1 -HostIp 43.142.92.115 -User root
+```
+
+脚本仅创建远程目录 `/opt/dingfengbo-sync` 并启动容器 `dingfengbo-sync`，不改动主机已有环境。数据卷为 `/opt/dingfengbo-sync/data`，容器监听 `8000:8000`。桌面端「设置」里的服务地址填 `http://43.142.92.115:8000`。
+
+若公网无法访问，需在云厂商安全组放行 TCP 8000（服务器内部 `ufw` 无需改动）；腾讯云轻量应用服务器可在「防火墙」中添加规则。
+
 ## 关键实现
 
 - Python 3.11 + Flet + SQLAlchemy 2.x + SQLite。

@@ -1,0 +1,25 @@
+# Deploy sync server to a remote host over SSH.
+# Usage: .\docker\deploy.ps1 -HostIp 43.142.92.115 -User root
+param(
+    [string]$HostIp = "43.142.92.115",
+    [string]$User = "root",
+    [string]$RemoteDir = "/opt/dingfengbo-sync"
+)
+
+$ErrorActionPreference = "Stop"
+$root = Split-Path -Parent $PSScriptRoot
+Set-Location $root
+
+$target = "$User@$HostIp"
+$sshOpts = @("-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new")
+
+& ssh @sshOpts $target "mkdir -p '$RemoteDir/docker'"
+if ($LASTEXITCODE -ne 0) { throw "SSH failed" }
+
+& scp @sshOpts -r app server run_server.py requirements-server.txt .dockerignore "$target`:$RemoteDir/"
+if ($LASTEXITCODE -ne 0) { throw "Copy source failed" }
+& scp @sshOpts docker/Dockerfile docker/docker-compose.yml "$target`:$RemoteDir/docker/"
+if ($LASTEXITCODE -ne 0) { throw "Copy docker config failed" }
+
+& ssh @sshOpts $target "cd '$RemoteDir' && docker compose -f docker/docker-compose.yml up -d --build && docker ps --filter name=dingfengbo-sync --format '{{.Status}}' && curl -fsS http://127.0.0.1:8000/api/health"
+if ($LASTEXITCODE -ne 0) { throw "Remote deploy failed" }

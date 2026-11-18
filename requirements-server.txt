@@ -1,0 +1,5 @@
+# 同步服务端最小依赖（Docker 镜像使用）
+fastapi>=0.110,<1.0
+uvicorn[standard]>=0.29,<1.0
+SQLAlchemy>=2.0,<3.0
+pydantic>=2.6,<3.0

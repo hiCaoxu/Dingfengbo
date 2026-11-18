@@ -1,0 +1,17 @@
+.git
+.gitignore
+.idea
+.vscode
+build
+dist
+packaging
+__pycache__
+*.pyc
+*.db
+*.msi
+*.exe
+*.zip
+*.wixobj
+*.wixpdb
+Dingfengbo/
+data/

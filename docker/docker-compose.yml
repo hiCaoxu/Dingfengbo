@@ -1,0 +1,16 @@
+services:
+  dingfengbo-sync:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: dingfengbo-sync:1.0.0
+    container_name: dingfengbo-sync
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../data:/data
+    environment:
+      DINGFENGBO_HOST: 0.0.0.0
+      DINGFENGBO_PORT: 8000
+      DINGFENGBO_SERVER_DB: /data/cloud.db
