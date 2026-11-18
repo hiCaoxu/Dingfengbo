@@ -28,6 +28,7 @@ def card(
     expand: int | None = None,
     padding: ft.Padding | None = None,
     on_click=None,
+    height: int | float | None = None,
 ) -> ft.Container:
     header: list[ft.Control] = []
     if title:
@@ -49,6 +50,7 @@ def card(
         padding=padding or CARD_PADDING,
         expand=expand,
         on_click=on_click,
+        height=height,
     )
 
 

@@ -12,7 +12,7 @@ from sqlalchemy import select
 from ..db.models import Account, Diary, Diet, Exercise, Note, Sleep, Todo, Transaction, Weight
 from ..db.session import session_scope
 from ..icons import ACTIONS, QUICK, ico
-from ..services.dates import day_of_year, iso_week, lunar_text, shift_month, weekday_cn
+from ..services.dates import day_of_year, iso_week, lunar_text, shift_date_month, shift_month, weekday_cn
 from ..services.diary import ensure_diary
 from ..services.finance import account_balance, money, month_summary, total_assets
 from ..services.sync import mark_pending_write
@@ -40,36 +40,51 @@ QUICK_ITEMS = [
     ("sleep", "记录睡眠"),
 ]
 
+# 首页视图状态需跨 refresh 保留，否则每次重建都会回到今天。
+_HOME_STATE = {"selected_date": date.today(), "year": date.today().year}
 
-def _calendar_card(month: date, refresh, set_month) -> ft.Container:
-    def move(delta):
-        year, mon = shift_month(month.year, month.month, delta)
-        set_month(date(year, mon, 1))
 
+def _calendar_card(selected: date, set_date, height: int = 260) -> ft.Container:
     body = ft.Column(
         [
-            ft.Text(str(month.day), size=58, color=TEXT, weight="bold", text_align=ft.TextAlign.CENTER),
-            ft.Text(f"第 {day_of_year(month)} 天 · 第 {iso_week(month)} 周", size=12, color=TEXT_MUTED, text_align=ft.TextAlign.CENTER),
-            ft.Text(f"{lunar_text(month)}  {weekday_cn(month)}", size=12, color=ACCENT, text_align=ft.TextAlign.CENTER),
+            ft.Text(str(selected.day), size=58, color=TEXT, weight="bold", text_align=ft.TextAlign.CENTER),
+            ft.Text(
+                f"第 {day_of_year(selected)} 天 · 第 {iso_week(selected)} 周",
+                size=12, color=TEXT_MUTED, text_align=ft.TextAlign.CENTER,
+            ),
+            ft.Text(
+                f"{lunar_text(selected)}  {weekday_cn(selected)}",
+                size=12, color=ACCENT, text_align=ft.TextAlign.CENTER,
+            ),
         ],
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         spacing=6,
     )
     return card(
         body,
-        title=f"{month.year}年{month.month}月",
+        title=f"{selected.year}年{selected.month}月",
+        expand=1,
+        height=height,
         trailing=ft.Row(
             [
-                icon_button(ACTIONS["chevron_left"], lambda e: move(-1), "上一月"),
-                icon_button(ACTIONS["chevron_right"], lambda e: move(1), "下一月"),
-                ft.TextButton("今天", on_click=lambda e: set_month(date.today().replace(day=1))),
+                icon_button(
+                    ACTIONS["chevron_left"],
+                    lambda e: set_date(shift_date_month(selected, -1)),
+                    "上一月",
+                ),
+                icon_button(
+                    ACTIONS["chevron_right"],
+                    lambda e: set_date(shift_date_month(selected, 1)),
+                    "下一月",
+                ),
+                ft.TextButton("今天", on_click=lambda e: set_date(date.today())),
             ],
             spacing=0,
         ),
     )
 
 
-def _stat_card(title: str, value: str, accent: bool = False) -> ft.Container:
+def _stat_card(title: str, value: str, accent: bool = False, height: int = 260) -> ft.Container:
     return card(
         ft.Column(
             [
@@ -80,6 +95,8 @@ def _stat_card(title: str, value: str, accent: bool = False) -> ft.Container:
             spacing=8,
         ),
         title=title,
+        expand=1,
+        height=height,
     )
 
 
@@ -185,14 +202,13 @@ def _heatmap_card(year: int, on_open, set_year) -> ft.Container:
 
 def build(page: ft.Page, refresh, on_open_diary, on_open_note) -> ft.Control:
     today = date.today()
-    state = {"month": today.replace(day=1), "year": today.year}
 
-    def set_month(value: date):
-        state["month"] = value
+    def set_date(value: date):
+        _HOME_STATE["selected_date"] = value
         refresh()
 
     def set_year(value: int):
-        state["year"] = value
+        _HOME_STATE["year"] = value
         refresh()
 
     with session_scope() as session:
@@ -283,25 +299,27 @@ def build(page: ft.Page, refresh, on_open_diary, on_open_note) -> ft.Control:
 
     return ft.Column(
         [
+            _heatmap_card(_HOME_STATE["year"], open_day, set_year),
             ft.Row(
                 [
-                    _calendar_card(state["month"], refresh, set_month),
+                    _calendar_card(_HOME_STATE["selected_date"], set_date),
                     _stat_card("本月收入", money(summary["income"])),
                     _stat_card("本月支出", money(summary["expense"]), accent=True),
                     _stat_card("总资产", money(assets)),
                 ],
                 spacing=14,
-                expand=True,
+                vertical_alignment=ft.CrossAxisAlignment.STRETCH,
             ),
             ft.Row(
                 [
-                    card(todo_rows(todo_today, "今天没有待办"), title="今日待办"),
-                    card(todo_rows(todo_week, "本周没有待办"), title="本周待办"),
-                    card(note_body, title="随机笔记", on_click=open_note if note else None),
+                    card(todo_rows(todo_today, "今天没有待办"), title="今日待办", expand=1, height=360),
+                    card(todo_rows(todo_week, "本周没有待办"), title="本周待办", expand=1, height=360),
+                    card(note_body, title="随机笔记", on_click=open_note if note else None,
+                         expand=1, height=360),
                 ],
                 spacing=14,
+                vertical_alignment=ft.CrossAxisAlignment.STRETCH,
             ),
-            _heatmap_card(state["year"], open_day, set_year),
             card(quick, title="快捷入口"),
         ],
         spacing=14,

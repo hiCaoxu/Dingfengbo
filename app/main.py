@@ -55,10 +55,13 @@ def main(page: ft.Page) -> None:
     page.bgcolor = BG
     page.padding = 0
     page.spacing = 0
-    page.window.width = 1440
-    page.window.height = 900
-    page.window.min_width = 1100
-    page.window.min_height = 700
+    page.window.width = 1800
+    page.window.height = 1500
+    page.window.min_width = 1800
+    page.window.min_height = 1500
+    page.window.max_width = 1800
+    page.window.max_height = 1500
+    page.window.resizable = False
     page.window.bgcolor = BG
     page.theme = ft.Theme(
         color_scheme_seed="#4A7C59",

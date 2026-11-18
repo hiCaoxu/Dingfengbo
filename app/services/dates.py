@@ -51,6 +51,13 @@ def shift_month(year: int, month: int, delta: int) -> tuple[int, int]:
     return index // 12, index % 12 + 1
 
 
+def shift_date_month(value: date, delta: int) -> date:
+    """按月份平移日期，保留日号；目标月无该日时取月末。"""
+    year, month = shift_month(value.year, value.month, delta)
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
+
+
 def month_grid(year: int, month: int) -> list[list[date]]:
     """周一为行首的整月网格，补齐前后日期。"""
     first = date(year, month, 1)
