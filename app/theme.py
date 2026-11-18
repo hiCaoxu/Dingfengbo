@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from flet import Border, TextStyle, border, padding
+import flet as ft
+from flet import Border, TextStyle
 
 BG = "#FAF7F2"
 CARD = "#FFFFFF"
@@ -22,7 +23,7 @@ CARD_PADDING = 16
 
 
 def card_border() -> Border:
-    return border.all(1, DIVIDER)
+    return ft.Border.all(1, DIVIDER)
 
 
 def title_style(size: int = 13, color: str = TEXT, bold: bool = True) -> TextStyle:
@@ -37,8 +38,8 @@ def money_style(size: int = 20) -> TextStyle:
     return TextStyle(size=size, color=TEXT, weight="bold")
 
 
-def card_padding() -> padding:
-    return padding.all(CARD_PADDING)
+def card_padding() -> ft.Padding:
+    return ft.Padding.all(CARD_PADDING)
 
 
 def icon_size() -> int:

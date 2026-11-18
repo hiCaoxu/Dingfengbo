@@ -2,7 +2,7 @@
 # 桌面端 + 同步服务端共用的最小依赖集合
 flet>=0.24,<1.0
 SQLAlchemy>=2.0,<3.0
-zhdate>=0.5,<1.0
+zhdate>=0.1
 Pygments>=2.17,<3.0
 matplotlib>=3.8,<4.0
 httpx>=0.27,<1.0

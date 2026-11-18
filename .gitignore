@@ -6,6 +6,8 @@ venv/
 build/
 dist/
 *.spec.bak
+*.wixobj
+*.msi
 *.db
 *.db-wal
 *.db-shm

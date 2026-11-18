@@ -79,23 +79,25 @@ def mark_clean(session: Session, changes: Iterable[dict]) -> None:
 
 
 def _parse(column, value: Any) -> Any:
-    if value is None or isinstance(value, (int, float, str, bool)):
-        return value
+    if value is None:
+        return None
     py_type = column.type.python_type
     if py_type is datetime:
-        return datetime.fromisoformat(value)
+        return value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
     if py_type is date:
-        return date.fromisoformat(value[:10])
+        return value if isinstance(value, date) else date.fromisoformat(str(value)[:10])
     if py_type is bool:
-        return bool(value)
+        return value if isinstance(value, bool) else bool(value)
     if py_type is float:
         return float(value)
+    if py_type is int:
+        return int(value)
     return value
 
 
-def apply_remote(session: Session, changes: Iterable[dict]) -> int:
-    """最后写入获胜：仅当远端 updated_at 更新时才覆盖本地。"""
-    applied = 0
+def apply_remote(session: Session, changes: Iterable[dict]) -> list[dict]:
+    """最后写入获胜：仅当远端 updated_at 更新时才覆盖本地，返回被接受的变更。"""
+    applied: list[dict] = []
     for change in changes:
         table = change.get("table")
         data = change.get("data") or {}
@@ -120,7 +122,7 @@ def apply_remote(session: Session, changes: Iterable[dict]) -> int:
             if column.name in data:
                 setattr(obj, column.name, _parse(column, data[column.name]))
         obj.sync_status = "clean"
-        applied += 1
+        applied.append(change)
     session.flush()
     return applied
 

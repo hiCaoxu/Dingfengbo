@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="定风波 个人工作台"
+           Language="2052"
+           Codepage="65001"
+           Version="1.0.0.0"
+           Manufacturer="定风波"
+           UpgradeCode="B8E6A4D2-5C71-4F3A-9D02-1F7C0A6E42B9">
+
+    <Package InstallerVersion="200"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Description="定风波 · 单机优先、可多端同步的个人工作台"
+             Manufacturer="定风波" />
+
+    <MajorUpgrade DowngradeErrorMessage="已安装更新版本的定风波。" />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- 默认安装目录：D:\Dingfengbo；应用数据另存 D:\Data\Dingfengbo -->
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+    <Property Id="INSTALLFOLDER" Value="D:\Dingfengbo\" />
+    <UIRef Id="WixUI_InstallDir" />
+    <WixVariable Id="WixUILicenseRtf" Value="license.rtf" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="DesktopFolder" />
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="定风波" />
+      </Directory>
+      <Directory Id="D_Drive" Name="D:\">
+        <Directory Id="INSTALLFOLDER" Name="Dingfengbo" />
+      </Directory>
+    </Directory>
+
+    <Fragment>
+      <ComponentGroup Id="DingfengboFiles" Directory="INSTALLFOLDER">
+        <Component Id="MainExecutable" Guid="3F1C9B7A-42E8-4D55-8F1A-6C2E93D7A001">
+          <File Id="ExeFile"
+                Source="..\dist\定风波.exe"
+                Name="定风波.exe"
+                KeyPath="yes" />
+        </Component>
+      </ComponentGroup>
+    </Fragment>
+
+    <Fragment>
+      <Component Id="DesktopShortcut" Directory="DesktopFolder" Guid="3F1C9B7A-42E8-4D55-8F1A-6C2E93D7A002">
+        <Shortcut Id="DesktopShortcutLink"
+                  Name="定风波"
+                  Target="[INSTALLFOLDER]定风波.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon"
+                  Advertise="no" />
+        <RegistryValue Root="HKCU" Key="Software\Dingfengbo\DesktopShortcut" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+
+      <Component Id="StartMenuShortcut" Directory="ApplicationProgramsFolder" Guid="3F1C9B7A-42E8-4D55-8F1A-6C2E93D7A003">
+        <Shortcut Id="StartMenuShortcutLink"
+                  Name="定风波"
+                  Target="[INSTALLFOLDER]定风波.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon" />
+        <Shortcut Id="UninstallShortcut"
+                  Name="卸载 定风波"
+                  Target="[System64Folder]msiexec.exe"
+                  Arguments="/x [ProductCode]"
+                  Icon="AppIcon" />
+        <RemoveFolder Id="RemoveApplicationProgramsFolder" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\Dingfengbo\StartMenu" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+
+      <Icon Id="AppIcon" SourceFile="icon.ico" />
+    </Fragment>
+
+    <Feature Id="ProductFeature" Title="定风波" Level="1" ConfigurableDirectory="INSTALLFOLDER">
+      <ComponentGroupRef Id="DingfengboFiles" />
+      <ComponentRef Id="DesktopShortcut" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+  </Product>
+</Wix>
