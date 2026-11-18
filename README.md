@@ -30,7 +30,7 @@ python run_server.py
 .\packaging\build.ps1
 ```
 
-依赖 PyInstaller 与 WiX Toolset v3。产物为 `packaging\定风波.msi`，安装后生成 `定风波.exe`、桌面快捷方式、开始菜单项与卸载入口。
+依赖 PyInstaller 与 WiX Toolset v3（也可将 `candle.exe`/`light.exe` 放到 `packaging\wix314\`）。产物为 `packaging\Dingfengbo.msi`，安装后生成 `定风波.exe`、桌面快捷方式、开始菜单项与卸载入口。
 
 ## 同步机制
 
