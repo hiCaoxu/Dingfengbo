@@ -44,7 +44,7 @@ QUICK_ITEMS = [
 _HOME_STATE = {"selected_date": date.today(), "year": date.today().year}
 
 
-def _calendar_card(selected: date, set_date, height: int = 260) -> ft.Container:
+def _calendar_card(selected: date, set_date, width: int | None = None, height: int | None = 240) -> ft.Container:
     body = ft.Column(
         [
             ft.Text(str(selected.day), size=58, color=TEXT, weight="bold", text_align=ft.TextAlign.CENTER),
@@ -64,6 +64,7 @@ def _calendar_card(selected: date, set_date, height: int = 260) -> ft.Container:
         body,
         title=f"{selected.year}年{selected.month}月",
         expand=1,
+        width=width,
         height=height,
         trailing=ft.Row(
             [
@@ -84,7 +85,7 @@ def _calendar_card(selected: date, set_date, height: int = 260) -> ft.Container:
     )
 
 
-def _stat_card(title: str, value: str, accent: bool = False, height: int = 260) -> ft.Container:
+def _stat_card(title: str, value: str, accent: bool = False, width: int | None = None, height: int | None = 240) -> ft.Container:
     return card(
         ft.Column(
             [
@@ -96,6 +97,7 @@ def _stat_card(title: str, value: str, accent: bool = False, height: int = 260) 
         ),
         title=title,
         expand=1,
+        width=width,
         height=height,
     )
 
@@ -308,21 +310,18 @@ def build(page: ft.Page, refresh, on_open_diary, on_open_note) -> ft.Control:
                     _stat_card("总资产", money(assets)),
                 ],
                 spacing=14,
-                vertical_alignment=ft.CrossAxisAlignment.STRETCH,
             ),
             ft.Row(
                 [
-                    card(todo_rows(todo_today, "今天没有待办"), title="今日待办", expand=1, height=360),
-                    card(todo_rows(todo_week, "本周没有待办"), title="本周待办", expand=1, height=360),
+                    card(todo_rows(todo_today, "今天没有待办"), title="今日待办", expand=1, height=320),
+                    card(todo_rows(todo_week, "本周没有待办"), title="本周待办", expand=1, height=320),
                     card(note_body, title="随机笔记", on_click=open_note if note else None,
-                         expand=1, height=360),
+                         expand=1, height=320),
                 ],
                 spacing=14,
-                vertical_alignment=ft.CrossAxisAlignment.STRETCH,
             ),
             card(quick, title="快捷入口"),
         ],
         spacing=14,
-        scroll=ft.ScrollMode.AUTO,
         expand=True,
     )

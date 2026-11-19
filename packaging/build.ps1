@@ -5,6 +5,10 @@ Set-Location $root
 
 python -m pip install -r requirements.txt
 python -m PyInstaller --clean --noconfirm "packaging\dingfengbo.spec"
+$built = Join-Path "$root\dist" "Dingfengbo.exe"
+Get-ChildItem "$root\dist" -Filter "*.exe" -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -ne $built } |
+    ForEach-Object { Copy-Item -LiteralPath $built -Destination $_.FullName -Force }
 
 $candle = (Get-Command candle.exe -ErrorAction SilentlyContinue).Source
 $light = (Get-Command light.exe -ErrorAction SilentlyContinue).Source

@@ -55,13 +55,6 @@ def main(page: ft.Page) -> None:
     page.bgcolor = BG
     page.padding = 0
     page.spacing = 0
-    page.window.width = 1800
-    page.window.height = 1500
-    page.window.min_width = 1800
-    page.window.min_height = 1500
-    page.window.max_width = 1800
-    page.window.max_height = 1500
-    page.window.resizable = False
     page.window.bgcolor = BG
     page.theme = ft.Theme(
         color_scheme_seed="#4A7C59",
@@ -109,6 +102,29 @@ def main(page: ft.Page) -> None:
     def _manual_sync():
         sync_client.sync_once()
         refresh_status()
+        page.update()
+
+    def _apply_window_bounds() -> None:
+        # Flet 使用逻辑像素；Windows 缩放 150% 时需把物理尺寸换算为逻辑尺寸。
+        scale = 1.0
+        try:
+            import ctypes
+            factor = ctypes.c_uint()
+            if ctypes.windll.shcore.GetScaleFactorForDevice(0, ctypes.byref(factor)) == 0:
+                if factor.value:
+                    scale = factor.value / 100.0
+        except Exception:
+            pass
+        width = int(round(1800 / scale))
+        height = int(round(1500 / scale))
+        page.window.width = width
+        page.window.height = height
+        page.window.min_width = width
+        page.window.min_height = height
+        page.window.max_width = width
+        page.window.max_height = height
+        page.window.resizable = False
+        page.window.alignment = ft.Alignment.CENTER
         page.update()
 
     def navigate(key: str) -> None:
@@ -208,6 +224,7 @@ def main(page: ft.Page) -> None:
         )
     )
     refresh()
+    _apply_window_bounds()
     bind_sync(page, refresh_status)
 
 
