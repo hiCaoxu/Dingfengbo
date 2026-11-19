@@ -8,7 +8,6 @@ from datetime import date, timedelta
 import flet as ft
 from sqlalchemy import select
 
-from ..config import load_settings
 from ..db.models import Diet, Exercise, Sleep, Weight
 from ..db.repo import soft_delete
 from ..db.session import session_scope
@@ -181,8 +180,6 @@ def build(page: ft.Page, refresh) -> ft.Control:
     )
 
     latest_text = f"{latest_weight.kg:.1f} kg · BMI {bmi(latest_weight.kg)}" if latest_weight else "暂无体重记录"
-    settings = load_settings()
-    profile_text = f"{float(settings.get('height_cm', 165)):g} cm · {settings.get('gender', '男')}"
     return ft.Column(
         [
             section_header("健康", ft.Row(
@@ -191,7 +188,6 @@ def build(page: ft.Page, refresh) -> ft.Control:
                 [
                     card(ft.Text(latest_text, size=20, color=TEXT, weight="bold"), title="最新体重"),
                     card(ft.Text(f"{today_kcal:.0f} kcal", size=20, color=ACCENT, weight="bold"), title="今日摄入"),
-                    card(ft.Text(profile_text, size=13, color=TEXT_MUTED), title="身高 / 性别"),
                 ],
                 spacing=12,
             ),
