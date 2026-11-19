@@ -11,7 +11,7 @@ from ..db.models import Diary
 from ..db.repo import update
 from ..db.session import session_scope
 from ..icons import ACTIONS, ico
-from ..services.dates import diary_title, iso_week, lunar_text, month_grid, shift_month
+from ..services.dates import diary_title, iso_week, month_grid, shift_month
 from ..services.diary import ensure_diary
 from ..services.sync import mark_pending_write
 from ..theme import ACCENT, DIVIDER, PRIMARY, PRIMARY_LIGHT, TEXT, TEXT_MUTED, card_border
@@ -47,12 +47,9 @@ def _editor(day: date, refresh) -> ft.Control:
         multiline=True,
         min_lines=14,
         max_lines=24,
-        border=ft.Border.all(1, DIVIDER),
-        focused_border_color=PRIMARY,
-        border_radius=10,
+        border=ft.InputBorder.NONE,
         color=TEXT,
         text_style=ft.TextStyle(size=13, color=TEXT, height=1.6),
-        content_padding=ft.Padding.all(14),
         on_blur=lambda e: save_content(diary_id, e.control.value),
     )
     return card(
@@ -100,8 +97,6 @@ def _month_view(refresh) -> ft.Control:
                         [
                             ft.Text(str(day.day), size=12, color=TEXT if in_month else TEXT_MUTED,
                                     weight="bold" if selected else "normal"),
-                            ft.Container(expand=True),
-                            ft.Text(lunar_text(day), size=9, color=TEXT_MUTED),
                         ],
                         spacing=2,
                     ),
