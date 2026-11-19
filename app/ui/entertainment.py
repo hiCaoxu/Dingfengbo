@@ -43,15 +43,24 @@ def delete(item_id: str, page, refresh) -> None:
     confirm(page, "确定删除该条目？", action)
 
 
-def _cover(item: Entertainment) -> ft.Control:
-    source = (item.cover or "").strip()
-    if source.startswith(("http://", "https://")) or (source and Path(source).exists()):
-        return ft.Image(src=source, width=64, height=84, fit=ft.BoxFit.COVER, border_radius=6)
+def _placeholder_cover() -> ft.Control:
     return ft.Container(
         content=ft.Icon(ico("IMAGE_OUTLINED"), size=24, color=TEXT_MUTED),
         width=64, height=84, bgcolor=PRIMARY_LIGHT, border_radius=6,
         alignment=ft.Alignment.CENTER,
     )
+
+
+def _cover(item: Entertainment) -> ft.Control:
+    source = (item.cover or "").strip()
+    if source.startswith(("http://", "https://")):
+        return ft.Image(
+            src=source, width=64, height=84, fit=ft.BoxFit.COVER, border_radius=6,
+            error_content=_placeholder_cover(),
+        )
+    if source and Path(source).exists():
+        return ft.Image(src=source, width=64, height=84, fit=ft.BoxFit.COVER, border_radius=6)
+    return _placeholder_cover()
 
 
 def _item_card(item: Entertainment, page, refresh) -> ft.Control:

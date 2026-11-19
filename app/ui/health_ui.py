@@ -123,40 +123,42 @@ def build(page: ft.Page, refresh) -> ft.Control:
     exercise_labels, exercise_minutes = daily_totals(exercises, "minutes")
     diet_labels, diet_calories = daily_totals(diets, "calories")
 
+    weight_img = ft.Image(src="", width=420, height=170, fit=ft.BoxFit.CONTAIN)
+    sleep_img = ft.Image(src="", width=420, height=170, fit=ft.BoxFit.CONTAIN)
+    exercise_img = ft.Image(src="", width=420, height=170, fit=ft.BoxFit.CONTAIN)
+    diet_img = ft.Image(src="", width=420, height=170, fit=ft.BoxFit.CONTAIN)
+
     charts = ft.Column(
         [
-            card(
-                ft.Image(src=line_chart(
-                    labels_of(weights),
-                    [{"name": "体重 kg", "values": [w.kg for w in weights[-14:]], "color": PRIMARY, "fill": True}],
-                    "体重趋势",
-                ), width=420, height=170, fit=ft.BoxFit.CONTAIN),
-                title="体重趋势",
-            ),
-            card(
-                ft.Image(src=line_chart(
-                    labels_of(sleeps),
-                    [{"name": "睡眠小时", "values": [s.hours for s in sleeps[-14:]], "color": ACCENT, "fill": True}],
-                    "睡眠时长",
-                ), width=420, height=170, fit=ft.BoxFit.CONTAIN),
-                title="睡眠时长",
-            ),
-            card(
-                ft.Image(src=bar_chart(
-                    exercise_labels, exercise_minutes, "锻炼分钟", PRIMARY,
-                ), width=420, height=170, fit=ft.BoxFit.CONTAIN),
-                title="锻炼时长",
-            ),
-            card(
-                ft.Image(src=bar_chart(
-                    diet_labels, diet_calories, "饮食热量", ACCENT,
-                ), width=420, height=170, fit=ft.BoxFit.CONTAIN),
-                title="饮食热量",
-            ),
+            card(weight_img, title="体重趋势"),
+            card(sleep_img, title="睡眠时长"),
+            card(exercise_img, title="锻炼时长"),
+            card(diet_img, title="饮食热量"),
         ],
         spacing=12,
         scroll=ft.ScrollMode.AUTO,
     )
+
+    def render_charts() -> None:
+        weight_img.src = line_chart(
+            labels_of(weights),
+            [{"name": "体重 kg", "values": [w.kg for w in weights[-14:]], "color": PRIMARY, "fill": True}],
+            "体重趋势",
+        )
+        sleep_img.src = line_chart(
+            labels_of(sleeps),
+            [{"name": "睡眠小时", "values": [s.hours for s in sleeps[-14:]], "color": ACCENT, "fill": True}],
+            "睡眠时长",
+        )
+        exercise_img.src = bar_chart(exercise_labels, exercise_minutes, "锻炼分钟", PRIMARY)
+        diet_img.src = bar_chart(diet_labels, diet_calories, "饮食热量", ACCENT)
+        try:
+            page.update()
+        except Exception:
+            pass
+
+    if page is not None:
+        page.run_thread(render_charts)
 
     tab_row = ft.Row(
         [ft.TextButton(("● " if _state["tab"] == t else "") + t,

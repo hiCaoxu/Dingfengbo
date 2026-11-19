@@ -44,11 +44,24 @@ def account_balance(session: Session, account: Account) -> float:
     return round(total, 2)
 
 
+def account_balances(session: Session) -> dict[str, float]:
+    """一次性聚合全部账户余额，避免逐账户重复扫描交易。"""
+    accounts = session.scalars(select(Account).where(Account.is_deleted.is_(False)))
+    balances = {account.id: float(account.initial_balance or 0) for account in accounts}
+    rows = session.scalars(select(Transaction).where(Transaction.is_deleted.is_(False)))
+    for tx in rows:
+        if tx.kind == "income":
+            balances[tx.account_id] = balances.get(tx.account_id, 0) + tx.amount
+        elif tx.kind == "expense":
+            balances[tx.account_id] = balances.get(tx.account_id, 0) - tx.amount
+        elif tx.kind == "transfer":
+            balances[tx.account_id] = balances.get(tx.account_id, 0) - tx.amount
+            balances[tx.to_account_id] = balances.get(tx.to_account_id, 0) + tx.amount
+    return {key: round(value, 2) for key, value in balances.items()}
+
+
 def total_assets(session: Session) -> float:
-    accounts = session.scalars(
-        select(Account).where(Account.is_deleted.is_(False))
-    )
-    return round(sum(account_balance(session, a) for a in accounts), 2)
+    return round(sum(account_balances(session).values()), 2)
 
 
 def month_summary(session: Session, year: int, month: int) -> dict[str, Any]:

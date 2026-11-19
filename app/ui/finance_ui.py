@@ -12,7 +12,7 @@ from ..db.repo import soft_delete
 from ..db.session import session_scope
 from ..icons import ACTIONS, ico
 from ..services.charts import bar_chart, line_chart, pie_chart
-from ..services.finance import account_balance, money, month_summary, six_month_trend, total_assets
+from ..services.finance import account_balances, money, month_summary, six_month_trend
 from ..services.sync import mark_pending_write
 from ..theme import ACCENT, DIVIDER, PRIMARY, TEXT, TEXT_MUTED
 from .forms import open_account_dialog, open_transaction_dialog
@@ -37,7 +37,8 @@ def build(page: ft.Page, refresh) -> ft.Control:
     today = date.today()
     with session_scope() as session:
         summary = month_summary(session, today.year, today.month)
-        assets = total_assets(session)
+        balances = account_balances(session)
+        assets = sum(balances.values())
         accounts = list(session.scalars(select(Account).where(Account.is_deleted.is_(False))))
         transactions = list(session.scalars(
             select(Transaction).where(Transaction.is_deleted.is_(False)).order_by(Transaction.date.desc(), Transaction.id.desc())
@@ -54,23 +55,38 @@ def build(page: ft.Page, refresh) -> ft.Control:
         spacing=12,
     )
 
+    pie_img = ft.Image(src="", width=320, height=220, fit=ft.BoxFit.CONTAIN)
+    trend_img = ft.Image(src="", width=420, height=220, fit=ft.BoxFit.CONTAIN)
+    account_img = ft.Image(src="", width=320, height=220, fit=ft.BoxFit.CONTAIN)
+
     charts = ft.Row(
         [
-            card(ft.Image(src=pie_chart(summary["categories"], "支出占比"),
-                          width=320, height=220, fit=ft.BoxFit.CONTAIN), title="支出占比"),
-            card(ft.Image(src=line_chart(
-                [t["label"] for t in trend],
-                [{"name": "收入", "values": [t["income"] for t in trend], "color": PRIMARY},
-                 {"name": "支出", "values": [t["expense"] for t in trend], "color": ACCENT}],
-                "近六个月收支趋势",
-            ), width=420, height=220, fit=ft.BoxFit.CONTAIN), title="收支趋势"),
-            card(ft.Image(src=bar_chart(
-                [a.name for a in accounts], [account_balance_from(a) for a in accounts], "账户余额", PRIMARY,
-            ), width=320, height=220, fit=ft.BoxFit.CONTAIN), title="账户余额"),
+            card(pie_img, title="支出占比"),
+            card(trend_img, title="收支趋势"),
+            card(account_img, title="账户余额"),
         ],
         spacing=12,
         scroll=ft.ScrollMode.AUTO,
     )
+
+    def render_charts() -> None:
+        pie_img.src = pie_chart(summary["categories"], "支出占比")
+        trend_img.src = line_chart(
+            [t["label"] for t in trend],
+            [{"name": "收入", "values": [t["income"] for t in trend], "color": PRIMARY},
+             {"name": "支出", "values": [t["expense"] for t in trend], "color": ACCENT}],
+            "近六个月收支趋势",
+        )
+        account_img.src = bar_chart(
+            [a.name for a in accounts], [balances.get(a.id, 0) for a in accounts], "账户余额", PRIMARY,
+        )
+        try:
+            page.update()
+        except Exception:
+            pass
+
+    if page is not None:
+        page.run_thread(render_charts)
 
     tabs = ft.Row(
         [
@@ -83,28 +99,26 @@ def build(page: ft.Page, refresh) -> ft.Control:
     )
 
     if _state["tab"] == "账户":
-        with session_scope() as session:
-            account_rows = []
-            for account in accounts:
-                obj = session.get(Account, account.id)
-                balance = account_balance(session, obj) if obj else 0
-                account_rows.append(
-                    ft.Container(
-                        content=ft.Row(
-                            [
-                                ft.Column([ft.Text(account.name, size=13, color=TEXT, weight="bold"),
-                                           ft.Text(f"{account.kind} · 初始 {money(account.initial_balance)}", size=10, color=TEXT_MUTED)],
-                                          spacing=3, expand=True),
-                                ft.Text(money(balance), size=16, color=PRIMARY, weight="bold"),
-                                icon_button(ACTIONS["edit"], lambda e, a=account: open_account_dialog(page, a, refresh), "编辑"),
-                                icon_button(ACTIONS["delete"], lambda e, a=account.id: _delete(Account, a, page, refresh), "删除"),
-                            ],
-                            spacing=10,
-                        ),
-                        border=ft.Border.all(1, DIVIDER), border_radius=10,
-                        padding=ft.Padding.symmetric(vertical=10, horizontal=12),
-                    )
+        account_rows = []
+        for account in accounts:
+            balance = balances.get(account.id, 0)
+            account_rows.append(
+                ft.Container(
+                    content=ft.Row(
+                        [
+                            ft.Column([ft.Text(account.name, size=13, color=TEXT, weight="bold"),
+                                       ft.Text(f"{account.kind} · 初始 {money(account.initial_balance)}", size=10, color=TEXT_MUTED)],
+                                      spacing=3, expand=True),
+                            ft.Text(money(balance), size=16, color=PRIMARY, weight="bold"),
+                            icon_button(ACTIONS["edit"], lambda e, a=account: open_account_dialog(page, a, refresh), "编辑"),
+                            icon_button(ACTIONS["delete"], lambda e, a=account.id: _delete(Account, a, page, refresh), "删除"),
+                        ],
+                        spacing=10,
+                    ),
+                    border=ft.Border.all(1, DIVIDER), border_radius=10,
+                    padding=ft.Padding.symmetric(vertical=10, horizontal=12),
                 )
+            )
         body = card(
             ft.Column(
                 [section_header("账户列表", primary_button("新增账户", lambda e: open_account_dialog(page, None, refresh), ACTIONS["add"])),
@@ -158,11 +172,3 @@ def build(page: ft.Page, refresh) -> ft.Control:
         spacing=12,
         expand=True,
     )
-
-
-def account_balance_from(account: Account) -> float:
-    """供图表调用的轻量余额计算。"""
-    from ..services.finance import account_balance as calculate
-
-    with session_scope() as session:
-        return calculate(session, session.get(Account, account.id) or account)

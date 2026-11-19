@@ -113,11 +113,17 @@ def _activity_counts() -> dict[date, int]:
     return counts
 
 
+_WEEKDAY_LABELS = ["一", "二", "三", "四", "五", "六", "日"]
+_HEAT_CELL = 11
+_HEAT_GAP = 3
+_HEAT_LABEL_W = 22
+
+
 def _heatmap_cell(day: date, count: int, on_open) -> ft.Container:
     level = 0 if count == 0 else min(5, max(1, (count + 1) // 2))
     return ft.Container(
-        width=6,
-        height=6,
+        width=_HEAT_CELL,
+        height=_HEAT_CELL,
         bgcolor=HEATMAP_LEVELS[level],
         border_radius=3,
         tooltip=f"{day.isoformat()} · {count} 条",
@@ -140,39 +146,58 @@ def _heatmap_card(year: int, on_open, set_year) -> ft.Container:
         cursor += timedelta(days=7)
     rows = []
     for weekday in range(7):
-        rows.append(
-            ft.Row(
-                [_heatmap_cell(week[weekday], counts.get(week[weekday], 0), on_open) for week in weeks],
-                spacing=1,
-            )
+        label = ft.Container(
+            content=ft.Text(_WEEKDAY_LABELS[weekday], size=9, color=TEXT_MUTED),
+            width=_HEAT_LABEL_W,
+            height=_HEAT_CELL,
+            alignment=ft.Alignment.CENTER_RIGHT,
         )
+        cells = ft.Row(
+            [_heatmap_cell(week[weekday], counts.get(week[weekday], 0), on_open) for week in weeks],
+            spacing=_HEAT_GAP,
+        )
+        rows.append(ft.Row([label, cells], spacing=4))
+
     grid = ft.Column(
         [
             ft.Row(
                 [
-                    ft.Container(width=24, height=8),
+                    ft.Container(width=_HEAT_LABEL_W + 4, height=8),
                     *[
                         ft.Container(
                             content=ft.Text(f"{w[0].month}月", size=8, color=TEXT_MUTED)
                             if w[0].day <= 7
                             else None,
-                            width=8,
+                            width=_HEAT_CELL,
                         )
                         for w in weeks
                     ],
                 ],
-                spacing=1,
+                spacing=_HEAT_GAP,
             ),
             *rows,
         ],
-        spacing=1,
+        spacing=_HEAT_GAP,
+    )
+    legend = ft.Row(
+        [
+            ft.Text("少", size=9, color=TEXT_MUTED),
+            *[
+                ft.Container(width=10, height=10, bgcolor=HEATMAP_LEVELS[i], border_radius=3)
+                for i in range(6)
+            ],
+            ft.Text("多", size=9, color=TEXT_MUTED),
+        ],
+        spacing=3,
+        alignment=ft.MainAxisAlignment.END,
     )
     return card(
         ft.Column(
             [
-                ft.Container(content=grid, width=max(240, len(weeks) * 7)),
+                ft.Row([grid], scroll=ft.ScrollMode.AUTO),
+                legend,
             ],
-            spacing=6,
+            spacing=8,
         ),
         title="活跃度热力图",
         trailing=ft.Row(
