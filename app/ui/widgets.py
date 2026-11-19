@@ -30,6 +30,7 @@ def card(
     on_click=None,
     height: int | float | None = None,
     width: int | float | None = None,
+    alignment: ft.Alignment | None = None,
 ) -> ft.Container:
     header: list[ft.Control] = []
     if title:
@@ -53,6 +54,7 @@ def card(
         on_click=on_click,
         height=height,
         width=width,
+        alignment=alignment,
     )
 
 

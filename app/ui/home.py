@@ -44,7 +44,7 @@ QUICK_ITEMS = [
 _HOME_STATE = {"selected_date": date.today(), "year": date.today().year}
 
 
-def _calendar_card(selected: date, set_date, width: int | None = None, height: int | None = None) -> ft.Container:
+def _calendar_card(selected: date, set_date, width: int | None = None, height: int | None = None, expand: int | None = None) -> ft.Container:
     body = ft.Column(
         [
             ft.Text(str(selected.day), size=30, color=TEXT, weight="bold", text_align=ft.TextAlign.CENTER),
@@ -59,9 +59,10 @@ def _calendar_card(selected: date, set_date, width: int | None = None, height: i
     return card(
         body,
         title=f"{selected.year}年{selected.month}月",
-        expand=1,
+        expand=expand,
         width=width,
         height=height,
+        alignment=ft.Alignment.CENTER,
         padding=ft.Padding.all(10),
         trailing=ft.Row(
             [
@@ -310,15 +311,28 @@ def build(page: ft.Page, refresh, on_open_diary, on_open_note) -> ft.Control:
 
     return ft.Column(
         [
-            _heatmap_card(_HOME_STATE["year"], open_day, set_year),
             ft.Row(
                 [
-                    _calendar_card(_HOME_STATE["selected_date"], set_date, height=130),
-                    _stat_card("本月收入", money(summary["income"]), height=130),
-                    _stat_card("本月支出", money(summary["expense"]), accent=True, height=130),
-                    _stat_card("总资产", money(assets), height=130),
+                    ft.Column(
+                        [
+                            _heatmap_card(_HOME_STATE["year"], open_day, set_year),
+                            ft.Row(
+                                [
+                                    _stat_card("本月收入", money(summary["income"]), height=130),
+                                    _stat_card("本月支出", money(summary["expense"]), accent=True, height=130),
+                                    _stat_card("总资产", money(assets), height=130),
+                                ],
+                                spacing=12,
+                            ),
+                        ],
+                        spacing=8,
+                        expand=True,
+                        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+                    ),
+                    _calendar_card(_HOME_STATE["selected_date"], set_date, width=280),
                 ],
                 spacing=12,
+                vertical_alignment=ft.CrossAxisAlignment.STRETCH,
             ),
             ft.Row(
                 [
