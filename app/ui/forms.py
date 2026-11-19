@@ -434,11 +434,15 @@ def open_sleep_dialog(page: ft.Page, item: Sleep | None = None, on_done: Callabl
     def save(_):
         hours = parse_hours(bedtime.value or "", wake.value or "")
         if hours == 0:
+            dialog.open = False
+            page.update()
             snack(page, "时间格式应为 HH:MM", "#C97B63")
             return
         try:
             record_date = _date(day.value, date.today()) or date.today()
         except ValueError:
+            dialog.open = False
+            page.update()
             snack(page, "日期格式不正确", "#C97B63")
             return
         try:
@@ -453,7 +457,13 @@ def open_sleep_dialog(page: ft.Page, item: Sleep | None = None, on_done: Callabl
                 if target:
                     update(session, target, **fields)
             else:
-                create(session, Sleep, **fields)
+                existing = session.scalar(
+                    select(Sleep).where(Sleep.is_deleted.is_(False), Sleep.date == record_date)
+                )
+                if existing:
+                    update(session, existing, **fields)
+                else:
+                    create(session, Sleep, **fields)
         mark_pending_write()
         _close_and_refresh(page, dialog, on_done)
 
