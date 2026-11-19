@@ -163,6 +163,39 @@ def next_due(value: date, rule: str) -> date | None:
     return None
 
 
+def next_lunar_due(value: date, rule: str) -> date | None:
+    """农历日期的循环推进：按天/按周走公历，按月=农历月+1，按年=农历年+1。"""
+    if rule == "day":
+        return value + timedelta(days=1)
+    if rule == "week":
+        return value + timedelta(weeks=1)
+    if rule not in ("month", "year"):
+        return None
+    try:
+        from zhdate import ZhDate
+
+        zh = ZhDate.from_datetime(datetime.combine(value, datetime.min.time()))
+        year, month, day = zh.lunar_year, zh.lunar_month, zh.lunar_day
+        if rule == "month":
+            if month == 12:
+                year, month = year + 1, 1
+            else:
+                month += 1
+        else:
+            year += 1
+        days = ZhDate.month_days(year)[month - 1]
+        if day > days:
+            day = days
+        return ZhDate(year, month, day).to_datetime().date()
+    except Exception:
+        return None
+
+
+def lunar_md(value: date) -> str:
+    """返回简洁农历月日，如「九月初九」；不可用时返回空串。"""
+    return lunar_text(value).split(" ")[0]
+
+
 def local_date_from_utc(value: datetime) -> date:
     """将历史 naive UTC 或带时区时间转换为本地日期。"""
     if value.tzinfo is None:

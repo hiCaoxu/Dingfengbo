@@ -11,7 +11,7 @@ from ..db.models import Todo
 from ..db.repo import create, soft_delete, update
 from ..db.session import session_scope
 from ..icons import ACTIONS, ico
-from ..services.dates import next_due
+from ..services.dates import lunar_md, next_due, next_lunar_due
 from ..services.sync import mark_pending_write
 from ..theme import DANGER, DIVIDER, PRIMARY_LIGHT, TEXT, TEXT_MUTED
 from .forms import open_todo_dialog, tags_text
@@ -32,14 +32,18 @@ def toggle(page: ft.Page, todo_id: str, refresh) -> None:
         item = session.get(Todo, todo_id)
         if item is None:
             return
-        if not item.completed and item.repeat_rule != "none" and not item.is_template:
+        if not item.completed and item.repeat_rule not in ("none", "irregular") and not item.is_template:
             due = item.due_date or date.today()
-            following = next_due(due, item.repeat_rule)
+            if item.lunar_reminder:
+                following = next_lunar_due(due, item.repeat_rule)
+            else:
+                following = next_due(due, item.repeat_rule)
             if following:
                 create(
                     session, Todo,
                     title=item.title, note=item.note, due_date=following, tags=item.tags,
-                    lunar_reminder=item.lunar_reminder, repeat_rule=item.repeat_rule,
+                    lunar_reminder=lunar_md(following) if item.lunar_reminder else "",
+                    repeat_rule=item.repeat_rule,
                     priority=item.priority, completed=False, is_template=False,
                 )
             update(session, item, completed=True, completed_at=datetime.utcnow(), is_template=True)

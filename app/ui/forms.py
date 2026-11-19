@@ -71,8 +71,8 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
         width=380,
     )
     tags = form_field("标签（逗号分隔）", tags_text(todo.tags) if todo else "")
-    repeat = dropdown("循环规则", ["不循环", "按天", "按周", "按月", "按年"],
-                      {"none": "不循环", "day": "按天", "week": "按周", "month": "按月", "year": "按年"}.get(todo.repeat_rule, "不循环") if todo else "不循环")
+    repeat = dropdown("循环规则", ["不循环", "不定期", "按天", "按周", "按月", "按年"],
+                      {"none": "不循环", "irregular": "不定期", "day": "按天", "week": "按周", "month": "按月", "year": "按年"}.get(todo.repeat_rule, "不循环") if todo else "不循环")
     priority = dropdown("优先级", ["", "低", "中", "高"], todo.priority if todo and todo.priority else "")
 
     def on_type_change(e):
@@ -108,7 +108,7 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
                 snack(page, "到期日期格式不正确", "#C97B63")
                 return
             lunar_reminder = ""
-        rule_map = {"不循环": "none", "按天": "day", "按周": "week", "按月": "month", "按年": "year"}
+        rule_map = {"不循环": "none", "不定期": "irregular", "按天": "day", "按周": "week", "按月": "month", "按年": "year"}
         fields = dict(
             title=title.value.strip(),
             note=note.value or "",
