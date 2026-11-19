@@ -61,7 +61,14 @@ def account_balances(session: Session) -> dict[str, float]:
 
 
 def total_assets(session: Session) -> float:
-    return round(sum(account_balances(session).values()), 2)
+    """总资产：仅统计非「借贷」类型账户的余额。"""
+    asset_ids = {
+        account.id
+        for account in session.scalars(
+            select(Account).where(Account.is_deleted.is_(False), Account.kind != "借贷")
+        )
+    }
+    return round(sum(value for key, value in account_balances(session).items() if key in asset_ids), 2)
 
 
 def month_summary(session: Session, year: int, month: int) -> dict[str, Any]:

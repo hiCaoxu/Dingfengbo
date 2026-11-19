@@ -171,6 +171,10 @@ def open_note_dialog(page: ft.Page, note: Note | None = None, on_done: Callable 
 
 # ---------------------------------------------------------------- 记账
 
+_EXPENSE_CATEGORIES = ["餐饮", "交通", "购物", "居住", "娱乐", "医疗", "教育", "通讯", "人情", "其他"]
+_INCOME_CATEGORIES = ["工资", "奖金", "理财", "兼职", "礼金", "报销", "其他"]
+
+
 def open_account_dialog(page: ft.Page, account: Account | None = None, on_done: Callable | None = None):
     name = form_field("账户名称 *", account.name if account else "")
     kind = dropdown("类型", ["现金", "银行卡", "电子钱包", "储蓄", "借贷"], account.kind if account else "银行卡")
@@ -214,7 +218,14 @@ def open_transaction_dialog(page: ft.Page, kind: str = "expense", tx: Transactio
     kind_value = tx.kind if tx else kind
     kind_dd = dropdown("类型", ["支出", "收入", "转账"], {"expense": "支出", "income": "收入", "transfer": "转账"}[kind_value])
     amount = form_field("金额 *", str(tx.amount) if tx else "")
-    category = form_field("分类", tx.category if tx else "", width=220)
+
+    def category_options(kind_key: str) -> list[str]:
+        return _INCOME_CATEGORIES if kind_key == "income" else _EXPENSE_CATEGORIES
+
+    initial_kind = {"支出": "expense", "收入": "income", "转账": "transfer"}[kind_dd.value]
+    cats = category_options(initial_kind)
+    category = dropdown("分类", cats, (tx.category if tx and tx.category in cats else None))
+
     initial_account = str(tx.account_id) if tx and tx.account_id in account_ids else account_ids[0]
     initial_to = str(tx.to_account_id) if tx and tx.to_account_id in account_ids else next(
         (account_id for account_id in account_ids if account_id != initial_account), initial_account
@@ -231,6 +242,19 @@ def open_transaction_dialog(page: ft.Page, kind: str = "expense", tx: Transactio
     to_dd = account_dropdown("转入账户", initial_to)
     date_field = form_field("日期 YYYY-MM-DD", tx.date.isoformat() if tx else date.today().isoformat(), width=220)
     note = form_field("备注", tx.note if tx else "")
+
+    def apply_kind(kind_key: str) -> None:
+        cats = category_options(kind_key)
+        category.options = [ft.dropdown.Option(c) for c in cats]
+        category.value = (tx.category if tx and tx.category in cats else None) or cats[0]
+        category.visible = kind_key != "transfer"
+        to_dd.visible = kind_key == "transfer"
+
+    apply_kind(initial_kind)
+    kind_dd.on_select = lambda e: (
+        apply_kind({"支出": "expense", "收入": "income", "转账": "transfer"}[e.control.value]),
+        page.update(),
+    )
 
     def save(_):
         try:
@@ -256,7 +280,7 @@ def open_transaction_dialog(page: ft.Page, kind: str = "expense", tx: Transactio
         fields = dict(
             kind=mapped,
             amount=value,
-            category=category.value or ("转账" if mapped == "transfer" else "其他"),
+            category="转账" if mapped == "transfer" else (category.value or "其他"),
             account_id=account_id,
             to_account_id=str(to_dd.value) if mapped == "transfer" else None,
             date=record_date,
