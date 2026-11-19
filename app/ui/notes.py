@@ -122,8 +122,9 @@ def build(page: ft.Page, refresh) -> ft.Control:
         value=str(selected.id) if selected else None,
         options=[ft.dropdown.Option(key=str(n.id), text=n.title) for n in filtered],
         width=260,
-        border_color=DIVIDER,
-        focused_border_color=PRIMARY,
+        border=ft.InputBorder.NONE,
+        border_width=0,
+        filled=False,
         on_select=lambda e: (_state.__setitem__("selected", int(e.control.value)), refresh()),
     )
     _preview = ft.Container(content=render_markdown(selected.content if selected else ""), expand=True)
