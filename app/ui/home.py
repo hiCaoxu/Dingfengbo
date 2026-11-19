@@ -44,21 +44,17 @@ QUICK_ITEMS = [
 _HOME_STATE = {"selected_date": date.today(), "year": date.today().year}
 
 
-def _calendar_card(selected: date, set_date, width: int | None = None, height: int | None = 240) -> ft.Container:
+def _calendar_card(selected: date, set_date, width: int | None = None, height: int | None = None) -> ft.Container:
     body = ft.Column(
         [
-            ft.Text(str(selected.day), size=58, color=TEXT, weight="bold", text_align=ft.TextAlign.CENTER),
+            ft.Text(str(selected.day), size=30, color=TEXT, weight="bold", text_align=ft.TextAlign.CENTER),
             ft.Text(
-                f"第 {day_of_year(selected)} 天 · 第 {iso_week(selected)} 周",
-                size=12, color=TEXT_MUTED, text_align=ft.TextAlign.CENTER,
-            ),
-            ft.Text(
-                f"{lunar_text(selected)}  {weekday_cn(selected)}",
-                size=12, color=ACCENT, text_align=ft.TextAlign.CENTER,
+                f"第{day_of_year(selected)}天 · 第{iso_week(selected)}周 · {lunar_text(selected)} {weekday_cn(selected)}",
+                size=10, color=TEXT_MUTED, text_align=ft.TextAlign.CENTER,
             ),
         ],
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-        spacing=6,
+        spacing=2,
     )
     return card(
         body,
@@ -66,6 +62,7 @@ def _calendar_card(selected: date, set_date, width: int | None = None, height: i
         expand=1,
         width=width,
         height=height,
+        padding=ft.Padding.all(10),
         trailing=ft.Row(
             [
                 icon_button(
@@ -85,7 +82,7 @@ def _calendar_card(selected: date, set_date, width: int | None = None, height: i
     )
 
 
-def _stat_card(title: str, value: str, accent: bool = False, width: int | None = None, height: int | None = 240) -> ft.Container:
+def _stat_card(title: str, value: str, accent: bool = False, width: int | None = None, height: int | None = None) -> ft.Container:
     return card(
         ft.Column(
             [
@@ -119,8 +116,8 @@ def _activity_counts() -> dict[date, int]:
 def _heatmap_cell(day: date, count: int, on_open) -> ft.Container:
     level = 0 if count == 0 else min(5, max(1, (count + 1) // 2))
     return ft.Container(
-        width=13,
-        height=13,
+        width=6,
+        height=6,
         bgcolor=HEATMAP_LEVELS[level],
         border_radius=3,
         tooltip=f"{day.isoformat()} · {count} 条",
@@ -146,49 +143,36 @@ def _heatmap_card(year: int, on_open, set_year) -> ft.Container:
         rows.append(
             ft.Row(
                 [_heatmap_cell(week[weekday], counts.get(week[weekday], 0), on_open) for week in weeks],
-                spacing=3,
+                spacing=1,
             )
         )
     grid = ft.Column(
         [
             ft.Row(
                 [
-                    ft.Container(width=26, height=13),
+                    ft.Container(width=24, height=8),
                     *[
                         ft.Container(
-                            content=ft.Text(f"{w[0].month}月", size=9, color=TEXT_MUTED)
+                            content=ft.Text(f"{w[0].month}月", size=8, color=TEXT_MUTED)
                             if w[0].day <= 7
                             else None,
-                            width=13,
+                            width=8,
                         )
                         for w in weeks
                     ],
                 ],
-                spacing=3,
+                spacing=1,
             ),
             *rows,
         ],
-        spacing=3,
+        spacing=1,
     )
     return card(
         ft.Column(
             [
-                ft.Row(
-                    [
-                        ft.Text("过去 12 个月活跃度", size=12, color=TEXT_MUTED),
-                        ft.Row(
-                            [
-                                ft.Container(width=10, height=10, bgcolor=c, border_radius=2) for c in HEATMAP_LEVELS
-                            ],
-                            spacing=3,
-                        ),
-                    ],
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                ),
-                ft.Container(content=grid, width=max(400, len(weeks) * 16)),
-                ft.Text("悬停查看日期与条目数，点击直达当日日记", size=10, color=TEXT_MUTED),
+                ft.Container(content=grid, width=max(240, len(weeks) * 7)),
             ],
-            spacing=10,
+            spacing=6,
         ),
         title="活跃度热力图",
         trailing=ft.Row(
@@ -284,10 +268,10 @@ def build(page: ft.Page, refresh, on_open_diary, on_open_note) -> ft.Control:
                     [
                         ft.Container(
                             content=ft.Icon(ico(QUICK[key]), size=22, color=PRIMARY),
-                            width=44, height=44, bgcolor=PRIMARY_LIGHT, border_radius=12,
+                            width=36, height=36, bgcolor=PRIMARY_LIGHT, border_radius=10,
                             alignment=ft.Alignment.CENTER,
                         ),
-                        ft.Text(label, size=11, color=TEXT_MUTED, text_align=ft.TextAlign.CENTER),
+                        ft.Text(label, size=10, color=TEXT_MUTED, text_align=ft.TextAlign.CENTER),
                     ],
                     horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                     spacing=6,
@@ -304,24 +288,24 @@ def build(page: ft.Page, refresh, on_open_diary, on_open_note) -> ft.Control:
             _heatmap_card(_HOME_STATE["year"], open_day, set_year),
             ft.Row(
                 [
-                    _calendar_card(_HOME_STATE["selected_date"], set_date),
-                    _stat_card("本月收入", money(summary["income"])),
-                    _stat_card("本月支出", money(summary["expense"]), accent=True),
-                    _stat_card("总资产", money(assets)),
+                    _calendar_card(_HOME_STATE["selected_date"], set_date, height=130),
+                    _stat_card("本月收入", money(summary["income"]), height=130),
+                    _stat_card("本月支出", money(summary["expense"]), accent=True, height=130),
+                    _stat_card("总资产", money(assets), height=130),
                 ],
-                spacing=14,
+                spacing=12,
             ),
             ft.Row(
                 [
-                    card(todo_rows(todo_today, "今天没有待办"), title="今日待办", expand=1, height=320),
-                    card(todo_rows(todo_week, "本周没有待办"), title="本周待办", expand=1, height=320),
+                    card(todo_rows(todo_today, "今天没有待办"), title="今日待办", expand=1, height=180),
+                    card(todo_rows(todo_week, "本周没有待办"), title="本周待办", expand=1, height=180),
                     card(note_body, title="随机笔记", on_click=open_note if note else None,
-                         expand=1, height=320),
+                         expand=1, height=180),
                 ],
-                spacing=14,
+                spacing=12,
             ),
-            card(quick, title="快捷入口"),
+            card(quick, title="快捷入口", padding=ft.Padding.symmetric(vertical=8, horizontal=16)),
         ],
-        spacing=14,
+        spacing=8,
         expand=True,
     )
