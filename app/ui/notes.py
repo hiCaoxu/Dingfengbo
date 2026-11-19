@@ -131,8 +131,7 @@ def build(page: ft.Page, refresh) -> ft.Control:
     source = ft.TextField(
         value=selected.content if selected else "",
         multiline=True,
-        min_lines=18,
-        max_lines=28,
+        expand=True,
         border=ft.InputBorder.NONE,
         border_width=0,
         filled=False,
