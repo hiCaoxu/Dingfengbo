@@ -36,6 +36,16 @@ def _chart_placeholder() -> ft.Control:
     )
 
 
+def _chart_slot(width: int, height: int) -> ft.Container:
+    """图表占位槽：初始显示加载提示，后台渲染完成后替换为 Image。"""
+    return ft.Container(
+        content=_chart_placeholder(),
+        width=width,
+        height=height,
+        alignment=ft.Alignment.CENTER,
+    )
+
+
 def _date_range(today: date | None = None) -> tuple[date, date]:
     today = today or date.today()
     if _state["range"] == "本周":
@@ -130,35 +140,47 @@ def build(page: ft.Page, refresh) -> ft.Control:
     exercise_labels, exercise_minutes = daily_totals(exercises, "minutes")
     diet_labels, diet_calories = daily_totals(diets, "calories")
 
-    weight_img = ft.Image(src="", width=420, height=170, fit=ft.BoxFit.CONTAIN, error_content=_chart_placeholder())
-    sleep_img = ft.Image(src="", width=420, height=170, fit=ft.BoxFit.CONTAIN, error_content=_chart_placeholder())
-    exercise_img = ft.Image(src="", width=420, height=170, fit=ft.BoxFit.CONTAIN, error_content=_chart_placeholder())
-    diet_img = ft.Image(src="", width=420, height=170, fit=ft.BoxFit.CONTAIN, error_content=_chart_placeholder())
+    weight_slot = _chart_slot(420, 170)
+    sleep_slot = _chart_slot(420, 170)
+    exercise_slot = _chart_slot(420, 170)
+    diet_slot = _chart_slot(420, 170)
 
     charts = ft.Column(
         [
-            card(weight_img, title="体重趋势"),
-            card(sleep_img, title="睡眠时长"),
-            card(exercise_img, title="锻炼时长"),
-            card(diet_img, title="饮食热量"),
+            card(weight_slot, title="体重趋势"),
+            card(sleep_slot, title="睡眠时长"),
+            card(exercise_slot, title="锻炼时长"),
+            card(diet_slot, title="饮食热量"),
         ],
         spacing=12,
         scroll=ft.ScrollMode.AUTO,
     )
 
     def render_charts() -> None:
-        weight_img.src = line_chart(
-            labels_of(weights),
-            [{"name": "体重 kg", "values": [w.kg for w in weights[-14:]], "color": PRIMARY, "fill": True}],
-            "体重趋势",
+        weight_slot.content = ft.Image(
+            src=line_chart(
+                labels_of(weights),
+                [{"name": "体重 kg", "values": [w.kg for w in weights[-14:]], "color": PRIMARY, "fill": True}],
+                "体重趋势",
+            ),
+            width=420, height=170, fit=ft.BoxFit.CONTAIN,
         )
-        sleep_img.src = line_chart(
-            labels_of(sleeps),
-            [{"name": "睡眠小时", "values": [s.hours for s in sleeps[-14:]], "color": ACCENT, "fill": True}],
-            "睡眠时长",
+        sleep_slot.content = ft.Image(
+            src=line_chart(
+                labels_of(sleeps),
+                [{"name": "睡眠小时", "values": [s.hours for s in sleeps[-14:]], "color": ACCENT, "fill": True}],
+                "睡眠时长",
+            ),
+            width=420, height=170, fit=ft.BoxFit.CONTAIN,
         )
-        exercise_img.src = bar_chart(exercise_labels, exercise_minutes, "锻炼分钟", PRIMARY)
-        diet_img.src = bar_chart(diet_labels, diet_calories, "饮食热量", ACCENT)
+        exercise_slot.content = ft.Image(
+            src=bar_chart(exercise_labels, exercise_minutes, "锻炼分钟", PRIMARY),
+            width=420, height=170, fit=ft.BoxFit.CONTAIN,
+        )
+        diet_slot.content = ft.Image(
+            src=bar_chart(diet_labels, diet_calories, "饮食热量", ACCENT),
+            width=420, height=170, fit=ft.BoxFit.CONTAIN,
+        )
         try:
             page.update()
         except Exception:

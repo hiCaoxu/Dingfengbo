@@ -31,6 +31,16 @@ def _chart_placeholder() -> ft.Control:
     )
 
 
+def _chart_slot(width: int, height: int) -> ft.Container:
+    """图表占位槽：初始显示加载提示，后台渲染完成后替换为 Image。"""
+    return ft.Container(
+        content=_chart_placeholder(),
+        width=width,
+        height=height,
+        alignment=ft.Alignment.CENTER,
+    )
+
+
 def _delete(model, item_id: str, page, refresh) -> None:
     def action():
         with session_scope() as session:
@@ -65,25 +75,31 @@ def build(page: ft.Page, refresh) -> ft.Control:
         spacing=12,
     )
 
-    pie_img = ft.Image(src="", width=320, height=220, fit=ft.BoxFit.CONTAIN, error_content=_chart_placeholder())
-    trend_img = ft.Image(src="", width=420, height=220, fit=ft.BoxFit.CONTAIN, error_content=_chart_placeholder())
+    pie_slot = _chart_slot(320, 220)
+    trend_slot = _chart_slot(420, 220)
 
     charts = ft.Row(
         [
-            card(pie_img, title="支出占比"),
-            card(trend_img, title="收支趋势"),
+            card(pie_slot, title="支出占比"),
+            card(trend_slot, title="收支趋势"),
         ],
         spacing=12,
         scroll=ft.ScrollMode.AUTO,
     )
 
     def render_charts() -> None:
-        pie_img.src = pie_chart(summary["categories"], "支出占比")
-        trend_img.src = line_chart(
-            [t["label"] for t in trend],
-            [{"name": "收入", "values": [t["income"] for t in trend], "color": PRIMARY},
-             {"name": "支出", "values": [t["expense"] for t in trend], "color": ACCENT}],
-            "近六个月收支趋势",
+        pie_slot.content = ft.Image(
+            src=pie_chart(summary["categories"], "支出占比"),
+            width=320, height=220, fit=ft.BoxFit.CONTAIN,
+        )
+        trend_slot.content = ft.Image(
+            src=line_chart(
+                [t["label"] for t in trend],
+                [{"name": "收入", "values": [t["income"] for t in trend], "color": PRIMARY},
+                 {"name": "支出", "values": [t["expense"] for t in trend], "color": ACCENT}],
+                "近六个月收支趋势",
+            ),
+            width=420, height=220, fit=ft.BoxFit.CONTAIN,
         )
         try:
             page.update()
@@ -108,8 +124,8 @@ def build(page: ft.Page, refresh) -> ft.Control:
     filtered = [tx for tx in transactions if matches(tx)]
     total = len(filtered)
     total_pages = max(1, (total + _PAGE_SIZE - 1) // _PAGE_SIZE)
-    page = min(_state["page"], total_pages - 1)
-    page_items = filtered[page * _PAGE_SIZE:(page + 1) * _PAGE_SIZE]
+    current_page = min(_state["page"], total_pages - 1)
+    page_items = filtered[current_page * _PAGE_SIZE:(current_page + 1) * _PAGE_SIZE]
 
     def set_year(value: str) -> None:
         _state["year"] = None if value == "全部" else int(value)
@@ -155,11 +171,11 @@ def build(page: ft.Page, refresh) -> ft.Control:
 
     pagination = ft.Row(
         [
-            ft.TextButton("上一页", disabled=page == 0,
-                          on_click=lambda e: (_state.__setitem__("page", max(0, page - 1)), refresh())),
-            ft.Text(f"{page + 1} / {total_pages}", size=11, color=TEXT_MUTED),
-            ft.TextButton("下一页", disabled=page >= total_pages - 1,
-                          on_click=lambda e: (_state.__setitem__("page", min(total_pages - 1, page + 1)), refresh())),
+            ft.TextButton("上一页", disabled=current_page == 0,
+                          on_click=lambda e: (_state.__setitem__("page", max(0, current_page - 1)), refresh())),
+            ft.Text(f"{current_page + 1} / {total_pages}", size=11, color=TEXT_MUTED),
+            ft.TextButton("下一页", disabled=current_page >= total_pages - 1,
+                          on_click=lambda e: (_state.__setitem__("page", min(total_pages - 1, current_page + 1)), refresh())),
         ],
         spacing=4,
         alignment=ft.MainAxisAlignment.CENTER,
