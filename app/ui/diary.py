@@ -71,7 +71,7 @@ def _editor(day: date, refresh) -> ft.Control:
             spacing=10,
         ),
         title="日记编辑",
-        expand=2,
+        expand=True,
     )
 
 
@@ -101,14 +101,14 @@ def _month_view(refresh) -> ft.Control:
             selected = day == _state["selected"]
             body = ft.Column(
                 [
-                    ft.Text(str(day.day), size=10, color=TEXT if in_month else TEXT_MUTED,
+                    ft.Text(str(day.day), size=11, color=TEXT if in_month else TEXT_MUTED,
                             weight="bold" if selected else "normal"),
                     ft.Container(
-                        width=4, height=4, bgcolor=PRIMARY, border_radius=2,
+                        width=5, height=5, bgcolor=PRIMARY, border_radius=3,
                         visible=has_diary,
                     ),
                 ],
-                spacing=1,
+                spacing=2,
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             )
             cells.append(
@@ -117,15 +117,41 @@ def _month_view(refresh) -> ft.Control:
                     bgcolor=PRIMARY_LIGHT if selected else ("#FFFFFF" if in_month else "#F7F4EF"),
                     border=ft.Border.all(1, DIVIDER),
                     border_radius=4,
-                    padding=2,
-                    width=30,
-                    height=24,
+                    padding=3,
+                    width=36,
+                    height=30,
                     opacity=1 if in_month else 0.55,
                     on_click=(
                         lambda e, d=day: (_state.__setitem__("selected", d), refresh())
                     ) if in_month else None,
                 )
             )
+    selected = _state["selected"]
+    history = [
+        d for d in diaries.values()
+        if d.date.year in range(selected.year - 5, selected.year)
+        and d.date.month == selected.month
+        and d.date.day == selected.day
+        and (d.content or "").strip()
+    ]
+    history.sort(key=lambda d: d.date, reverse=True)
+    history_section = ft.Column(
+        [
+            ft.Text("历史上的今天", size=11, color=TEXT_MUTED, weight="bold"),
+            *(
+                [
+                    ft.TextButton(
+                        f"{d.date.year}年{d.date.month}月{d.date.day}日",
+                        on_click=lambda e, dd=d.date: (_state.__setitem__("selected", dd), refresh()),
+                    )
+                    for d in history
+                ]
+                if history
+                else [ft.Text("暂无", size=10, color=TEXT_MUTED)]
+            ),
+        ],
+        spacing=2,
+    )
     return card(
         ft.Column(
             [
@@ -141,13 +167,15 @@ def _month_view(refresh) -> ft.Control:
                 divider(),
                 ft.Row(cells[:8], spacing=4),
                 *[ft.Row(cells[i:i + 8], spacing=4) for i in range(8, len(cells), 8)],
+                divider(),
+                history_section,
             ],
             spacing=8,
             scroll=ft.ScrollMode.AUTO,
             expand=True,
         ),
         title="月历视图",
-        expand=3,
+        width=360,
     )
 
 
@@ -203,7 +231,7 @@ def _list_view(refresh) -> ft.Control:
             expand=True,
         ),
         title="日记列表",
-        expand=3,
+        width=360,
     )
 
 
