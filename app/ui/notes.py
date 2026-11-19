@@ -47,6 +47,20 @@ def _code_block(code: str, lang: str) -> ft.Control:
     )
 
 
+def _table(header: list[str], rows: list[list[str]]) -> ft.Control:
+    table = ft.DataTable(
+        columns=[ft.DataColumn(ft.Text(h, size=12, weight="bold", color=TEXT)) for h in header],
+        rows=[
+            ft.DataRow(cells=[ft.DataCell(ft.Text(c, size=12, color=TEXT)) for c in row])
+            for row in rows
+        ],
+        border=ft.Border.all(1, DIVIDER),
+        border_radius=8,
+        heading_row_color="#F4F6F3",
+    )
+    return ft.Row([table], scroll=ft.ScrollMode.AUTO)
+
+
 def render_markdown(markdown: str) -> ft.Control:
     blocks = parse(markdown or "")
     controls: list[ft.Control] = []
@@ -74,6 +88,8 @@ def render_markdown(markdown: str) -> ft.Control:
                     spacing=4,
                 )
             )
+        elif kind == "table":
+            controls.append(_table(block["header"], block["rows"]))
         else:
             controls.append(ft.Text(spans=inline_spans(block["text"]), size=13))
     return ft.Column(controls, spacing=10, scroll=ft.ScrollMode.AUTO, expand=True)

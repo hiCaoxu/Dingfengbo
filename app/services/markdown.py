@@ -78,6 +78,16 @@ def inline_spans(text: str) -> list[ft.TextSpan]:
     return spans
 
 
+def _split_table_row(line: str) -> list[str]:
+    line = (line or "").strip().strip("|")
+    return [c.strip() for c in line.split("|")]
+
+
+def _is_table_separator(line: str) -> bool:
+    cells = _split_table_row(line)
+    return bool(cells) and all(re.fullmatch(r":?-{3,}:?", c) for c in cells)
+
+
 def parse(markdown: str) -> list[dict[str, Any]]:
     blocks: list[dict[str, Any]] = []
     lines = (markdown or "").splitlines()
@@ -117,6 +127,15 @@ def parse(markdown: str) -> list[dict[str, Any]]:
                 items.append(re.sub(r"^\s*[-*]\s+", "", lines[index]))
                 index += 1
             blocks.append({"type": "list", "items": items})
+            continue
+        if line.strip().startswith("|") and index + 1 < len(lines) and _is_table_separator(lines[index + 1]):
+            header = _split_table_row(line)
+            index += 2
+            rows: list[list[str]] = []
+            while index < len(lines) and lines[index].strip().startswith("|"):
+                rows.append(_split_table_row(lines[index]))
+                index += 1
+            blocks.append({"type": "table", "header": header, "rows": rows})
             continue
         if not line.strip():
             index += 1
