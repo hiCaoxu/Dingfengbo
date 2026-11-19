@@ -56,7 +56,7 @@ def _run_sync_async() -> None:
     threading.Thread(target=worker, daemon=True).start()
 
 
-def _after_sync() -> None:
+async def _after_sync() -> None:
     if _refresh_status:
         _refresh_status()
     if sync_client.status.startswith("已同步") and _refresh_content:
