@@ -101,14 +101,14 @@ def _month_view(refresh) -> ft.Control:
             selected = day == _state["selected"]
             body = ft.Column(
                 [
-                    ft.Text(str(day.day), size=12, color=TEXT if in_month else TEXT_MUTED,
+                    ft.Text(str(day.day), size=10, color=TEXT if in_month else TEXT_MUTED,
                             weight="bold" if selected else "normal"),
                     ft.Container(
-                        width=6, height=6, bgcolor=PRIMARY, border_radius=3,
+                        width=4, height=4, bgcolor=PRIMARY, border_radius=2,
                         visible=has_diary,
                     ),
                 ],
-                spacing=3,
+                spacing=1,
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             )
             cells.append(
@@ -116,10 +116,10 @@ def _month_view(refresh) -> ft.Control:
                     content=body,
                     bgcolor=PRIMARY_LIGHT if selected else ("#FFFFFF" if in_month else "#F7F4EF"),
                     border=ft.Border.all(1, DIVIDER),
-                    border_radius=8,
-                    padding=6,
-                    width=78,
-                    height=48,
+                    border_radius=4,
+                    padding=2,
+                    width=30,
+                    height=24,
                     opacity=1 if in_month else 0.55,
                     on_click=(
                         lambda e, d=day: (_state.__setitem__("selected", d), refresh())
