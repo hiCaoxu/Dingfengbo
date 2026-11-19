@@ -441,9 +441,13 @@ def open_sleep_dialog(page: ft.Page, item: Sleep | None = None, on_done: Callabl
         except ValueError:
             snack(page, "日期格式不正确", "#C97B63")
             return
+        try:
+            quality_val = int(quality.value)
+        except (TypeError, ValueError):
+            quality_val = 3
         with session_scope() as session:
             fields = dict(date=record_date, bedtime=bedtime.value or "",
-                          wake_time=wake.value or "", hours=hours, quality=int(quality.value))
+                          wake_time=wake.value or "", hours=hours, quality=quality_val)
             if item:
                 target = session.get(Sleep, item.id)
                 if target:
