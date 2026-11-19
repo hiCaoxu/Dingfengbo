@@ -55,8 +55,8 @@ def main(page: ft.Page) -> None:
     page.bgcolor = BG
     page.padding = 0
     page.spacing = 0
-    page.window.width = 1280
-    page.window.height = 720
+    page.window.width = 1920
+    page.window.height = 1200
     page.window.min_width = 900
     page.window.min_height = 600
     page.window.resizable = True
