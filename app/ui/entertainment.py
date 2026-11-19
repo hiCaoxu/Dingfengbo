@@ -46,7 +46,7 @@ def delete(item_id: str, page, refresh) -> None:
 def _cover(item: Entertainment) -> ft.Control:
     source = (item.cover or "").strip()
     if source.startswith(("http://", "https://")) or (source and Path(source).exists()):
-        return ft.Image(src=source, width=64, height=84, fit=ft.ImageFit.COVER, border_radius=6)
+        return ft.Image(src=source, width=64, height=84, fit=ft.BoxFit.COVER, border_radius=6)
     return ft.Container(
         content=ft.Icon(ico("IMAGE_OUTLINED"), size=24, color=TEXT_MUTED),
         width=64, height=84, bgcolor=PRIMARY_LIGHT, border_radius=6,
