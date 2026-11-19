@@ -14,14 +14,20 @@ from ..services.sync import sync_client
 
 _page: ft.Page | None = None
 _refresh_status: Callable[[], None] | None = None
+_refresh_content: Callable[[], None] | None = None
 _interval_timer: threading.Timer | None = None
 _pending_timer: threading.Timer | None = None
 
 
-def bind(page: ft.Page, refresh_status: Callable[[], None]) -> None:
-    global _page, _refresh_status, _interval_timer
+def bind(
+    page: ft.Page,
+    refresh_status: Callable[[], None],
+    refresh_content: Callable[[], None],
+) -> None:
+    global _page, _refresh_status, _refresh_content, _interval_timer
     _page = page
     _refresh_status = refresh_status
+    _refresh_content = refresh_content
     _run_sync_async()
     _start_interval()
 
@@ -53,7 +59,9 @@ def _run_sync_async() -> None:
 def _after_sync() -> None:
     if _refresh_status:
         _refresh_status()
-    if _page is not None:
+    if sync_client.status.startswith("已同步") and _refresh_content:
+        _refresh_content()
+    elif _page is not None:
         try:
             _page.update()
         except Exception:

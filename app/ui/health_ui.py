@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date, timedelta
 
 import flet as ft
 from sqlalchemy import select
 
+from ..config import load_settings
 from ..db.models import Diet, Exercise, Sleep, Weight
 from ..db.repo import soft_delete
 from ..db.session import session_scope
@@ -27,12 +29,18 @@ _TABS = {
 }
 
 
-def _range_start() -> date:
-    today = date.today()
-    return today - timedelta(days=6) if _state["range"] == "本周" else today.replace(day=1)
+def _date_range(today: date | None = None) -> tuple[date, date]:
+    today = today or date.today()
+    if _state["range"] == "本周":
+        start = today - timedelta(days=today.weekday())
+        return start, start + timedelta(days=7)
+    start = today.replace(day=1)
+    if start.month == 12:
+        return start, date(start.year + 1, 1, 1)
+    return start, date(start.year, start.month + 1, 1)
 
 
-def _delete(model, item_id: int, page, refresh) -> None:
+def _delete(model, item_id: str, page, refresh) -> None:
     def action():
         with session_scope() as session:
             obj = session.get(model, item_id)
@@ -75,26 +83,45 @@ def _row(item, tab: str, page, refresh) -> ft.Control:
 
 
 def build(page: ft.Page, refresh) -> ft.Control:
-    start = _range_start()
+    start, end = _date_range()
     tab = _state["tab"]
     model, opener = _TABS[tab]
     with session_scope() as session:
         items = list(
             session.scalars(
-                select(model).where(model.is_deleted.is_(False), model.date >= start).order_by(model.date.desc())
+                select(model).where(
+                    model.is_deleted.is_(False), model.date >= start, model.date < end
+                ).order_by(model.date.desc())
             )
         )
         latest_weight = session.scalar(select(Weight).where(Weight.is_deleted.is_(False)).order_by(Weight.date.desc()))
         today_kcal = sum(d.calories for d in session.scalars(
             select(Diet).where(Diet.is_deleted.is_(False), Diet.date == date.today())
         ))
-        weights = list(session.scalars(select(Weight).where(Weight.is_deleted.is_(False)).order_by(Weight.date)))
-        sleeps = list(session.scalars(select(Sleep).where(Sleep.is_deleted.is_(False)).order_by(Sleep.date)))
-        exercises = list(session.scalars(select(Exercise).where(Exercise.is_deleted.is_(False)).order_by(Exercise.date)))
-        diets = list(session.scalars(select(Diet).where(Diet.is_deleted.is_(False)).order_by(Diet.date)))
+        chart_models = (Weight, Sleep, Exercise, Diet)
+        weights, sleeps, exercises, diets = [
+            list(session.scalars(
+                select(chart_model).where(
+                    chart_model.is_deleted.is_(False),
+                    chart_model.date >= start,
+                    chart_model.date < end,
+                ).order_by(chart_model.date)
+            ))
+            for chart_model in chart_models
+        ]
 
     def labels_of(rows):
         return [r.date.strftime("%m-%d") for r in rows[-14:]]
+
+    def daily_totals(rows, attribute: str):
+        totals = defaultdict(float)
+        for row in rows:
+            totals[row.date] += getattr(row, attribute)
+        days = sorted(totals)[-14:]
+        return [day.strftime("%m-%d") for day in days], [totals[day] for day in days]
+
+    exercise_labels, exercise_minutes = daily_totals(exercises, "minutes")
+    diet_labels, diet_calories = daily_totals(diets, "calories")
 
     charts = ft.Column(
         [
@@ -116,13 +143,13 @@ def build(page: ft.Page, refresh) -> ft.Control:
             ),
             card(
                 ft.Image(src=bar_chart(
-                    labels_of(exercises), [e.minutes for e in exercises[-14:]], "锻炼分钟", PRIMARY,
+                    exercise_labels, exercise_minutes, "锻炼分钟", PRIMARY,
                 ), width=420, height=170, fit=ft.BoxFit.CONTAIN),
                 title="锻炼时长",
             ),
             card(
                 ft.Image(src=bar_chart(
-                    labels_of(diets), [d.calories for d in diets[-14:]], "饮食热量", ACCENT,
+                    diet_labels, diet_calories, "饮食热量", ACCENT,
                 ), width=420, height=170, fit=ft.BoxFit.CONTAIN),
                 title="饮食热量",
             ),
@@ -144,6 +171,8 @@ def build(page: ft.Page, refresh) -> ft.Control:
     )
 
     latest_text = f"{latest_weight.kg:.1f} kg · BMI {bmi(latest_weight.kg)}" if latest_weight else "暂无体重记录"
+    settings = load_settings()
+    profile_text = f"{float(settings.get('height_cm', 165)):g} cm · {settings.get('gender', '男')}"
     return ft.Column(
         [
             section_header("健康", ft.Row(
@@ -152,7 +181,7 @@ def build(page: ft.Page, refresh) -> ft.Control:
                 [
                     card(ft.Text(latest_text, size=20, color=TEXT, weight="bold"), title="最新体重"),
                     card(ft.Text(f"{today_kcal:.0f} kcal", size=20, color=ACCENT, weight="bold"), title="今日摄入"),
-                    card(ft.Text("165 cm · 男", size=13, color=TEXT_MUTED), title="身高 / 性别"),
+                    card(ft.Text(profile_text, size=13, color=TEXT_MUTED), title="身高 / 性别"),
                 ],
                 spacing=12,
             ),

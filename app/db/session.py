@@ -9,7 +9,8 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import DB_PATH
-from .models import Base, Food
+from .migrations import initialize_schema
+from .models import Food
 
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 engine = create_engine(
@@ -43,7 +44,7 @@ FOOD_SEED: list[tuple[str, str, float]] = [
 
 
 def init_db() -> None:
-    Base.metadata.create_all(engine)
+    initialize_schema(engine)
     with SessionLocal() as session:
         count = session.scalar(select(Food.id).limit(1))
         if count is None:

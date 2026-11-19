@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Iterable
 
-from sqlalchemy import select
+from sqlalchemy import select, update as sql_update
 from sqlalchemy.orm import Session
 
 from .models import MODEL_BY_TABLE, Base, Diary, SyncMixin, utcnow
@@ -67,15 +67,33 @@ def pending_changes(session: Session, owner_id: str = "local", limit: int = 500)
     return rows
 
 
-def mark_clean(session: Session, changes: Iterable[dict]) -> None:
+def mark_clean(
+    session: Session, changes: Iterable[dict], owner_id: str = "local"
+) -> None:
+    """只确认本次上传的版本，避免覆盖同步期间产生的新编辑。"""
     for change in changes:
         model = MODEL_BY_TABLE.get(change.get("table"))
-        if model is None:
+        data = change.get("data") or {}
+        record_id = data.get("id")
+        updated_at = data.get("updated_at")
+        if model is None or not record_id or not updated_at:
             continue
-        record_id = change.get("data", {}).get("id")
-        obj = session.get(model, record_id)
-        if obj is not None and obj.owner_id == change.get("data", {}).get("owner_id", obj.owner_id):
-            obj.sync_status = "clean"
+        try:
+            version = datetime.fromisoformat(str(updated_at))
+        except ValueError:
+            continue
+        stmt = (
+            sql_update(model)
+            .where(
+                model.id == str(record_id),
+                model.owner_id == owner_id,
+                model.sync_status == "pending",
+                model.updated_at == version,
+            )
+            .values(sync_status="clean")
+            .execution_options(synchronize_session=False)
+        )
+        session.execute(stmt)
 
 
 def _parse(column, value: Any) -> Any:
@@ -95,18 +113,40 @@ def _parse(column, value: Any) -> Any:
     return value
 
 
-def apply_remote(session: Session, changes: Iterable[dict]) -> list[dict]:
-    """最后写入获胜：仅当远端 updated_at 更新时才覆盖本地，返回被接受的变更。"""
+_VERSION_AGNOSTIC_FIELDS = {"owner_id", "sync_status", "sync_seq"}
+
+
+def _same_version(obj: SyncMixin, model, data: dict[str, Any]) -> bool:
+    """比较业务字段，忽略归属与同步元数据，用于幂等推送确认。"""
+    for column in model.__table__.columns:
+        if column.name in _VERSION_AGNOSTIC_FIELDS or column.name not in data:
+            continue
+        try:
+            expected = _parse(column, data[column.name])
+        except (TypeError, ValueError):
+            return False
+        if getattr(obj, column.name) != expected:
+            return False
+    return True
+
+
+def apply_remote(
+    session: Session, changes: Iterable[dict], owner_id: str | None = None
+) -> list[dict]:
+    """最后写入获胜；桌面端将远端租户 ID 规范化为本地所有者。"""
     applied: list[dict] = []
     for change in changes:
         table = change.get("table")
-        data = change.get("data") or {}
+        data = dict(change.get("data") or {})
         model = MODEL_BY_TABLE.get(table)
         if model is None or not data.get("id"):
             continue
+        if owner_id is not None:
+            data["owner_id"] = owner_id
         remote_time = datetime.fromisoformat(data["updated_at"])
         owner = str(data.get("owner_id", "local"))
-        obj = session.get(model, int(data["id"]))
+        record_id = str(data["id"])
+        obj = session.get(model, record_id)
         if obj is None and model is Diary and data.get("date"):
             obj = session.scalar(
                 select(Diary).where(Diary.owner_id == owner, Diary.date == date.fromisoformat(data["date"][:10]))
@@ -117,12 +157,14 @@ def apply_remote(session: Session, changes: Iterable[dict]) -> list[dict]:
         elif obj.owner_id != owner:
             continue
         if obj.updated_at and obj.updated_at >= remote_time:
+            if obj.updated_at == remote_time and _same_version(obj, model, data):
+                applied.append({"table": table, "data": data, "changed": False})
             continue
         for column in model.__table__.columns:
             if column.name in data:
                 setattr(obj, column.name, _parse(column, data[column.name]))
         obj.sync_status = "clean"
-        applied.append(change)
+        applied.append({"table": table, "data": data, "changed": True})
     session.flush()
     return applied
 

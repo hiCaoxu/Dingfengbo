@@ -27,7 +27,7 @@ def _all_tags(items) -> list[str]:
     return sorted(t for t in tags if t)
 
 
-def toggle(page: ft.Page, todo_id: int, refresh) -> None:
+def toggle(page: ft.Page, todo_id: str, refresh) -> None:
     with session_scope() as session:
         item = session.get(Todo, todo_id)
         if item is None:
@@ -50,7 +50,7 @@ def toggle(page: ft.Page, todo_id: int, refresh) -> None:
     refresh()
 
 
-def delete(page: ft.Page, todo_id: int, refresh) -> None:
+def delete(page: ft.Page, todo_id: str, refresh) -> None:
     def action():
         with session_scope() as session:
             item = session.get(Todo, todo_id)

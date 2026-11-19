@@ -20,7 +20,7 @@ COLUMNS = ["想看", "在看", "看完"]
 _state = {"kind": "全部"}
 
 
-def move(item_id: int, direction: int, page, refresh) -> None:
+def move(item_id: str, direction: int, page, refresh) -> None:
     with session_scope() as session:
         item = session.get(Entertainment, item_id)
         if item:
@@ -31,7 +31,7 @@ def move(item_id: int, direction: int, page, refresh) -> None:
     refresh()
 
 
-def delete(item_id: int, page, refresh) -> None:
+def delete(item_id: str, page, refresh) -> None:
     def action():
         with session_scope() as session:
             item = session.get(Entertainment, item_id)

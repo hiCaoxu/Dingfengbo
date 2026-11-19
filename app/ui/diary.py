@@ -30,7 +30,7 @@ def set_selected(day: date) -> None:
     _state["selected"] = day
 
 
-def save_content(diary_id: int, value: str) -> None:
+def save_content(diary_id: str, value: str) -> None:
     with session_scope() as session:
         item = session.get(Diary, diary_id)
         if item:

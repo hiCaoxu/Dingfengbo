@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import calendar
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 WEEKDAY_CN = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
 
@@ -86,13 +86,20 @@ def next_due(value: date, rule: str) -> date | None:
     return None
 
 
+def local_date_from_utc(value: datetime) -> date:
+    """将历史 naive UTC 或带时区时间转换为本地日期。"""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone().date()
+
+
 def parse_hours(bedtime: str, wake_time: str) -> float:
-    """跨天睡眠时长。"""
-    try:
-        bh, bm = (int(x) for x in bedtime.split(":")[:2])
-        wh, wm = (int(x) for x in wake_time.split(":")[:2])
-    except (ValueError, AttributeError):
+    """跨天睡眠时长；非法 HH:MM 输入按 0 小时处理。"""
+    pattern = r"(?:[01]\d|2[0-3]):[0-5]\d"
+    if not re.fullmatch(pattern, bedtime) or not re.fullmatch(pattern, wake_time):
         return 0.0
+    bh, bm = (int(x) for x in bedtime.split(":"))
+    wh, wm = (int(x) for x in wake_time.split(":"))
     minutes = (wh * 60 + wm) - (bh * 60 + bm)
     if minutes <= 0:
         minutes += 24 * 60

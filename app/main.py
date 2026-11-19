@@ -206,7 +206,7 @@ def main(page: ft.Page) -> None:
         )
     )
     refresh()
-    bind_sync(page, refresh_status)
+    bind_sync(page, refresh_status, refresh)
 
 
 def run() -> None:

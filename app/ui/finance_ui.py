@@ -21,7 +21,7 @@ from .widgets import card, confirm, divider, empty, icon_button, primary_button,
 _state = {"tab": "记录"}
 
 
-def _delete(model, item_id: int, page, refresh) -> None:
+def _delete(model, item_id: str, page, refresh) -> None:
     def action():
         with session_scope() as session:
             obj = session.get(model, item_id)
@@ -127,7 +127,7 @@ def build(page: ft.Page, refresh) -> ft.Control:
                             ft.Column([ft.Text(f"{sign} {money(tx.amount)}", size=14, color=color, weight="bold"),
                                        ft.Text(f"{tx.date} · {note} · {tx.note}", size=10, color=TEXT_MUTED)],
                                       spacing=3, expand=True),
-                            icon_button(ACTIONS["edit"], lambda e, t=tx: open_transaction_dialog(page, tx.kind, t, refresh), "编辑"),
+                            icon_button(ACTIONS["edit"], lambda e, t=tx: open_transaction_dialog(page, t.kind, t, refresh), "编辑"),
                             icon_button(ACTIONS["delete"], lambda e, t=tx.id: _delete(Transaction, t, page, refresh), "删除"),
                         ],
                         spacing=8,

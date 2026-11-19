@@ -12,7 +12,7 @@ from sqlalchemy import select
 from ..db.models import Account, Diary, Diet, Exercise, Note, Sleep, Todo, Transaction, Weight
 from ..db.session import session_scope
 from ..icons import ACTIONS, QUICK, ico
-from ..services.dates import day_of_year, iso_week, lunar_text, shift_date_month, shift_month, weekday_cn
+from ..services.dates import day_of_year, iso_week, local_date_from_utc, lunar_text, shift_date_month, shift_month, weekday_cn
 from ..services.diary import ensure_diary
 from ..services.finance import account_balance, money, month_summary, total_assets
 from ..services.sync import mark_pending_write
@@ -106,7 +106,7 @@ def _activity_counts() -> dict[date, int]:
             counts[obj.date] += 1
         for obj in session.scalars(select(Todo).where(Todo.completed.is_(True), Todo.is_deleted.is_(False))):
             if obj.completed_at:
-                counts[obj.completed_at.date()] += 1
+                counts[local_date_from_utc(obj.completed_at)] += 1
         for model in (Exercise, Diet, Weight, Sleep, Transaction):
             for obj in session.scalars(select(model).where(model.is_deleted.is_(False))):
                 counts[obj.date] += 1

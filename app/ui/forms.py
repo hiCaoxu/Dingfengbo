@@ -48,10 +48,7 @@ def _date(value: str | None, default: date | None = None) -> date | None:
     value = (value or "").strip()
     if not value:
         return default
-    try:
-        return date.fromisoformat(value[:10])
-    except ValueError:
-        return default
+    return date.fromisoformat(value)
 
 
 def _close_and_refresh(page, dialog, on_done):
@@ -77,11 +74,16 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
         if not title.value or not title.value.strip():
             snack(page, "请填写标题", "#C97B63")
             return
+        try:
+            due_date = _date(due.value)
+        except ValueError:
+            snack(page, "到期日期格式不正确", "#C97B63")
+            return
         rule_map = {"不循环": "none", "按天": "day", "按周": "week", "按月": "month", "按年": "year"}
         fields = dict(
             title=title.value.strip(),
             note=note.value or "",
-            due_date=_date(due.value),
+            due_date=due_date,
             tags=_tags(tags.value or ""),
             lunar_reminder=lunar.value or "",
             repeat_rule=rule_map.get(repeat.value or "不循环", "none"),
@@ -179,13 +181,25 @@ def open_transaction_dialog(page: ft.Page, kind: str = "expense", tx: Transactio
     if not accounts:
         snack(page, "请先新增账户", "#C97B63")
         return None
-    labels = [name for _, name in accounts]
+    account_ids = [str(account_id) for account_id, _ in accounts]
     kind_value = tx.kind if tx else kind
     kind_dd = dropdown("类型", ["支出", "收入", "转账"], {"expense": "支出", "income": "收入", "transfer": "转账"}[kind_value])
     amount = form_field("金额 *", str(tx.amount) if tx else "")
     category = form_field("分类", tx.category if tx else "", width=220)
-    account_dd = dropdown("账户", labels, labels[0], width=220)
-    to_dd = dropdown("转入账户", labels, labels[-1] if len(labels) > 1 else labels[0], width=220)
+    initial_account = str(tx.account_id) if tx and tx.account_id in account_ids else account_ids[0]
+    initial_to = str(tx.to_account_id) if tx and tx.to_account_id in account_ids else next(
+        (account_id for account_id in account_ids if account_id != initial_account), initial_account
+    )
+
+    def account_dropdown(label: str, value: str) -> ft.Dropdown:
+        control = dropdown(label, account_ids, value, width=220)
+        control.options = [
+            ft.dropdown.Option(key=str(account_id), text=name) for account_id, name in accounts
+        ]
+        return control
+
+    account_dd = account_dropdown("账户", initial_account)
+    to_dd = account_dropdown("转入账户", initial_to)
     date_field = form_field("日期 YYYY-MM-DD", tx.date.isoformat() if tx else date.today().isoformat(), width=220)
     note = form_field("备注", tx.note if tx else "")
 
@@ -198,16 +212,25 @@ def open_transaction_dialog(page: ft.Page, kind: str = "expense", tx: Transactio
         if value <= 0:
             snack(page, "金额需大于 0", "#C97B63")
             return
-        account_id = accounts[labels.index(account_dd.value)][0]
-        to_id = accounts[labels.index(to_dd.value)][0] if len(labels) > 1 else None
+        try:
+            record_date = _date(date_field.value, date.today()) or date.today()
+        except ValueError:
+            snack(page, "日期格式不正确", "#C97B63")
+            return
         mapped = {"支出": "expense", "收入": "income", "转账": "transfer"}[kind_dd.value]
+        account_id = str(account_dd.value)
+        if mapped == "transfer" and (
+            len(accounts) < 2 or not to_dd.value or str(to_dd.value) == account_id
+        ):
+            snack(page, "转账需要选择两个不同账户", "#C97B63")
+            return
         fields = dict(
             kind=mapped,
             amount=value,
             category=category.value or ("转账" if mapped == "transfer" else "其他"),
             account_id=account_id,
-            to_account_id=to_id if mapped == "transfer" else None,
-            date=_date(date_field.value, date.today()) or date.today(),
+            to_account_id=str(to_dd.value) if mapped == "transfer" else None,
+            date=record_date,
             note=note.value or "",
         )
         with session_scope() as session:
@@ -252,12 +275,15 @@ def open_exercise_dialog(page: ft.Page, item: Exercise | None = None, on_done: C
             return
         try:
             kcal = float(calories.value) if calories.value else estimate_exercise_calories(kind.value, mins)
+            record_date = _date(day.value, date.today()) or date.today()
+            distance_km = float(distance.value) if distance.value else None
         except ValueError:
-            kcal = estimate_exercise_calories(kind.value, mins)
+            snack(page, "日期、距离或热量格式不正确", "#C97B63")
+            return
         with session_scope() as session:
             fields = dict(
-                date=_date(day.value, date.today()) or date.today(), kind=kind.value, minutes=mins,
-                distance_km=float(distance.value) if distance.value else None,
+                date=record_date, kind=kind.value, minutes=mins,
+                distance_km=distance_km,
                 calories=kcal, note=note.value or "",
             )
             if item:
@@ -299,12 +325,17 @@ def open_diet_dialog(page: ft.Page, item: Diet | None = None, on_done: Callable 
     def save(_):
         try:
             weight = float(grams.value or 0)
-            kcal = float(calories.value or 0)
+            record_date = _date(day.value, date.today()) or date.today()
+            if (calories.value or "").strip():
+                kcal = float(calories.value or 0)
+            else:
+                with session_scope() as session:
+                    kcal = calorie_of(session, food.value or "", weight)
         except ValueError:
-            snack(page, "请输入正确的重量/热量", "#C97B63")
+            snack(page, "请输入正确的日期、重量和热量", "#C97B63")
             return
         with session_scope() as session:
-            fields = dict(date=_date(day.value, date.today()) or date.today(), meal=meal.value,
+            fields = dict(date=record_date, meal=meal.value,
                           food=food.value, grams=weight, calories=kcal, note=note.value or "")
             if item:
                 target = session.get(Diet, item.id)
@@ -340,9 +371,14 @@ def open_weight_dialog(page: ft.Page, item: Weight | None = None, on_done: Calla
         if weight <= 0:
             snack(page, "体重需大于 0", "#C97B63")
             return
+        try:
+            record_date = _date(day.value, date.today()) or date.today()
+            body_fat = float(fat.value) if fat.value else None
+        except ValueError:
+            snack(page, "日期或体脂率格式不正确", "#C97B63")
+            return
         with session_scope() as session:
-            fields = dict(date=_date(day.value, date.today()) or date.today(), kg=weight,
-                          body_fat=float(fat.value) if fat.value else None)
+            fields = dict(date=record_date, kg=weight, body_fat=body_fat)
             if item:
                 target = session.get(Weight, item.id)
                 if target:
@@ -368,8 +404,16 @@ def open_sleep_dialog(page: ft.Page, item: Sleep | None = None, on_done: Callabl
 
     def save(_):
         hours = parse_hours(bedtime.value or "", wake.value or "")
+        if hours == 0:
+            snack(page, "时间格式应为 HH:MM", "#C97B63")
+            return
+        try:
+            record_date = _date(day.value, date.today()) or date.today()
+        except ValueError:
+            snack(page, "日期格式不正确", "#C97B63")
+            return
         with session_scope() as session:
-            fields = dict(date=_date(day.value, date.today()) or date.today(), bedtime=bedtime.value or "",
+            fields = dict(date=record_date, bedtime=bedtime.value or "",
                           wake_time=wake.value or "", hours=hours, quality=int(quality.value))
             if item:
                 target = session.get(Sleep, item.id)
@@ -462,7 +506,7 @@ def open_quick_action(page: ft.Page, action: str, on_done: Callable | None = Non
     return {
         "todo": open_todo_dialog,
         "note": open_note_dialog,
-        "finance": lambda p, on_done=None: open_transaction_dialog(p, "expense", None, on_done),
+        "finance": lambda p, _item=None, on_done=None: open_transaction_dialog(p, "expense", None, on_done),
         "exercise": open_exercise_dialog,
         "diet": open_diet_dialog,
         "weight": open_weight_dialog,

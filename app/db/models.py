@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy import Boolean, Date, DateTime, Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -17,19 +18,22 @@ def utcnow() -> datetime:
     return datetime.utcnow()
 
 
+def new_sync_id() -> str:
+    return str(uuid4())
+
+
 class Base(DeclarativeBase):
     pass
 
 
 class SyncMixin:
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_sync_id)
     owner_id: Mapped[str] = mapped_column(String(64), default="local", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=utcnow, onupdate=utcnow, nullable=False, index=True
-    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False, index=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     sync_status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
+    sync_seq: Mapped[int] = mapped_column(Integer, default=0, nullable=False, index=True)
 
 
 class Todo(SyncMixin, Base):
@@ -140,8 +144,8 @@ class Transaction(SyncMixin, Base):
     kind: Mapped[str] = mapped_column(String(16), nullable=False)  # income/expense/transfer
     amount: Mapped[float] = mapped_column(Float, nullable=False)
     category: Mapped[str] = mapped_column(String(40), default="")
-    account_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    to_account_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    account_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    to_account_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     note: Mapped[str] = mapped_column(Text, default="")
 

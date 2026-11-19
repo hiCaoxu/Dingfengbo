@@ -77,7 +77,7 @@ def render_markdown(markdown: str) -> ft.Control:
     return ft.Column(controls, spacing=10, scroll=ft.ScrollMode.AUTO, expand=True)
 
 
-def save_content(note_id: int, value: str) -> None:
+def save_content(note_id: str, value: str) -> None:
     with session_scope() as session:
         note = session.get(Note, note_id)
         if note:
@@ -156,7 +156,20 @@ def build(page: ft.Page, refresh) -> ft.Control:
     )
 
     if not selected:
-        return card(empty("暂无笔记，点击右上角新增"), title="笔记", expand=True)
+        return ft.Column(
+            [
+                section_header(
+                    "笔记",
+                    primary_button(
+                        "新增笔记", lambda e: open_note_dialog(page, None, refresh), ACTIONS["add"]
+                    ),
+                ),
+                tag_row,
+                card(empty("暂无笔记，点击右上角新增"), expand=True),
+            ],
+            spacing=12,
+            expand=True,
+        )
 
     return ft.Column(
         [
