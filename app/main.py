@@ -56,7 +56,7 @@ def main(page: ft.Page) -> None:
     page.padding = 0
     page.spacing = 0
     page.window.width = 1280
-    page.window.height = 800
+    page.window.height = 880
     page.window.min_width = 900
     page.window.min_height = 600
     page.window.resizable = True
