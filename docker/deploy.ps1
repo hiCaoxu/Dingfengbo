@@ -21,5 +21,5 @@ if ($LASTEXITCODE -ne 0) { throw "Copy source failed" }
 & scp @sshOpts docker/Dockerfile docker/docker-compose.yml "$target`:$RemoteDir/docker/"
 if ($LASTEXITCODE -ne 0) { throw "Copy docker config failed" }
 
-& ssh @sshOpts $target "cd '$RemoteDir' && docker compose -f docker/docker-compose.yml up -d --build && docker ps --filter name=dingfengbo-sync --format '{{.Status}}' && curl -fsS http://127.0.0.1:8000/api/health"
+& ssh @sshOpts $target "cd '$RemoteDir' && docker compose -f docker/docker-compose.yml up -d --build && for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do curl -fsS http://127.0.0.1:8000/api/health >/dev/null 2>&1 && echo 'health-ready' && break; sleep 1; done && docker ps --filter name=dingfengbo-sync --format '{{.Status}}' && curl -fsS http://127.0.0.1:8000/api/health"
 if ($LASTEXITCODE -ne 0) { throw "Remote deploy failed" }
