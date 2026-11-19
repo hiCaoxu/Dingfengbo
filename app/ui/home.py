@@ -19,6 +19,7 @@ from ..services.sync import mark_pending_write
 from ..theme import (
     ACCENT,
     CARD,
+    CARD_RADIUS,
     DIVIDER,
     HEATMAP_LEVELS,
     PRIMARY,
@@ -28,7 +29,7 @@ from ..theme import (
     card_border,
 )
 from .forms import open_quick_action
-from .widgets import card, divider, empty, icon_button, primary_button, section_header, tag_chip
+from .widgets import card, divider, empty, primary_button, section_header, tag_chip
 
 QUICK_ITEMS = [
     ("todo", "新增待办"),
@@ -44,42 +45,62 @@ QUICK_ITEMS = [
 _HOME_STATE = {"selected_date": date.today(), "year": date.today().year}
 
 
-def _calendar_card(selected: date, set_date, width: int | None = None, height: int | None = None, expand: int | None = None) -> ft.Container:
-    body = ft.Column(
-        [
-            ft.Text(str(selected.day), size=30, color=TEXT, weight="bold", text_align=ft.TextAlign.CENTER),
-            ft.Text(
-                f"第{day_of_year(selected)}天 · 第{iso_week(selected)}周 · {lunar_text(selected)} {weekday_cn(selected)}",
-                size=10, color=TEXT_MUTED, text_align=ft.TextAlign.CENTER,
-            ),
-        ],
-        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-        spacing=2,
-    )
-    return card(
-        body,
-        title=f"{selected.year}年{selected.month}月",
-        expand=expand,
-        width=width,
-        height=height,
-        alignment=ft.Alignment.CENTER,
-        padding=ft.Padding.all(10),
-        trailing=ft.Row(
+def _calendar_card(selected: date, set_date, width: int | None = None, height: int | None = None) -> ft.Container:
+    def nav(months: int, icon_name: str, tooltip: str) -> ft.IconButton:
+        return ft.IconButton(
+            icon=ico(icon_name),
+            icon_size=16,
+            icon_color="#FFFFFF",
+            tooltip=tooltip,
+            on_click=lambda e: set_date(shift_date_month(selected, months)),
+        )
+
+    header = ft.Container(
+        content=ft.Row(
             [
-                icon_button(
-                    ACTIONS["chevron_left"],
-                    lambda e: set_date(shift_date_month(selected, -1)),
-                    "上一月",
+                ft.Text(f"{selected.year}年{selected.month}月", size=14, color="#FFFFFF", weight="bold"),
+                ft.Container(expand=True),
+                nav(-1, ACTIONS["chevron_left"], "上一月"),
+                nav(1, ACTIONS["chevron_right"], "下一月"),
+                ft.TextButton(
+                    "今天",
+                    style=ft.ButtonStyle(color="#FFFFFF"),
+                    on_click=lambda e: set_date(date.today()),
                 ),
-                icon_button(
-                    ACTIONS["chevron_right"],
-                    lambda e: set_date(shift_date_month(selected, 1)),
-                    "下一月",
-                ),
-                ft.TextButton("今天", on_click=lambda e: set_date(date.today())),
             ],
             spacing=0,
         ),
+        bgcolor=PRIMARY,
+        border_radius=ft.BorderRadius(
+            top_left=CARD_RADIUS, top_right=CARD_RADIUS, bottom_left=0, bottom_right=0
+        ),
+        padding=ft.Padding.symmetric(vertical=4, horizontal=10),
+    )
+    body = ft.Column(
+        [
+            ft.Text(str(selected.day), size=72, color=TEXT, weight="bold", text_align=ft.TextAlign.CENTER),
+            ft.Text(
+                f"第{day_of_year(selected)}天 · 第{iso_week(selected)}周",
+                size=12, color=TEXT_MUTED, text_align=ft.TextAlign.CENTER,
+            ),
+            ft.Text(
+                f"{lunar_text(selected)} {weekday_cn(selected)}",
+                size=15, color=TEXT, text_align=ft.TextAlign.CENTER,
+            ),
+        ],
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        alignment=ft.MainAxisAlignment.CENTER,
+        expand=True,
+        spacing=10,
+    )
+    return ft.Container(
+        content=ft.Column([header, body], spacing=0, expand=True),
+        bgcolor=CARD,
+        border=card_border(),
+        border_radius=CARD_RADIUS,
+        clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+        width=width,
+        height=height,
     )
 
 
