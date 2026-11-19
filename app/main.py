@@ -178,13 +178,13 @@ def main(page: ft.Page) -> None:
         elif current == "diary":
             body.content = diary_ui.build(page, refresh)
         elif current == "notes":
-            body.content = notes.build(page, refresh)
+            body.content = notes.build(page, refresh, open_note_preview)
         elif current == "note_preview":
             note = state["preview_note"]
             if note is None:
-                body.content = notes.build(page, refresh)
+                body.content = notes.build(page, refresh, open_note_preview)
             else:
-                body.content = notes.build_preview(note, lambda e: navigate("notes"))
+                body.content = notes.build_preview(page, note, lambda e: navigate("notes"))
         elif current == "health":
             body.content = health_ui.build(page, refresh)
         elif current == "fun":

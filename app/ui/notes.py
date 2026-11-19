@@ -2,20 +2,22 @@
 
 from __future__ import annotations
 
+import json
+
 import flet as ft
 from sqlalchemy import select
 
 from ..db.models import Note
-from ..db.repo import update
+from ..db.repo import create, update
 from ..db.session import session_scope
 from ..icons import ACTIONS, ico
 from ..services.markdown import highlight_lines, inline_spans, parse
 from ..services.sync import mark_pending_write
 from ..theme import DIVIDER, PRIMARY, TEXT, TEXT_MUTED
-from .forms import open_note_dialog, tags_text
+from .forms import tags_text
 from .widgets import card, divider, empty, primary_button, section_header, tag_chip
 
-_state = {"selected": None, "tag": "全部"}
+_state = {"tag": "全部"}
 _preview: ft.Container | None = None
 
 
@@ -85,51 +87,47 @@ def save_content(note_id: str, value: str) -> None:
     mark_pending_write()
 
 
-def build_preview(note: Note, on_back) -> ft.Control:
-    return ft.Column(
-        [
-            section_header("笔记预览", ft.TextButton("返回", on_click=on_back)),
-            card(
-                ft.Column(
-                    [
-                        ft.Text(note.title, size=18, color=TEXT, weight="bold"),
-                        ft.Text(f"标签：{tags_text(note.tags) or '无'}", size=11, color=TEXT_MUTED),
-                        divider(),
-                        ft.Container(content=render_markdown(note.content), expand=True, height=520),
-                    ],
-                    spacing=12,
-                ),
-                expand=True,
-            ),
-        ],
-        expand=True,
-    )
-
-
-def build(page: ft.Page, refresh) -> ft.Control:
-    global _preview
+def save_title(note_id: str, value: str) -> None:
     with session_scope() as session:
-        notes = list(session.scalars(select(Note).where(Note.is_deleted.is_(False)).order_by(Note.id.desc())))
-    all_tags: set[str] = set()
-    for note in notes:
-        all_tags.update(t for t in tags_text(note.tags).split(", ") if t)
-    filtered = [n for n in notes if _state["tag"] == "全部" or _state["tag"] in tags_text(n.tags).split(", ")]
-    selected = next((n for n in filtered if n.id == _state["selected"]), filtered[0] if filtered else None)
-    _state["selected"] = selected.id if selected else None
+        note = session.get(Note, note_id)
+        if note:
+            update(session, note, title=value)
+    mark_pending_write()
 
-    selector = ft.Dropdown(
-        label="选择笔记",
-        value=str(selected.id) if selected else None,
-        options=[ft.dropdown.Option(key=str(n.id), text=n.title) for n in filtered],
-        width=260,
+
+def save_tags(note_id: str, value: str) -> None:
+    parts = [p.strip() for p in (value or "").replace("，", ",").split(",") if p.strip()]
+    with session_scope() as session:
+        note = session.get(Note, note_id)
+        if note:
+            update(session, note, tags=json.dumps(parts, ensure_ascii=False))
+    mark_pending_write()
+
+
+def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
+    global _preview
+    title_field = ft.TextField(
+        value=note.title,
         border=ft.InputBorder.NONE,
         border_width=0,
         filled=False,
-        on_select=lambda e: (_state.__setitem__("selected", int(e.control.value)), refresh()),
+        color=TEXT,
+        text_style=ft.TextStyle(size=16, color=TEXT, weight="bold"),
+        on_blur=lambda e: save_title(note.id, e.control.value or ""),
     )
-    _preview = ft.Container(content=render_markdown(selected.content if selected else ""), expand=True)
+    tags_field = ft.TextField(
+        value=tags_text(note.tags),
+        border=ft.InputBorder.NONE,
+        border_width=0,
+        filled=False,
+        color=TEXT_MUTED,
+        text_style=ft.TextStyle(size=11, color=TEXT_MUTED),
+        hint_text="标签（逗号分隔）",
+        on_blur=lambda e: save_tags(note.id, e.control.value or ""),
+    )
+    _preview = ft.Container(content=render_markdown(note.content), expand=True)
     source = ft.TextField(
-        value=selected.content if selected else "",
+        value=note.content,
         multiline=True,
         expand=True,
         border=ft.InputBorder.NONE,
@@ -139,13 +137,58 @@ def build(page: ft.Page, refresh) -> ft.Control:
         text_style=ft.TextStyle(size=12, color=TEXT, font_family="Consolas", height=1.5),
         hint_text="输入 Markdown，右侧实时预览；代码块使用 ```python 语法",
         on_change=lambda e: _update_preview(e.control.value or ""),
-        on_blur=lambda e: save_content(selected.id, e.control.value or "") if selected else None,
+        on_blur=lambda e: save_content(note.id, e.control.value or ""),
     )
 
     def _update_preview(value: str) -> None:
         if _preview is not None:
             _preview.content = render_markdown(value)
             page.update()
+
+    return ft.Column(
+        [
+            section_header("编辑笔记", ft.TextButton("返回", on_click=on_back)),
+            card(
+                ft.Column(
+                    [
+                        title_field,
+                        tags_field,
+                        divider(),
+                        ft.Row(
+                            [
+                                card(ft.Column([source], spacing=10, expand=True), title="源码", expand=1),
+                                card(_preview, title="实时预览", expand=1),
+                            ],
+                            spacing=14,
+                            expand=True,
+                        ),
+                    ],
+                    spacing=8,
+                    expand=True,
+                ),
+                expand=True,
+            ),
+        ],
+        expand=True,
+    )
+
+
+def build(page: ft.Page, refresh, on_open) -> ft.Control:
+    with session_scope() as session:
+        notes = list(session.scalars(select(Note).where(Note.is_deleted.is_(False)).order_by(Note.id.desc())))
+    all_tags: set[str] = set()
+    for note in notes:
+        all_tags.update(t for t in tags_text(note.tags).split(", ") if t)
+    filtered = [n for n in notes if _state["tag"] == "全部" or _state["tag"] in tags_text(n.tags).split(", ")]
+
+    def add_note(_):
+        with session_scope() as session:
+            note = create(session, Note, title="未命名笔记", content="", tags="[]")
+            note_id = note.id
+        with session_scope() as session:
+            new_note = session.get(Note, note_id)
+        if new_note:
+            on_open(new_note)
 
     tag_row = ft.Row(
         [tag_chip(t, _state["tag"] == t, lambda e, tag=t: (_state.__setitem__("tag", tag), refresh()))
@@ -154,40 +197,24 @@ def build(page: ft.Page, refresh) -> ft.Control:
         wrap=True,
     )
 
-    if not selected:
-        return ft.Column(
-            [
-                section_header(
-                    "笔记",
-                    primary_button(
-                        "新增笔记", lambda e: open_note_dialog(page, None, refresh), ACTIONS["add"]
-                    ),
-                ),
-                tag_row,
-                card(empty("暂无笔记，点击右上角新增"), expand=True),
-            ],
-            spacing=12,
-            expand=True,
+    rows = [
+        ft.ListTile(
+            title=ft.Text(n.title, size=13, color=TEXT, weight="bold"),
+            subtitle=ft.Text(
+                (n.content or "").replace("\n", " ")[:60] or "（暂无正文）",
+                size=11, color=TEXT_MUTED, overflow=ft.TextOverflow.ELLIPSIS,
+            ),
+            on_click=lambda e, nn=n: on_open(nn),
         )
+        for n in filtered
+    ]
 
     return ft.Column(
         [
-            section_header(
-                "笔记",
-                ft.Row([primary_button("新增笔记", lambda e: open_note_dialog(page, None, refresh), ACTIONS["add"]),
-                        ft.TextButton("编辑元信息", on_click=lambda e: open_note_dialog(page, selected, refresh))], spacing=6),
-            ),
+            section_header("笔记", primary_button("新增笔记", add_note, ACTIONS["add"])),
             tag_row,
-            ft.Row(
-                [
-                    card(
-                        ft.Column([selector, source], spacing=10, expand=True),
-                        title="源码",
-                        expand=1,
-                    ),
-                    card(_preview, title="实时预览", expand=1),
-                ],
-                spacing=14,
+            card(
+                ft.Column(rows, spacing=2, scroll=ft.ScrollMode.AUTO, expand=True) if rows else empty("暂无笔记"),
                 expand=True,
             ),
         ],
