@@ -11,8 +11,8 @@ from sqlalchemy import select
 
 from ..db.models import Account, Diary, Diet, Exercise, Note, Sleep, Todo, Transaction, Weight
 from ..db.session import session_scope
-from ..icons import ACTIONS, QUICK, ico
-from ..services.dates import day_of_year, iso_week, local_date_from_utc, lunar_text, shift_date_month, shift_month, weekday_cn
+from ..icons import QUICK, ico
+from ..services.dates import day_of_year, iso_week, local_date_from_utc, lunar_text, shift_month, weekday_cn
 from ..services.diary import ensure_diary
 from ..services.finance import account_balance, money, month_summary, total_assets
 from ..services.sync import mark_pending_write
@@ -46,55 +46,46 @@ _HOME_STATE = {"selected_date": date.today(), "year": date.today().year}
 
 
 def _calendar_card(selected: date, set_date, width: int | None = None, height: int | None = None) -> ft.Container:
-    def nav(months: int, icon_name: str, tooltip: str) -> ft.IconButton:
-        return ft.IconButton(
-            icon=ico(icon_name),
-            icon_size=16,
-            icon_color="#FFFFFF",
-            tooltip=tooltip,
-            on_click=lambda e: set_date(shift_date_month(selected, months)),
-        )
-
     header = ft.Container(
         content=ft.Row(
             [
-                ft.Text(f"{selected.year}年{selected.month}月", size=14, color="#FFFFFF", weight="bold"),
-                ft.Container(expand=True),
-                nav(-1, ACTIONS["chevron_left"], "上一月"),
-                nav(1, ACTIONS["chevron_right"], "下一月"),
-                ft.TextButton(
-                    "今天",
-                    style=ft.ButtonStyle(color="#FFFFFF"),
-                    on_click=lambda e: set_date(date.today()),
+                ft.Text(
+                    f"{selected.year}年{selected.month}月",
+                    size=14, color="#FFFFFF", weight="bold",
                 ),
             ],
-            spacing=0,
+            alignment=ft.MainAxisAlignment.CENTER,
         ),
         bgcolor=PRIMARY,
         border_radius=ft.BorderRadius(
             top_left=CARD_RADIUS, top_right=CARD_RADIUS, bottom_left=0, bottom_right=0
         ),
-        padding=ft.Padding.symmetric(vertical=4, horizontal=10),
+        padding=ft.Padding.symmetric(vertical=6, horizontal=10),
     )
     body = ft.Column(
         [
-            ft.Text(str(selected.day), size=72, color=TEXT, weight="bold", text_align=ft.TextAlign.CENTER),
+            ft.Text(str(selected.day), size=60, color=TEXT, weight="bold", text_align=ft.TextAlign.CENTER),
             ft.Text(
                 f"第{day_of_year(selected)}天 · 第{iso_week(selected)}周",
-                size=12, color=TEXT_MUTED, text_align=ft.TextAlign.CENTER,
+                size=11, color=TEXT_MUTED, text_align=ft.TextAlign.CENTER,
             ),
             ft.Text(
-                f"{lunar_text(selected)} {weekday_cn(selected)}",
-                size=15, color=TEXT, text_align=ft.TextAlign.CENTER,
+                f"{lunar_text(selected).split(' ')[0]} {weekday_cn(selected)}",
+                size=13, color=TEXT, text_align=ft.TextAlign.CENTER,
             ),
         ],
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         alignment=ft.MainAxisAlignment.CENTER,
         expand=True,
-        spacing=10,
+        spacing=6,
     )
     return ft.Container(
-        content=ft.Column([header, body], spacing=0, expand=True),
+        content=ft.Column(
+            [header, body],
+            spacing=0,
+            expand=True,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+        ),
         bgcolor=CARD,
         border=card_border(),
         border_radius=CARD_RADIUS,
