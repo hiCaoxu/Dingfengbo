@@ -49,6 +49,8 @@ def _editor(day: date, refresh) -> ft.Control:
         min_lines=14,
         max_lines=24,
         border=ft.InputBorder.NONE,
+        border_width=0,
+        filled=False,
         color=TEXT,
         text_style=ft.TextStyle(size=13, color=TEXT, height=1.6),
         on_blur=lambda e: save_content(diary_id, e.control.value),

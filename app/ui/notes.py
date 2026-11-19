@@ -133,6 +133,8 @@ def build(page: ft.Page, refresh) -> ft.Control:
         min_lines=18,
         max_lines=28,
         border=ft.InputBorder.NONE,
+        border_width=0,
+        filled=False,
         color=TEXT,
         text_style=ft.TextStyle(size=12, color=TEXT, font_family="Consolas", height=1.5),
         hint_text="输入 Markdown，右侧实时预览；代码块使用 ```python 语法",
