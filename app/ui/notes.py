@@ -13,11 +13,11 @@ from ..db.session import session_scope
 from ..icons import ACTIONS, ico
 from ..services.markdown import highlight_lines, inline_spans, parse
 from ..services.sync import mark_pending_write
-from ..theme import DIVIDER, PRIMARY, TEXT, TEXT_MUTED
+from ..theme import DIVIDER, PRIMARY, PRIMARY_LIGHT, TEXT, TEXT_MUTED
 from .forms import tags_text
 from .widgets import card, divider, empty, primary_button, section_header, tag_chip
 
-_state = {"tag": "全部"}
+_state = {"tag_path": "全部", "expanded": set()}
 _preview: ft.Container | None = None
 
 
@@ -104,6 +104,42 @@ def save_tags(note_id: str, value: str) -> None:
     mark_pending_write()
 
 
+def _parse_tags(raw: str) -> list[str]:
+    """反序列化 tags JSON，返回路径标签列表。"""
+    try:
+        data = json.loads(raw or "[]")
+        return [str(t).strip() for t in data if str(t).strip()]
+    except (ValueError, TypeError):
+        return []
+
+
+def _collect_tag_paths(notes) -> list[str]:
+    """收集所有笔记的路径标签（去重、排序）。"""
+    seen: set[str] = set()
+    for note in notes:
+        seen.update(_parse_tags(note.tags))
+    return sorted(seen)
+
+
+def _build_tag_tree(tags: list[str]) -> dict:
+    """由路径标签构建嵌套树，如 {'技术': {'编程': {'Python': {}}}}。"""
+    tree: dict = {}
+    for tag in tags:
+        parts = [p for p in tag.split("/") if p]
+        node = tree
+        for part in parts:
+            node = node.setdefault(part, {})
+    return tree
+
+
+def _matches_path(note_tags: list[str], path: str) -> bool:
+    """方式 A：标签等于 path 或以其为前缀（path/）。"""
+    for tag in note_tags:
+        if tag == path or tag.startswith(path + "/"):
+            return True
+    return False
+
+
 def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
     global _preview
     title_field = ft.TextField(
@@ -115,6 +151,8 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
         text_style=ft.TextStyle(size=16, color=TEXT, weight="bold"),
         on_blur=lambda e: save_title(note.id, e.control.value or ""),
     )
+    with session_scope() as session:
+        all_tag_paths = _collect_tag_paths(list(session.scalars(select(Note).where(Note.is_deleted.is_(False)))))
     tags_field = ft.TextField(
         value=tags_text(note.tags),
         border=ft.InputBorder.NONE,
@@ -122,9 +160,42 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
         filled=False,
         color=TEXT_MUTED,
         text_style=ft.TextStyle(size=11, color=TEXT_MUTED),
-        hint_text="标签（逗号分隔）",
+        hint_text="标签（逗号分隔，路径用 /）",
+        on_change=lambda e: _on_tags_change(e.control.value or ""),
         on_blur=lambda e: save_tags(note.id, e.control.value or ""),
     )
+    suggestion_row = ft.Row([], wrap=True, spacing=6)
+
+    def _on_tags_change(value: str) -> None:
+        if "," in value:
+            _, _, prefix = value.rpartition(",")
+            prefix = prefix.strip()
+        else:
+            prefix = value.strip()
+        if not prefix:
+            suggestion_row.controls = []
+        else:
+            candidates = [t for t in all_tag_paths if t.startswith(prefix) and t != prefix]
+            suggestion_row.controls = [
+                tag_chip(c, False, lambda e, c=c: _apply_suggestion(c))
+                for c in candidates[:8]
+            ]
+        suggestion_row.visible = bool(suggestion_row.controls)
+        suggestion_row.update()
+        page.update()
+
+    def _apply_suggestion(suggestion: str) -> None:
+        value = tags_field.value or ""
+        if "," in value:
+            base = value.rsplit(",", 1)[0].rstrip() + ","
+        else:
+            base = ""
+        tags_field.value = (base + " " + suggestion).strip()
+        tags_field.update()
+        suggestion_row.controls = []
+        suggestion_row.visible = False
+        suggestion_row.update()
+        page.update()
     _preview = ft.Container(content=render_markdown(note.content), expand=True)
     source = ft.TextField(
         value=note.content,
@@ -152,7 +223,7 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
                 ft.Column(
                     [
                         title_field,
-                        tags_field,
+                        ft.Column([tags_field, suggestion_row], spacing=6),
                         divider(),
                         ft.Row(
                             [
@@ -176,10 +247,8 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
 def build(page: ft.Page, refresh, on_open) -> ft.Control:
     with session_scope() as session:
         notes = list(session.scalars(select(Note).where(Note.is_deleted.is_(False)).order_by(Note.id.desc())))
-    all_tags: set[str] = set()
-    for note in notes:
-        all_tags.update(t for t in tags_text(note.tags).split(", ") if t)
-    filtered = [n for n in notes if _state["tag"] == "全部" or _state["tag"] in tags_text(n.tags).split(", ")]
+    tag_paths = _collect_tag_paths(notes)
+    tree = _build_tag_tree(tag_paths)
 
     def add_note(_):
         with session_scope() as session:
@@ -190,12 +259,72 @@ def build(page: ft.Page, refresh, on_open) -> ft.Control:
         if new_note:
             on_open(new_note)
 
-    tag_row = ft.Row(
-        [tag_chip(t, _state["tag"] == t, lambda e, tag=t: (_state.__setitem__("tag", tag), refresh()))
-         for t in ["全部", *sorted(all_tags)]],
-        spacing=6,
-        wrap=True,
-    )
+    def select_path(path: str) -> None:
+        _state["tag_path"] = path
+        refresh()
+
+    def toggle_expand(path: str) -> None:
+        if path in _state["expanded"]:
+            _state["expanded"].discard(path)
+        else:
+            _state["expanded"].add(path)
+        refresh()
+
+    def render_tree(node: dict, parent_path: str, depth: int) -> list[ft.Control]:
+        controls: list[ft.Control] = []
+        for name in sorted(node.keys()):
+            path = f"{parent_path}/{name}" if parent_path else name
+            children = node[name]
+            has_children = bool(children)
+            expanded = path in _state["expanded"]
+            active = _state["tag_path"] == path
+            controls.append(
+                ft.Container(
+                    content=ft.Row(
+                        [
+                            ft.Container(width=depth * 14),
+                            ft.Container(
+                                content=ft.Text("▾" if expanded else "▸", size=11, color=TEXT_MUTED),
+                                width=18,
+                                alignment=ft.Alignment.CENTER,
+                                on_click=lambda e, p=path: toggle_expand(p),
+                                visible=has_children,
+                            ),
+                            ft.Text(name, size=12, color=PRIMARY if active else TEXT,
+                                    weight="bold" if active else "normal"),
+                        ],
+                        spacing=2,
+                    ),
+                    padding=ft.Padding.symmetric(vertical=4, horizontal=6),
+                    bgcolor=PRIMARY_LIGHT if active else None,
+                    border_radius=6,
+                    on_click=lambda e, p=path: select_path(p),
+                )
+            )
+            if has_children and expanded:
+                controls.extend(render_tree(children, path, depth + 1))
+        return controls
+
+    all_active = _state["tag_path"] == "全部"
+    tag_controls = [
+        ft.Container(
+            content=ft.Row(
+                [ft.Text("全部", size=12, color=PRIMARY if all_active else TEXT,
+                         weight="bold" if all_active else "normal")],
+                spacing=2,
+            ),
+            padding=ft.Padding.symmetric(vertical=4, horizontal=6),
+            bgcolor=PRIMARY_LIGHT if all_active else None,
+            border_radius=6,
+            on_click=lambda e: select_path("全部"),
+        ),
+        *render_tree(tree, "", 0),
+    ]
+
+    filtered = [
+        n for n in notes
+        if _state["tag_path"] == "全部" or _matches_path(_parse_tags(n.tags), _state["tag_path"])
+    ]
 
     rows = [
         ft.ListTile(
@@ -212,9 +341,19 @@ def build(page: ft.Page, refresh, on_open) -> ft.Control:
     return ft.Column(
         [
             section_header("笔记", primary_button("新增笔记", add_note, ACTIONS["add"])),
-            tag_row,
-            card(
-                ft.Column(rows, spacing=2, scroll=ft.ScrollMode.AUTO, expand=True) if rows else empty("暂无笔记"),
+            ft.Row(
+                [
+                    card(
+                        ft.Column(tag_controls, spacing=0, scroll=ft.ScrollMode.AUTO, expand=True),
+                        title="标签",
+                        width=220,
+                    ),
+                    card(
+                        ft.Column(rows, spacing=2, scroll=ft.ScrollMode.AUTO, expand=True) if rows else empty("暂无笔记"),
+                        expand=True,
+                    ),
+                ],
+                spacing=12,
                 expand=True,
             ),
         ],
