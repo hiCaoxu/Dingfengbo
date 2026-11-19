@@ -29,6 +29,14 @@ _TABS = {
 }
 
 
+def _chart_placeholder() -> ft.Control:
+    return ft.Container(
+        content=ft.Text("加载中…", size=11, color=TEXT_MUTED),
+        alignment=ft.Alignment.CENTER,
+        expand=True,
+    )
+
+
 def _date_range(today: date | None = None) -> tuple[date, date]:
     today = today or date.today()
     if _state["range"] == "本周":
@@ -123,10 +131,10 @@ def build(page: ft.Page, refresh) -> ft.Control:
     exercise_labels, exercise_minutes = daily_totals(exercises, "minutes")
     diet_labels, diet_calories = daily_totals(diets, "calories")
 
-    weight_img = ft.Image(src="", width=420, height=170, fit=ft.BoxFit.CONTAIN)
-    sleep_img = ft.Image(src="", width=420, height=170, fit=ft.BoxFit.CONTAIN)
-    exercise_img = ft.Image(src="", width=420, height=170, fit=ft.BoxFit.CONTAIN)
-    diet_img = ft.Image(src="", width=420, height=170, fit=ft.BoxFit.CONTAIN)
+    weight_img = ft.Image(src="", width=420, height=170, fit=ft.BoxFit.CONTAIN, error_content=_chart_placeholder())
+    sleep_img = ft.Image(src="", width=420, height=170, fit=ft.BoxFit.CONTAIN, error_content=_chart_placeholder())
+    exercise_img = ft.Image(src="", width=420, height=170, fit=ft.BoxFit.CONTAIN, error_content=_chart_placeholder())
+    diet_img = ft.Image(src="", width=420, height=170, fit=ft.BoxFit.CONTAIN, error_content=_chart_placeholder())
 
     charts = ft.Column(
         [

@@ -21,6 +21,14 @@ from .widgets import card, confirm, divider, empty, icon_button, primary_button,
 _state = {"tab": "记录"}
 
 
+def _chart_placeholder() -> ft.Control:
+    return ft.Container(
+        content=ft.Text("加载中…", size=11, color=TEXT_MUTED),
+        alignment=ft.Alignment.CENTER,
+        expand=True,
+    )
+
+
 def _delete(model, item_id: str, page, refresh) -> None:
     def action():
         with session_scope() as session:
@@ -55,9 +63,9 @@ def build(page: ft.Page, refresh) -> ft.Control:
         spacing=12,
     )
 
-    pie_img = ft.Image(src="", width=320, height=220, fit=ft.BoxFit.CONTAIN)
-    trend_img = ft.Image(src="", width=420, height=220, fit=ft.BoxFit.CONTAIN)
-    account_img = ft.Image(src="", width=320, height=220, fit=ft.BoxFit.CONTAIN)
+    pie_img = ft.Image(src="", width=320, height=220, fit=ft.BoxFit.CONTAIN, error_content=_chart_placeholder())
+    trend_img = ft.Image(src="", width=420, height=220, fit=ft.BoxFit.CONTAIN, error_content=_chart_placeholder())
+    account_img = ft.Image(src="", width=320, height=220, fit=ft.BoxFit.CONTAIN, error_content=_chart_placeholder())
 
     charts = ft.Row(
         [
