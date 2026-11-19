@@ -42,6 +42,83 @@ def lunar_text(value: date) -> str:
         return ""
 
 
+_CN_DIGITS = {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+_LUNAR_MONTHS = {"正": 1, "冬": 11, "腊": 12}
+
+
+def _cn_number(text: str) -> int | None:
+    """中文数字转整数（一到九十九），兼容「初九」「廿三」「三十」等。"""
+    text = text.strip()
+    if not text:
+        return None
+    if text.isdigit():
+        return int(text)
+    if text.startswith("初"):
+        text = text[1:]
+    if text.startswith("廿"):
+        return 20 + (_CN_DIGITS.get(text[1:]) or 0)
+    if text.startswith("十"):
+        return 10 + (_CN_DIGITS.get(text[1:]) or 0)
+    if text.endswith("十"):
+        return (_CN_DIGITS.get(text[0]) or 0) * 10
+    if "十" in text:
+        tens, ones = text.split("十", 1)
+        return (_CN_DIGITS.get(tens) or 0) * 10 + (_CN_DIGITS.get(ones) or 0)
+    return _CN_DIGITS.get(text)
+
+
+def _lunar_month(text: str) -> int | None:
+    text = text.strip()
+    if text in ("十一", "十一月"):
+        return 11
+    if text in ("十二", "十二月"):
+        return 12
+    if text in _LUNAR_MONTHS:
+        return _LUNAR_MONTHS[text]
+    if text and text[0] in _LUNAR_MONTHS:
+        return _LUNAR_MONTHS[text[0]]
+    return _cn_number(text)
+
+
+def parse_lunar(value: str, default_year: int | None = None) -> tuple[int, int, int] | None:
+    """解析农历日期，支持「九月初九」「2026年九月初九」「9-9」「2026-9-9」。
+
+    返回 (year, month, day)；年份缺省时用 default_year 或当前年。
+    """
+    value = (value or "").strip()
+    if not value:
+        return None
+    year = default_year or date.today().year
+    m = re.fullmatch(r"(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})日?", value)
+    if m:
+        year, month, day = (int(x) for x in m.groups())
+    else:
+        m = re.fullmatch(r"(\d{1,2})[-/.月](\d{1,2})日?", value)
+        if m:
+            month, day = (int(x) for x in m.groups())
+        else:
+            value = re.sub(r"^[〇零一二三四五六七八九十百千两0-9]+年", "", value)
+            value = value.replace("月", " ").replace("日", " ").strip()
+            parts = value.split()
+            if len(parts) != 2:
+                return None
+            month = _lunar_month(parts[0])
+            day = _cn_number(parts[1])
+    if month is None or day is None or not (1 <= month <= 12 and 1 <= day <= 30):
+        return None
+    return year, month, day
+
+
+def lunar_to_gregorian(year: int, month: int, day: int) -> date | None:
+    """农历转公历；非法日期（含该月无此日）返回 None。"""
+    try:
+        from zhdate import ZhDate
+
+        return ZhDate(year, month, day).to_datetime().date()
+    except Exception:
+        return None
+
+
 def diary_title(value: date) -> str:
     return f"{value.year}年{value.month}月{value.day}日 {iso_week(value)}周{weekday_cn(value)}"
 

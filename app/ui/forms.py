@@ -25,7 +25,7 @@ from ..db.models import (
 from ..db.repo import create, update
 from ..db.session import session_scope
 from ..icons import ico
-from ..services.dates import diary_title, parse_hours
+from ..services.dates import diary_title, lunar_to_gregorian, parse_hours, parse_lunar
 from ..services.health import calorie_of, estimate_exercise_calories, food_options
 from ..services.sync import mark_pending_write
 from ..theme import DIVIDER, TEXT, TEXT_MUTED
@@ -63,29 +63,58 @@ def _close_and_refresh(page, dialog, on_done):
 def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable | None = None):
     title = form_field("标题 *", todo.title if todo else "")
     note = form_field("备注", todo.note if todo else "", multiline=True)
-    due = form_field("到期日期 YYYY-MM-DD", todo.due_date.isoformat() if todo and todo.due_date else "")
+    is_lunar = bool(todo and todo.lunar_reminder)
+    due_type = dropdown("日期类型", ["公历", "农历"], "农历" if is_lunar else "公历", width=120)
+    due = form_field(
+        "农历日期（如 九月初九）" if is_lunar else "到期日期 YYYY-MM-DD",
+        (todo.lunar_reminder if is_lunar else (todo.due_date.isoformat() if todo and todo.due_date else "")),
+        width=380,
+    )
     tags = form_field("标签（逗号分隔）", tags_text(todo.tags) if todo else "")
-    lunar = form_field("农历提醒（如 九月初九）", todo.lunar_reminder if todo else "")
     repeat = dropdown("循环规则", ["不循环", "按天", "按周", "按月", "按年"],
                       {"none": "不循环", "day": "按天", "week": "按周", "month": "按月", "year": "按年"}.get(todo.repeat_rule, "不循环") if todo else "不循环")
     priority = dropdown("优先级", ["", "低", "中", "高"], todo.priority if todo and todo.priority else "")
+
+    def on_type_change(e):
+        lunar = e.control.value == "农历"
+        due.label = "农历日期（如 九月初九）" if lunar else "到期日期 YYYY-MM-DD"
+        due.hint_text = "九月初九 / 9-9" if lunar else "2026-12-31"
+        due.update()
+
+    due_type.on_select = on_type_change
 
     def save(_):
         if not title.value or not title.value.strip():
             snack(page, "请填写标题", "#C97B63")
             return
-        try:
-            due_date = _date(due.value)
-        except ValueError:
-            snack(page, "到期日期格式不正确", "#C97B63")
-            return
+        if due_type.value == "农历":
+            raw = (due.value or "").strip()
+            if not raw:
+                due_date, lunar_reminder = None, ""
+            else:
+                parsed = parse_lunar(raw)
+                if not parsed:
+                    snack(page, "农历日期格式不正确，例如「九月初九」或「9-9」", "#C97B63")
+                    return
+                due_date = lunar_to_gregorian(*parsed)
+                if due_date is None:
+                    snack(page, "农历日期无效", "#C97B63")
+                    return
+                lunar_reminder = raw
+        else:
+            try:
+                due_date = _date(due.value)
+            except ValueError:
+                snack(page, "到期日期格式不正确", "#C97B63")
+                return
+            lunar_reminder = ""
         rule_map = {"不循环": "none", "按天": "day", "按周": "week", "按月": "month", "按年": "year"}
         fields = dict(
             title=title.value.strip(),
             note=note.value or "",
             due_date=due_date,
             tags=_tags(tags.value or ""),
-            lunar_reminder=lunar.value or "",
+            lunar_reminder=lunar_reminder,
             repeat_rule=rule_map.get(repeat.value or "不循环", "none"),
             priority=priority.value or "",
         )
@@ -102,7 +131,7 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
     dialog = modal(
         page,
         "编辑待办" if todo else "新增待办",
-        ft.Column([title, note, due, tags, lunar, ft.Row([repeat, priority], spacing=12)], spacing=10, tight=True),
+        ft.Column([title, note, ft.Row([due_type, due], spacing=12), tags, ft.Row([repeat, priority], spacing=12)], spacing=10, tight=True),
         [ft.TextButton("取消", on_click=lambda e: _close_and_refresh(page, dialog, None)), primary_button("保存", save)],
     )
     return dialog
