@@ -127,7 +127,7 @@ def _activity_counts() -> dict[date, int]:
 
 
 _WEEKDAY_LABELS = ["一", "二", "三", "四", "五", "六", "日"]
-_HEAT_CELL = 9
+_HEAT_CELL = 10
 _HEAT_GAP = 2
 _HEAT_LABEL_W = 18
 
