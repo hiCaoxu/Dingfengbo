@@ -17,7 +17,7 @@ from ..theme import DANGER, DIVIDER, PRIMARY_LIGHT, TEXT, TEXT_MUTED
 from .forms import open_todo_dialog, tags_text
 from .widgets import card, confirm, divider, empty, icon_button, primary_button, section_header, tag_chip
 
-_state = {"tag": "全部", "status": "全部"}
+_state = {"tag": "全部", "status": "未完成"}
 
 
 def _all_tags(items) -> list[str]:
