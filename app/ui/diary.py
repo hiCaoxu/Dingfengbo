@@ -199,7 +199,11 @@ def _list_view(refresh) -> ft.Control:
             )
         )
     query = _state["query"]
-    shown = [d for d in diaries if not query or query in d.date.isoformat() or query in d.title]
+    shown = [
+        d for d in diaries
+        if (d.content or "").strip()
+        and (not query or query in d.date.isoformat() or query in d.title)
+    ]
     field = ft.TextField(
         label="按日期检索 YYYY-MM-DD",
         value=query,
