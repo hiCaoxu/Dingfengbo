@@ -13,7 +13,7 @@ from ..db.session import session_scope
 from ..icons import ACTIONS, ico
 from ..services.dates import next_due
 from ..services.sync import mark_pending_write
-from ..theme import ACCENT, DIVIDER, PRIMARY_LIGHT, TEXT, TEXT_MUTED
+from ..theme import DANGER, DIVIDER, PRIMARY_LIGHT, TEXT, TEXT_MUTED
 from .forms import open_todo_dialog, tags_text
 from .widgets import card, confirm, divider, empty, icon_button, primary_button, section_header, tag_chip
 
@@ -103,7 +103,7 @@ def build(page: ft.Page, refresh) -> ft.Control:
                         [
                             ft.Row(
                                 [
-                                    ft.Text(item.title, size=13, color=TEXT_MUTED if item.completed else TEXT,
+                                    ft.Text(item.title, size=13, color=DANGER if overdue else (TEXT_MUTED if item.completed else TEXT),
                                             weight="bold"),
                                     ft.Text("循环模板", size=9, color=TEXT_MUTED,
                                             visible=item.is_template),
@@ -113,7 +113,7 @@ def build(page: ft.Page, refresh) -> ft.Control:
                             ft.Text(
                                 f"{label}{due}" + (f" · {item.priority}" if item.priority else "")
                                 + (f" · {tags_text(item.tags)}" if tags_text(item.tags) else ""),
-                                size=11, color=ACCENT if overdue else TEXT_MUTED,
+                                size=11, color=DANGER if overdue else TEXT_MUTED,
                             ),
                         ],
                         spacing=4, expand=True,
@@ -123,7 +123,7 @@ def build(page: ft.Page, refresh) -> ft.Control:
                 ],
                 spacing=10,
             ),
-            bgcolor="#FFFFFF" if not overdue else "#FFF9F6",
+            bgcolor="#FFFFFF" if not overdue else "#FDECEA",
             border=ft.Border.all(1, DIVIDER),
             border_radius=10,
             padding=ft.Padding.symmetric(vertical=10, horizontal=12),

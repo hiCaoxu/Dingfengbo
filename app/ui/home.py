@@ -20,6 +20,7 @@ from ..theme import (
     ACCENT,
     CARD,
     CARD_RADIUS,
+    DANGER,
     DIVIDER,
     HEATMAP_LEVELS,
     PRIMARY,
@@ -245,8 +246,8 @@ def build(page: ft.Page, refresh, on_open_diary, on_open_note) -> ft.Control:
             session.scalars(
                 select(Todo).where(
                     Todo.is_deleted.is_(False), Todo.completed.is_(False),
-                    Todo.due_date == today,
-                ).order_by(Todo.priority, Todo.due_date)
+                    Todo.due_date <= today,
+                ).order_by(Todo.due_date, Todo.priority)
             )
         )[:5]
         todo_week = list(
@@ -268,8 +269,19 @@ def build(page: ft.Page, refresh, on_open_diary, on_open_note) -> ft.Control:
                 ft.Row(
                     [
                         ft.Icon(ico("RADIO_BUTTON_UNCHECKED_OUTLINED"), size=16, color=TEXT_MUTED),
-                        ft.Text(item.title, size=12, color=TEXT, expand=True, overflow=ft.TextOverflow.ELLIPSIS),
-                        ft.Text(item.due_date.isoformat() if item.due_date else "", size=10, color=TEXT_MUTED),
+                        ft.Text(
+                            item.title,
+                            size=12,
+                            color=DANGER if (item.due_date and item.due_date < today) else TEXT,
+                            expand=True,
+                            overflow=ft.TextOverflow.ELLIPSIS,
+                        ),
+                        ft.Text(
+                            ("已过期 · " if (item.due_date and item.due_date < today) else "")
+                            + (item.due_date.isoformat() if item.due_date else ""),
+                            size=10,
+                            color=DANGER if (item.due_date and item.due_date < today) else TEXT_MUTED,
+                        ),
                     ],
                     spacing=8,
                 )
