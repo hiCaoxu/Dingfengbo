@@ -132,7 +132,7 @@ def _heatmap_cell(day: date, count: int, on_open) -> ft.Container:
     )
 
 
-def _heatmap_card(year: int, on_open, set_year) -> ft.Container:
+def _heatmap_card(year: int, on_open, set_year, height: int | None = None) -> ft.Container:
     counts = _activity_counts()
     end = date(year, 12, 31)
     start = date(year - 1, 1, 1) if year > datetime.now().year else date(year, 1, 1)
@@ -201,6 +201,7 @@ def _heatmap_card(year: int, on_open, set_year) -> ft.Container:
             spacing=8,
         ),
         title="活跃度热力图",
+        height=height,
         trailing=ft.Row(
             [
                 ft.TextButton(f"{year - 1}", on_click=lambda e: set_year(year - 1)),
@@ -315,7 +316,7 @@ def build(page: ft.Page, refresh, on_open_diary, on_open_note) -> ft.Control:
                 [
                     ft.Column(
                         [
-                            _heatmap_card(_HOME_STATE["year"], open_day, set_year),
+                            _heatmap_card(_HOME_STATE["year"], open_day, set_year, height=220),
                             ft.Row(
                                 [
                                     _stat_card("本月收入", money(summary["income"]), height=130),
@@ -329,10 +330,9 @@ def build(page: ft.Page, refresh, on_open_diary, on_open_note) -> ft.Control:
                         expand=True,
                         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                     ),
-                    _calendar_card(_HOME_STATE["selected_date"], set_date, width=280),
+                    _calendar_card(_HOME_STATE["selected_date"], set_date, width=280, height=358),
                 ],
                 spacing=12,
-                vertical_alignment=ft.CrossAxisAlignment.STRETCH,
             ),
             ft.Row(
                 [
