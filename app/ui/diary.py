@@ -42,6 +42,7 @@ def _editor(day: date, refresh) -> ft.Control:
     with session_scope() as session:
         diary = ensure_diary(session, day)
         diary_id, title, content = diary.id, diary.title, diary.content
+    has_diary = bool((content or "").strip())
     field = ft.TextField(
         value=content,
         multiline=True,
@@ -55,7 +56,14 @@ def _editor(day: date, refresh) -> ft.Control:
     return card(
         ft.Column(
             [
-                ft.Text(title, size=14, color=TEXT, weight="bold"),
+                ft.Row(
+                    [
+                        ft.Text(title, size=14, color=TEXT, weight="bold"),
+                        ft.Container(width=7, height=7, bgcolor=PRIMARY if has_diary else DIVIDER, border_radius=4),
+                        ft.Text("有日记" if has_diary else "暂无日记", size=11, color=PRIMARY if has_diary else TEXT_MUTED),
+                    ],
+                    spacing=6,
+                ),
                 ft.Text("光标离开正文即自动保存", size=10, color=TEXT_MUTED),
                 divider(),
                 field,
@@ -89,24 +97,19 @@ def _month_view(refresh) -> ft.Control:
         for day in week:
             in_month = day.month == month and day.year == year
             diary = diaries.get(day)
-            summary = (diary.title if diary else "").replace(f"{day.year}年{day.month}月{day.day}日 ", "")
+            has_diary = bool(diary and (diary.content or "").strip())
             selected = day == _state["selected"]
             body = ft.Column(
                 [
-                    ft.Row(
-                        [
-                            ft.Text(str(day.day), size=12, color=TEXT if in_month else TEXT_MUTED,
-                                    weight="bold" if selected else "normal"),
-                        ],
-                        spacing=2,
-                    ),
-                    ft.Row(
-                        ([ft.Container(width=5, height=5, bgcolor=PRIMARY, border_radius=3)] if diary else [])
-                        + ([ft.Text(summary[:8], size=9, color=TEXT_MUTED, overflow=ft.TextOverflow.ELLIPSIS)] if diary else []),
-                        spacing=4,
+                    ft.Text(str(day.day), size=12, color=TEXT if in_month else TEXT_MUTED,
+                            weight="bold" if selected else "normal"),
+                    ft.Container(
+                        width=6, height=6, bgcolor=PRIMARY, border_radius=3,
+                        visible=has_diary,
                     ),
                 ],
-                spacing=4,
+                spacing=3,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             )
             cells.append(
                 ft.Container(
@@ -114,9 +117,9 @@ def _month_view(refresh) -> ft.Control:
                     bgcolor=PRIMARY_LIGHT if selected else ("#FFFFFF" if in_month else "#F7F4EF"),
                     border=ft.Border.all(1, DIVIDER),
                     border_radius=8,
-                    padding=7,
-                    width=118,
-                    height=64,
+                    padding=6,
+                    width=78,
+                    height=48,
                     opacity=1 if in_month else 0.55,
                     on_click=(
                         lambda e, d=day: (_state.__setitem__("selected", d), refresh())
