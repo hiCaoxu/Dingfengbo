@@ -482,7 +482,8 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
                 [
                     ft.Column(
                         [
-                            _heatmap_card(_HOME_STATE["year"], open_day, set_year, height=228),
+                            # 热力图内容约需 252px，228 会把图例顶出卡片、叠到下方统计卡上。
+                            _heatmap_card(_HOME_STATE["year"], open_day, set_year, height=256),
                             equal_height_row(
                                 [
                                     _stat_card("本月收入", money(summary["income"]), height=96),
@@ -493,11 +494,12 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
                                 height=96,
                             ),
                         ],
-                        spacing=8,
+                        spacing=12,
                         expand=True,
                         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                     ),
-                    _calendar_card(_HOME_STATE["selected_date"], set_date, width=280, height=332),
+                    # 日历高度 = 热力图 256 + 间距 12 + 统计卡 96，与左列严格对齐
+                    _calendar_card(_HOME_STATE["selected_date"], set_date, width=280, height=364),
                 ],
                 spacing=12,
                 vertical_alignment=ft.CrossAxisAlignment.STRETCH,

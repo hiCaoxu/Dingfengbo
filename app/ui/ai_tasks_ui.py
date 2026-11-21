@@ -49,6 +49,7 @@ def ensure_consent(page: ft.Page, refs: list[str], on_agree) -> bool:
         on_agree()
 
     dialog = ft.AlertDialog(
+        bgcolor=th.CARD,
         title=ft.Text("数据将发送至第三方大模型", size=th.FONT_SECTION_TITLE,
                       color=th.TEXT, weight="bold"),
         content=ft.Text(
@@ -92,6 +93,7 @@ def run_task_dialog(
     holder = ft.Column([output, footer], spacing=10, tight=True)
 
     dialog = ft.AlertDialog(
+        bgcolor=th.CARD,
         title=ft.Row(
             [
                 ft.Icon(ico("AUTO_AWESOME_OUTLINED"), size=18, color=th.PRIMARY),

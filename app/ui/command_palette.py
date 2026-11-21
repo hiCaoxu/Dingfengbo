@@ -313,6 +313,7 @@ def open_command_palette(
         tight=True,
     )
     dialog = ft.AlertDialog(
+        bgcolor=th.CARD,
         title=ft.Row(
             [
                 ft.Icon(ico("SEARCH_OUTLINED"), size=18, color=th.PRIMARY),

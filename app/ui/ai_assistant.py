@@ -257,6 +257,7 @@ def build(page: ft.Page, refresh) -> ft.Control:
             on_agree()
 
         dialog = ft.AlertDialog(
+            bgcolor=th.CARD,
             title=ft.Text("数据将发送至第三方大模型", size=th.FONT_SECTION_TITLE,
                           color=th.TEXT, weight="bold"),
             content=ft.Text(

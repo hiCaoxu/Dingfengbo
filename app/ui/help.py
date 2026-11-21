@@ -155,9 +155,12 @@ def _module_card(key: str, label: str, navigate) -> ft.Container:
         spacing=6,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
+    # 统一高度：同一排的模块卡片不再因说明条数不同而高矮不一，超长内容卡片内滚动。
     return card(
-        ft.Column([head, divider(), _bullets(MODULE_HELP[key])], spacing=8, tight=True),
+        ft.Column([head, divider(), _bullets(MODULE_HELP[key])], spacing=8,
+                  scroll=ft.ScrollMode.AUTO),
         width=316,
+        height=190,
     )
 
 

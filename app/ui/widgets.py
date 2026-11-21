@@ -467,6 +467,7 @@ def confirm(page: ft.Page, message: str, on_confirm: Callable) -> None:
         on_confirm()
 
     dialog = ft.AlertDialog(
+        bgcolor=th.CARD,
         title=ft.Text("确认操作", size=14, color=th.TEXT),
         content=ft.Text(message, size=12, color=th.TEXT_MUTED),
         actions=[
@@ -524,6 +525,7 @@ def dropdown(label: str, options: list[str], value: str | None = None, width: in
 
 def modal(page: ft.Page, title: str, body: ft.Control, actions: list[ft.Control], width: int = 560) -> ft.AlertDialog:
     dialog = ft.AlertDialog(
+        bgcolor=th.CARD,
         title=ft.Text(title, size=th.FONT_SECTION_TITLE, color=th.TEXT, weight="bold"),
         content=ft.Container(content=body, width=width),
         actions=actions,

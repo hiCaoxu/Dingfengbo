@@ -131,17 +131,22 @@ def main(page: ft.Page) -> None:
     page.window.title_bar_hidden = True
     # 中文霞鹜文楷 + 外文 Consolas（见 theme.apply_fonts）
     th.apply_fonts(page)
+    # 显式给出明/暗两套 Material 主题并联动 theme_mode：否则输入框、下拉菜单、
+    # 弹窗背景始终停在浅色 scheme，暗色下会「白花花一片」且浅色文字看不清。
     page.theme = th.build_theme()
+    page.dark_theme = th.build_theme(seed=th.PALETTES["dark"]["PRIMARY"])
+    page.theme_mode = ft.ThemeMode.DARK if th.is_dark() else ft.ThemeMode.LIGHT
 
     state = {"current": "home", "preview_note": None, "palette": False}
-    # 顶栏状态文字限宽 + 省略号：内容再长也不会把右侧图标按钮挤出屏幕。
+    # 同步状态/时间保持自然宽度，紧挨「立即同步」；过长靠省略号 + tooltip 兜底，
+    # 不会再预留大段空白把按钮顶到远处。
     sync_text = ft.Text(
         sync_client.status, size=th.FONT_CAPTION, color=th.TEXT_MUTED,
-        max_lines=1, overflow=ft.TextOverflow.ELLIPSIS, width=176,
+        max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
     )
     queue_text = ft.Text(
         "", size=th.FONT_CAPTION, color=th.TEXT_MUTED,
-        max_lines=1, overflow=ft.TextOverflow.ELLIPSIS, width=110,
+        max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
     )
     # 有失败记录时整块可点击，直接打开同步明细看重试/忽略。
     queue_box = ft.Container(
@@ -269,6 +274,8 @@ def main(page: ft.Page) -> None:
         page.bgcolor = th.BG
         page.window.bgcolor = th.BG
         page.theme = th.build_theme()
+        page.dark_theme = th.build_theme(seed=th.PALETTES["dark"]["PRIMARY"])
+        page.theme_mode = ft.ThemeMode.DARK if th.is_dark() else ft.ThemeMode.LIGHT
         header_box.bgcolor = th.BG
         greeting_text.color = th.TEXT
         slogan_text.color = th.PRIMARY
@@ -372,29 +379,7 @@ def main(page: ft.Page) -> None:
                     on_click=lambda e, k=key: navigate(k),
                 )
             )
-        # 帮助不是业务模块：不进 MODULES，也不参与 Ctrl+数字与设置里的排序
-        help_active = state["current"] == "help"
-        controls.append(
-            ft.Container(
-                content=ft.Row(
-                    [
-                        ft.Icon(ico("HELP_OUTLINE"), size=20,
-                                color=th.PRIMARY if help_active else th.TEXT_MUTED),
-                        ft.Text("帮助", size=th.FONT_NAV,
-                                color=th.PRIMARY if help_active else th.TEXT_MUTED,
-                                weight="bold" if help_active else "normal",
-                                max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
-                                expand=True),
-                    ],
-                    spacing=12,
-                ),
-                bgcolor=th.PRIMARY_LIGHT if help_active else None,
-                border_radius=8,
-                padding=ft.Padding.symmetric(vertical=9, horizontal=14),
-                margin=ft.Margin.symmetric(horizontal=10),
-                on_click=lambda e: navigate("help"),
-            )
-        )
+        # 「帮助」不进左侧导航：入口在顶栏「?」按钮和 F1，导航只保留业务模块。
         nav_column.controls = controls
         # 辅助信息固定在导航底部：字号仍为 12，只靠颜色弱化。
         nav_footer.content = ft.Column(
