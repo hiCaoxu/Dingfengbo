@@ -136,6 +136,9 @@ def open_command_palette(
     def open_timeline(_=None) -> None:
         go("timeline")
 
+    def open_help(_=None) -> None:
+        go("help")
+
     def open_data_io(_=None) -> None:
         from .data_io_dialog import open_data_io_dialog
 
@@ -160,6 +163,7 @@ def open_command_palette(
         ("INSIGHTS_OUTLINED", "查看回顾报告", "周/月/年统计与 AI 总结", open_report),
         ("BACKUP_OUTLINED", "备份恢复中心", "查看备份、恢复、导出", open_backup),
         ("DOWNLOAD_OUTLINED", "数据导入导出", "Markdown / CSV / JSON", open_data_io),
+        ("HELP_OUTLINE", "帮助与上手", "各模块能做什么、快捷键与常见问题", open_help),
         ("SETTINGS_OUTLINED", "打开设置", "同步、AI、外观与数据目录", open_settings),
     ]
 

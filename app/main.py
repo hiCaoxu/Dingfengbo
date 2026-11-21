@@ -24,6 +24,7 @@ from .services.holidays import ensure_sample_file
 from .services.sync import mark_pending_write, queue_counts, sync_client
 from .ui import ai_assistant, diary as diary_ui
 from .ui import entertainment, finance_ui, health_ui, home, notes
+from .ui import help as help_ui
 from .ui import reports as reports_ui
 from .ui import timeline as timeline_ui
 from .ui import todo
@@ -193,6 +194,7 @@ def main(page: ft.Page) -> None:
                 toggle_theme,
                 "切换暗色/亮色主题 (Ctrl+T)",
             ),
+            icon_button("HELP_OUTLINE", lambda e: navigate("help"), "帮助与上手 (F1)"),
             icon_button(ACTIONS["settings"],
                         lambda e: open_settings_dialog(page, refresh, refresh_status), "设置"),
         ]
@@ -344,6 +346,27 @@ def main(page: ft.Page) -> None:
                 )
             )
         controls.append(ft.Container(expand=True))
+        # 帮助不是业务模块：不进 MODULES，也不参与 Ctrl+数字与设置里的排序
+        help_active = state["current"] == "help"
+        controls.append(
+            ft.Container(
+                content=ft.Row(
+                    [
+                        ft.Icon(ico("HELP_OUTLINE"), size=20,
+                                color=th.PRIMARY if help_active else th.TEXT_MUTED),
+                        ft.Text("帮助", size=13,
+                                color=th.PRIMARY if help_active else th.TEXT_MUTED,
+                                weight="bold" if help_active else "normal"),
+                    ],
+                    spacing=12,
+                ),
+                bgcolor=th.PRIMARY_LIGHT if help_active else None,
+                border_radius=8,
+                padding=ft.Padding.symmetric(vertical=10, horizontal=14),
+                margin=ft.Margin.symmetric(horizontal=10),
+                on_click=lambda e: navigate("help"),
+            )
+        )
         controls.append(
             ft.Container(
                 content=ft.Column(
@@ -421,6 +444,8 @@ def main(page: ft.Page) -> None:
             )
         elif current == "ai":
             body.content = ai_assistant.build(page, refresh)
+        elif current == "help":
+            body.content = help_ui.build(page, navigate)
         page.update()
 
     def on_keyboard(e: ft.KeyboardEvent) -> None:
@@ -430,6 +455,9 @@ def main(page: ft.Page) -> None:
             return
         if e.ctrl and key == "t":
             toggle_theme()
+            return
+        if key == "f1":
+            navigate("help")
             return
         if e.ctrl and len(key) == 1 and key in "0123456789":
             modules = [name for name, _label in _module_list()]

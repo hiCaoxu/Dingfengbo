@@ -99,11 +99,11 @@ class LifeServiceTests(unittest.TestCase):
         life.add_event("本月目标", target_date=today + timedelta(days=3))
         life.add_event("没定日子")
 
-        # 有日期的按日期新的在上；没日期的沉底，按创建时间倒序
-        self.assertEqual(
-            [row["title"] for row in life.list_events()],
-            ["年底的目标", "本月目标", "没定日子", "无日期"],
-        )
+        # 有日期的按日期新的在上；没日期的沉底。两条无日期记录可能落在同一微秒，
+        # 创建时间相同时先后不定，这里只断言它们都在末尾。
+        titles = [row["title"] for row in life.list_events()]
+        self.assertEqual(titles[:2], ["年底的目标", "本月目标"])
+        self.assertEqual(set(titles[2:]), {"没定日子", "无日期"})
 
 
 class DiaryLayoutTests(unittest.TestCase):
