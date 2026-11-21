@@ -92,7 +92,7 @@ python -m pytest -q          # 或：python -m unittest discover -s tests -t .
 - 回顾报告（`app/services/reports.py`、`app/ui/reports.py`）：周/月/年本地统计（待办完成率、日记笔记、健康、财务与预算、娱乐、习惯），可生成 AI 叙述并导出 Markdown 到 `exports\`。
 - 统一标签 / 时间轴 / 关联（`app/services/timeline.py`、`app/ui/timeline.py`）：跨模块标签聚合、按模块/标签/时间段筛选的生活时间线，记录之间可建立双向关联（`record_links`）。
 - 预算与周期记账（`app/services/budget.py`、`app/services/expense_rules.py`、`app/ui/budget_dialogs.py`）：月度总预算与分类预算、超支提示、固定支出/订阅到期自动生成交易（幂等，最多补 12 期）、规则版「一句话记账」（「今天午饭花了 32 元」）。
-- 任务模块（`app/ui/todo.py`、`app/services/todo_views.py`、`app/ui/habits.py`）：待办与习惯合并为一页，左侧「月历 + 四象限」、中间任务列表、右侧习惯打卡。月历按到期日显示未完成数量，点日期只看当天（再点取消）；四象限支持点击筛选，规则为「高/中优先级 = 重要」「今明到期或逾期 = 紧急」，也可在任务编辑弹窗里手选象限（留空=自动）。
+- 任务模块（`app/ui/todo.py`、`app/services/todo_views.py`、`app/ui/habits.py`）：待办与习惯合并为一页，左侧「月历 + 四象限」、中间任务列表、右侧习惯打卡。四象限自动撑满左侧剩余高度并随窗口拉伸，支持点击筛选，规则为「高/中优先级 = 重要」「今明到期或逾期 = 紧急」，也可在任务编辑弹窗里手选象限（留空=自动）。月历按到期日显示未完成数量，点日期只看当天（再点取消）；任务列表与习惯面板用 `ListView` 各自滚动。
 - 习惯（`app/services/habits.py`、`app/ui/habits.py`）：每日打卡、连续/最长天数、周目标进度、12 周打卡日历，紧凑面板嵌在任务页右侧。
 - 系统体验：亮/暗主题（`app/theme.py` 运行时换色板）、`Ctrl+K`/`Ctrl+T`/`Ctrl+1..9`/`Ctrl+0` 快捷键、开机自启（注册表 Run 项）、关闭到系统托盘（`pystray` 可选，未安装时降级）、导航模块显隐与排序（设置页）。
 

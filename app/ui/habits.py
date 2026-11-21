@@ -285,7 +285,7 @@ def render_panel(page: ft.Page, refresh, items: list[dict]) -> ft.Control:
         )
 
     body: ft.Control = (
-        ft.Column(rows, spacing=6)
+        ft.ListView(rows, spacing=6, padding=0, expand=True)
         if rows
         else empty("还没有习惯。加一个「每天阅读 30 分钟」之类的小目标。")
     )
@@ -309,11 +309,7 @@ def render_panel(page: ft.Page, refresh, items: list[dict]) -> ft.Control:
                     spacing=6,
                 ),
                 divider(),
-                (
-                    ft.Column([body], scroll=ft.ScrollMode.AUTO, expand=True)
-                    if rows
-                    else body
-                ),
+                body,
                 ft.Text(
                     "待打卡：" + "、".join(pending[:3]) + ("…" if len(pending) > 3 else "")
                     if pending

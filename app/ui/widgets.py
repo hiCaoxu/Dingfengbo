@@ -36,8 +36,10 @@ def card(
             )
         )
     body = header + ([content] if content is not None else [])
+    # expand 必须一路传给内层 Column：否则卡片高度撑满了，内部带 expand 的
+    # 列表/滚动区拿不到高度，Flet 会渲染成一块空白。
     return ft.Container(
-        content=ft.Column(body, spacing=12, tight=not expand),
+        content=ft.Column(body, spacing=12, tight=not expand, expand=True if expand else None),
         bgcolor=th.CARD,
         border=th.card_border(),
         border_radius=th.CARD_RADIUS,

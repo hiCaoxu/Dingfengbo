@@ -298,7 +298,8 @@ def _quadrant_card(page, refresh, items, today: date) -> ft.Control:
                     ),
                 ],
                 spacing=2,
-                tight=True,
+                expand=True,
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             ),
             padding=ft.Padding.all(9),
             expand=True,
@@ -309,6 +310,7 @@ def _quadrant_card(page, refresh, items, today: date) -> ft.Control:
             on_click=lambda e, k=key: _toggle_quadrant(page, refresh, k),
         )
 
+    # expand 让四象限吃掉左侧栏剩下的高度，格子随可用空间变大
     return card(
         ft.Column(
             [
@@ -319,12 +321,14 @@ def _quadrant_card(page, refresh, items, today: date) -> ft.Control:
                         ft.Text("高/中优先级=重要 · 今明到期/逾期=紧急", size=8, color=th.TEXT_MUTED),
                     ]
                 ),
-                ft.Row([cell("q1"), cell("q2")], spacing=8),
-                ft.Row([cell("q3"), cell("q4")], spacing=8),
+                ft.Row([cell("q1"), cell("q2")], spacing=8, expand=True),
+                ft.Row([cell("q3"), cell("q4")], spacing=8, expand=True),
             ],
             spacing=8,
+            expand=True,
         ),
         padding=ft.Padding.all(12),
+        expand=True,
     )
 
 
@@ -498,11 +502,11 @@ def _render(page: ft.Page, refresh, data) -> ft.Control:
                 ),
                 divider(),
                 (
-                    ft.Column(
+                    ft.ListView(
                         [_row_for(page, refresh, item, today, item.id in overdue_ids)
                          for item in shown],
                         spacing=8,
-                        scroll=ft.ScrollMode.AUTO,
+                        padding=0,
                         expand=True,
                     )
                     if shown
@@ -523,7 +527,6 @@ def _render(page: ft.Page, refresh, data) -> ft.Control:
         width=LEFT_WIDTH,
         spacing=12,
         expand=True,
-        scroll=ft.ScrollMode.AUTO,
     )
     right_column = ft.Column(
         [render_habits_panel(page, refresh, data["habits"])],
