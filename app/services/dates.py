@@ -162,44 +162,7 @@ def nth_workday(year: int, month: int, nth: str) -> date | None:
     return None
 
 
-def next_custom_due(value: date, config: dict) -> date | None:
-    """自定义循环：按配置推算下一次到期日。
-
-    支持的 kind：
-    - ``weekly_times``（times=N）：每周 N 次，均匀分散（间隔 ``round(7/N)`` 天，至少 1 天）
-    - ``monthly_workday``（nth=first|last）：每月第一个/最后一个工作日
-    - ``monthly_days``（days=[1,15]）：每月指定日期，取严格晚于 value 的第一个
-    """
-    kind = str(config.get("kind") or "")
-    if kind == "weekly_times":
-        try:
-            times = int(config.get("times") or 1)
-        except (TypeError, ValueError):
-            times = 1
-        times = max(1, min(7, times))
-        return value + timedelta(days=max(1, round(7 / times)))
-    if kind == "monthly_workday":
-        year, month = shift_month(value.year, value.month, 1)
-        return nth_workday(year, month, str(config.get("nth") or "first"))
-    if kind == "monthly_days":
-        days = sorted(
-            {int(day) for day in config.get("days") or [] if str(day).isdigit()}
-        )
-        if not days:
-            return None
-        for offset in range(0, 13):
-            year, month = shift_month(value.year, value.month, offset)
-            month_days = calendar.monthrange(year, month)[1]
-            for day in days:
-                if 1 <= day <= month_days:
-                    candidate = date(year, month, day)
-                    if candidate > value:
-                        return candidate
-        return None
-    return None
-
-
-def next_due(value: date, rule: str, config: dict | None = None) -> date | None:
+def next_due(value: date, rule: str) -> date | None:
     if rule == "day":
         return value + timedelta(days=1)
     if rule == "week":
@@ -213,8 +176,6 @@ def next_due(value: date, rule: str, config: dict | None = None) -> date | None:
         month = value.month
         day = min(value.day, calendar.monthrange(year, month)[1])
         return date(year, month, day)
-    if rule == "custom":
-        return next_custom_due(value, config or {})
     return None
 
 

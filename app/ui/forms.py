@@ -51,9 +51,19 @@ from ..services.dates import (
     parse_lunar,
     valid_hm,
 )
+from ..services.recurrence import (
+    MONTH_MODE_LABELS,
+    NTH_BY_LABEL,
+    NTH_LABELS,
+    UNIT_BY_LABEL,
+    UNIT_LABELS,
+    WEEKDAY_INDEX,
+    WEEKDAY_LABELS,
+    WEEKDAY_SHORT,
+    YEAR_MODE_LABELS,
+    normalize_config,
+)
 from ..services.todo_rules import (
-    CUSTOM_KIND_LABELS,
-    CUSTOM_LABEL_BY_KIND,
     REPEAT_LABELS,
     RULE_BY_LABEL,
     RULE_OPTIONS,
@@ -68,7 +78,15 @@ from ..services.health import (
 )
 from ..services.sync import mark_pending_write, probe
 from ..theme import ACCENT, DIVIDER, PRIMARY, TEXT, TEXT_MUTED
-from .widgets import close_modal, dropdown, form_field, modal, primary_button, snack
+from .widgets import (
+    close_modal,
+    dropdown,
+    form_field,
+    modal,
+    primary_button,
+    snack,
+    tag_chip,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -133,16 +151,188 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
     priority = dropdown("优先级", ["", "低", "中", "高"], todo.priority if todo and todo.priority else "", width=150)
     tags = form_field("标签（逗号分隔）", tags_text(todo.tags) if todo else "", width=260)
 
-    config = parse_config(todo.repeat_config) if todo else {}
+    cfg = normalize_config(parse_config(todo.repeat_config)) if todo else {}
     repeat = dropdown("循环规则", RULE_OPTIONS, REPEAT_LABELS.get(todo.repeat_rule, "不循环") if todo else "不循环", width=160)
-    custom_kind = dropdown(
-        "自定义方式",
-        list(CUSTOM_KIND_LABELS.values()),
-        CUSTOM_KIND_LABELS.get(str(config.get("kind") or ""), CUSTOM_KIND_LABELS["weekly_times"]),
-        width=220,
+
+    # ---- 自定义循环配置（参考「到期重复」面板：每 N 天/周/月/年 + 跳过双休日/节假日）
+    selected: dict = {
+        "weekdays": {
+            int(day) for day in cfg.get("weekdays") or [] if str(day).isdigit()
+        },
+        "month_days": {
+            int(day) for day in cfg.get("month_days") or [] if str(day).isdigit()
+        },
+        "month_last_day": bool(cfg.get("month_last_day")),
+        "month_mode": str(cfg.get("month_mode") or "day"),
+        "year_mode": str(cfg.get("year_mode") or "date"),
+    }
+    if not selected["weekdays"] and todo and todo.due_date is not None:
+        selected["weekdays"] = {todo.due_date.weekday()}
+
+    interval_field = form_field("间隔", str(cfg.get("interval") or 1), width=100)
+    unit_dd = dropdown(
+        "单位", list(UNIT_LABELS.values()), UNIT_LABELS.get(str(cfg.get("unit") or "day"), "天"), width=120
     )
-    custom_times = form_field("每周次数（1-7）", str(config.get("times") or 3), width=140)
-    custom_row = ft.Row([custom_kind, custom_times], spacing=12)
+    skip_weekends_cb = ft.Checkbox(label="跳过双休日", value=bool(cfg.get("skip_weekends")))
+    skip_holidays_cb = ft.Checkbox(label="跳过法定节假日", value=bool(cfg.get("skip_holidays")))
+
+    weekday_row = ft.Row(spacing=6, wrap=True)
+    month_day_row = ft.Row(spacing=6, wrap=True)
+    month_mode_row = ft.Row(spacing=6, wrap=True)
+    year_mode_row = ft.Row(spacing=6, wrap=True)
+
+    month_nth_dd = dropdown(
+        "序次", list(NTH_LABELS.values()),
+        NTH_LABELS.get(str(cfg.get("month_nth") or "first"), "第一个"), width=140,
+    )
+    month_weekday_dd = dropdown(
+        "星期", WEEKDAY_LABELS,
+        WEEKDAY_LABELS[int(cfg.get("month_weekday") or 0) % 7], width=130,
+    )
+    workday_nth_dd = dropdown(
+        "工作日", ["第一个工作日", "最后一个工作日"],
+        "最后一个工作日" if str(cfg.get("month_nth")) == "last" else "第一个工作日", width=180,
+    )
+    year_nth_dd = dropdown(
+        "序次", list(NTH_LABELS.values()),
+        NTH_LABELS.get(str(cfg.get("year_nth") or "first"), "第一个"), width=140,
+    )
+    year_weekday_dd = dropdown(
+        "星期", WEEKDAY_LABELS,
+        WEEKDAY_LABELS[int(cfg.get("year_weekday") or 0) % 7], width=130,
+    )
+    today_ref = todo.due_date if todo and todo.due_date else date.today()
+    year_month_dd = dropdown(
+        "月份", [f"{m}月" for m in range(1, 13)],
+        f"{int(cfg.get('year_month') or today_ref.month)}月", width=110,
+    )
+    year_day_dd = dropdown(
+        "日期", [f"{d}日" for d in range(1, 32)],
+        f"{int(cfg.get('year_day') or today_ref.day)}日", width=110,
+    )
+
+    def render_weekdays() -> None:
+        weekday_row.controls = [
+            tag_chip(
+                WEEKDAY_SHORT[index],
+                index in selected["weekdays"],
+                lambda e, i=index: toggle_weekday(i),
+            )
+            for index in range(7)
+        ]
+
+    def toggle_weekday(index: int) -> None:
+        if index in selected["weekdays"]:
+            selected["weekdays"].discard(index)
+        else:
+            selected["weekdays"].add(index)
+        render_weekdays()
+        weekday_row.update()
+        page.update()
+
+    def render_month_days() -> None:
+        controls: list[ft.Control] = [
+            tag_chip(
+                str(day),
+                day in selected["month_days"],
+                lambda e, d=day: toggle_month_day(d),
+            )
+            for day in range(1, 32)
+        ]
+        controls.append(
+            tag_chip("最后一天", selected["month_last_day"], lambda e: toggle_last_day())
+        )
+        month_day_row.controls = controls
+
+    def toggle_month_day(day: int) -> None:
+        if day in selected["month_days"]:
+            selected["month_days"].discard(day)
+        else:
+            selected["month_days"].add(day)
+        render_month_days()
+        month_day_row.update()
+        page.update()
+
+    def toggle_last_day() -> None:
+        selected["month_last_day"] = not selected["month_last_day"]
+        render_month_days()
+        month_day_row.update()
+        page.update()
+
+    def render_month_modes() -> None:
+        month_mode_row.controls = [
+            tag_chip(label, selected["month_mode"] == mode, lambda e, m=mode: set_month_mode(m))
+            for mode, label in MONTH_MODE_LABELS.items()
+        ]
+
+    def set_month_mode(mode: str) -> None:
+        selected["month_mode"] = mode
+        render_month_modes()
+        update_panels()
+        page.update()
+
+    def render_year_modes() -> None:
+        year_mode_row.controls = [
+            tag_chip(label, selected["year_mode"] == mode, lambda e, m=mode: set_year_mode(m))
+            for mode, label in YEAR_MODE_LABELS.items()
+        ]
+
+    def set_year_mode(mode: str) -> None:
+        selected["year_mode"] = mode
+        render_year_modes()
+        update_panels()
+        page.update()
+
+    render_weekdays()
+    render_month_days()
+    render_month_modes()
+    render_year_modes()
+
+    month_day_panel = ft.Column([month_day_row], spacing=6)
+    month_weekday_panel = ft.Row([month_nth_dd, month_weekday_dd], spacing=12)
+    month_workday_panel = ft.Row([workday_nth_dd], spacing=12)
+    month_panel = ft.Column(
+        [month_mode_row, month_day_panel, month_weekday_panel, month_workday_panel],
+        spacing=8,
+    )
+    year_date_panel = ft.Row([year_month_dd, year_day_dd], spacing=12)
+    year_weekday_panel = ft.Row([year_nth_dd, year_weekday_dd], spacing=12)
+    year_panel = ft.Column([year_mode_row, year_date_panel, year_weekday_panel], spacing=8)
+    weekday_panel = ft.Row([weekday_row], spacing=8)
+
+    custom_panel = ft.Column(
+        [
+            ft.Row([interval_field, unit_dd], spacing=12),
+            weekday_panel,
+            month_panel,
+            year_panel,
+            ft.Row([skip_weekends_cb, skip_holidays_cb], spacing=12, wrap=True),
+        ],
+        spacing=8,
+    )
+
+    panel_holder: dict[str, ft.Container | None] = {"panel": None}
+
+    def update_panels() -> None:
+        unit = UNIT_BY_LABEL.get(unit_dd.value or "天", "day")
+        weekday_panel.visible = unit == "week"
+        month_panel.visible = unit == "month"
+        year_panel.visible = unit == "year"
+        month_mode = selected["month_mode"]
+        month_day_panel.visible = month_mode == "day"
+        month_weekday_panel.visible = month_mode == "weekday"
+        month_workday_panel.visible = month_mode == "workday"
+        year_date_panel.visible = selected["year_mode"] == "date"
+        year_weekday_panel.visible = selected["year_mode"] == "weekday"
+        custom_panel.visible = repeat.value == "自定义"
+        # 展开自定义面板时固定高度并内部滚动，否则「不循环」时弹窗会无故变很高。
+        panel = panel_holder["panel"]
+        if panel is not None:
+            panel.height = 520 if custom_panel.visible else None
+
+    update_panels()
+    repeat.on_select = lambda e: (update_panels(), page.update())
+    unit_dd.on_select = lambda e: (update_panels(), page.update())
 
     remind_days = form_field(
         "提前提醒天数（空=不提醒）",
@@ -150,16 +340,6 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
         width=210,
     )
     remind_time = form_field("提醒时间 HH:MM（可选）", todo.remind_time if todo else "", width=190)
-
-    def sync_custom_visibility() -> None:
-        custom_row.visible = repeat.value == "自定义"
-        custom_times.visible = (
-            custom_row.visible and custom_kind.value == CUSTOM_KIND_LABELS["weekly_times"]
-        )
-
-    sync_custom_visibility()
-    repeat.on_select = lambda e: (sync_custom_visibility(), page.update())
-    custom_kind.on_select = lambda e: (sync_custom_visibility(), page.update())
 
     def on_type_change(e):
         lunar = e.control.value == "农历"
@@ -217,19 +397,58 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
         rule = RULE_BY_LABEL.get(repeat.value or "不循环", "none")
         config_raw = ""
         if rule == "custom":
-            kind = CUSTOM_LABEL_BY_KIND.get(custom_kind.value or "") or "weekly_times"
-            if kind == "weekly_times":
-                try:
-                    times = int((custom_times.value or "3").strip())
-                except ValueError:
-                    snack(page, "每周次数需为 1-7 的数字", "#C97B63")
+            unit = UNIT_BY_LABEL.get(unit_dd.value or "天", "day")
+            try:
+                interval = int((interval_field.value or "1").strip())
+            except ValueError:
+                snack(page, "间隔需为数字", "#C97B63")
+                return
+            if interval < 1:
+                snack(page, "间隔至少为 1", "#C97B63")
+                return
+            custom_config: dict = {"unit": unit, "interval": interval}
+            if skip_weekends_cb.value:
+                custom_config["skip_weekends"] = True
+            if skip_holidays_cb.value:
+                custom_config["skip_holidays"] = True
+            if unit == "week":
+                if not selected["weekdays"]:
+                    snack(page, "请至少选择一个星期", "#C97B63")
                     return
-                if not 1 <= times <= 7:
-                    snack(page, "每周次数需在 1-7 之间", "#C97B63")
-                    return
-                config_raw = serialize_config({"kind": "weekly_times", "times": times})
-            else:
-                config_raw = serialize_config({"kind": kind})
+                custom_config["weekdays"] = sorted(selected["weekdays"])
+            elif unit == "month":
+                mode = selected["month_mode"]
+                custom_config["month_mode"] = mode
+                if mode == "day":
+                    if not selected["month_days"] and not selected["month_last_day"]:
+                        snack(page, "请选择每月日期或「最后一天」", "#C97B63")
+                        return
+                    custom_config["month_days"] = sorted(selected["month_days"])
+                    custom_config["month_last_day"] = bool(selected["month_last_day"])
+                elif mode == "weekday":
+                    custom_config["month_nth"] = NTH_BY_LABEL.get(
+                        month_nth_dd.value or "第一个", "first"
+                    )
+                    custom_config["month_weekday"] = WEEKDAY_INDEX.get(
+                        month_weekday_dd.value or "周一", 0
+                    )
+                else:
+                    custom_config["month_nth"] = (
+                        "last" if (workday_nth_dd.value or "").startswith("最后") else "first"
+                    )
+            elif unit == "year":
+                custom_config["year_mode"] = selected["year_mode"]
+                custom_config["year_month"] = int((year_month_dd.value or "1月").replace("月", ""))
+                if selected["year_mode"] == "date":
+                    custom_config["year_day"] = int((year_day_dd.value or "1日").replace("日", ""))
+                else:
+                    custom_config["year_nth"] = NTH_BY_LABEL.get(
+                        year_nth_dd.value or "第一个", "first"
+                    )
+                    custom_config["year_weekday"] = WEEKDAY_INDEX.get(
+                        year_weekday_dd.value or "周一", 0
+                    )
+            config_raw = serialize_config(custom_config)
         fields = dict(
             title=title.value.strip(),
             note=note.value or "",
@@ -247,24 +466,30 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
         mark_pending_write()
         _close_and_refresh(page, dialog, on_done)
 
-    dialog = modal(
-        page,
-        "编辑待办" if todo else "新增待办",
-        ft.Column(
+    panel = ft.Container(
+        content=ft.Column(
             [
                 title,
                 note,
                 ft.Row([due_type, due, due_time], spacing=12),
                 ft.Row([priority, tags, repeat], spacing=12),
-                custom_row,
+                custom_panel,
                 ft.Row([remind_days, remind_time], spacing=12),
             ],
             spacing=10,
             tight=True,
             scroll=ft.ScrollMode.AUTO,
         ),
+        height=520 if custom_panel.visible else None,
+    )
+    panel_holder["panel"] = panel
+
+    dialog = modal(
+        page,
+        "编辑待办" if todo else "新增待办",
+        panel,
         [ft.TextButton("取消", on_click=lambda e: _close_and_refresh(page, dialog, None)), primary_button("保存", save)],
-        width=620,
+        width=660,
     )
     return dialog
 
