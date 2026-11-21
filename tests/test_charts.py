@@ -30,6 +30,20 @@ class ChartSizeTests(unittest.TestCase):
         )
 
 
+class BarYRangeTests(unittest.TestCase):
+    def test_bar_chart_supports_fixed_y_range(self) -> None:
+        """睡眠柱状图固定 5-12：尺寸稳定，且不同范围不会命中同一张缓存图。"""
+        data = bar_chart(["11-20", "11-21"], [7.2, 0.0], "睡眠时长", y_range=(5, 12))
+        self.assertEqual(
+            _png_size(data),
+            _png_size(bar_chart(["11-20"], [7.2], "睡眠时长", y_range=(5, 12))),
+        )
+        self.assertNotEqual(
+            data,
+            bar_chart(["11-20", "11-21"], [7.2, 0.0], "睡眠时长", y_range=(0, 12)),
+        )
+
+
 class YRangeTests(unittest.TestCase):
     def test_keeps_requested_range_inside_bounds(self) -> None:
         self.assertEqual(_resolve_ylim([60.2, 68.9], (50, 70)), (50, 70))

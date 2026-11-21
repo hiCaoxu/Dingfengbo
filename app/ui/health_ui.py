@@ -251,6 +251,7 @@ def _chart_grid(page: ft.Page, data: dict) -> ft.Control:
 
     exercise_labels, exercise_minutes = daily_buckets(exercises, "minutes")
     diet_labels, diet_calories = daily_buckets(diets, "calories")
+    sleep_labels, sleep_hours = daily_buckets(sleeps, "hours")
 
     width, height = _CHART_W, _CHART_H
     weight_slot = _chart_slot(width, height)
@@ -273,10 +274,12 @@ def _chart_grid(page: ft.Page, data: dict) -> ft.Control:
             width=width, height=height, fit=ft.BoxFit.CONTAIN,
         )
         sleep_slot.content = ft.Image(
-            src=line_chart(
-                labels_of(sleeps),
-                [{"name": "睡眠小时", "values": [s.hours for s in sleeps[-14:]], "color": ACCENT, "fill": True}],
+            # 睡眠改成柱状图：每天一根，无记录的天为 0（固定 5-12 轴下不可见）。
+            src=bar_chart(
+                sleep_labels,
+                sleep_hours,
                 "睡眠时长",
+                ACCENT,
                 cache_key=_key(sleeps),
                 y_range=(5, 12),
             ),

@@ -150,14 +150,20 @@ def bar_chart(
     title: str = "",
     color: str = PRIMARY,
     cache_key: Any = None,
+    y_range: tuple[float, float] | None = None,
 ) -> bytes:
     """柱状图 PNG bytes；``cache_key`` 契约同 :func:`line_chart`。
 
     画布尺寸与横轴范围都固定：柱子数量变化时单根柱子的宽度不变，
     四张图在 2×2 网格里也保持同一像素尺寸。
+
+    ``y_range`` 为**严格**纵轴范围（不做越界扩展）：柱状图里 0 代表「当天无记录」，
+    落在轴外正好不显示；若数据超出范围也按范围裁切，保持刻度稳定可比。
     """
     key_values = tuple(float(value) for value in values)
-    key = (cache_key, title, color) if cache_key is not None else (tuple(labels), key_values, title, color)
+    key = (cache_key, title, color, y_range) if cache_key is not None else (
+        tuple(labels), key_values, title, color, y_range
+    )
     cached = _cache_get(key)
     if cached is not None:
         return cached
@@ -170,6 +176,8 @@ def bar_chart(
         # 固定横轴边界：否则只有几天数据时 matplotlib 会把少数柱子拉宽填满画布。
         ax.set_xlim(-0.5, max(len(key_values), 1) - 0.5)
         _style(ax)
+        if y_range is not None:
+            ax.set_ylim(float(y_range[0]), float(y_range[1]))
         if len(labels) > 7:
             ax.tick_params(axis="x", labelrotation=45, labelsize=8)
         if title:
