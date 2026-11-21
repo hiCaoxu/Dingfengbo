@@ -14,7 +14,7 @@ from ..services.ai.provider import AIError
 from ..theme import ACCENT, CARD, DIVIDER, PRIMARY, PRIMARY_LIGHT, TEXT, TEXT_MUTED, card_border
 from .forms import open_settings_dialog
 from .state import state
-from .widgets import dismiss, primary_button, snack
+from .widgets import dismiss, open_dialog, primary_button, snack
 
 logger = logging.getLogger(__name__)
 
@@ -238,9 +238,7 @@ def build(page: ft.Page, refresh) -> ft.Control:
             ],
             actions_alignment=ft.MainAxisAlignment.END,
         )
-        page.overlay.append(dialog)
-        dialog.open = True
-        page.update()
+        open_dialog(page, dialog)
 
     def send(_) -> None:
         text = (input_field.value or "").strip()

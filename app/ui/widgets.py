@@ -150,6 +150,17 @@ def delete_with_confirm(
     confirm(page, message, action)
 
 
+def open_dialog(page: ft.Page, dialog: ft.Control) -> None:
+    """显示弹窗：优先走 Flet 0.86 的受管 dialog 栈，老版本退回 overlay。"""
+    opener = getattr(page, "show_dialog", None)
+    if callable(opener):
+        opener(dialog)
+        return
+    page.overlay.append(dialog)
+    dialog.open = True
+    page.update()
+
+
 def confirm(page: ft.Page, message: str, on_confirm: Callable) -> None:
     def close(_):
         dismiss(page, dialog)
@@ -167,9 +178,7 @@ def confirm(page: ft.Page, message: str, on_confirm: Callable) -> None:
         ],
         actions_alignment=ft.MainAxisAlignment.END,
     )
-    page.overlay.append(dialog)
-    dialog.open = True
-    page.update()
+    open_dialog(page, dialog)
 
 
 def section_header(text: str, action: ft.Control | None = None) -> ft.Row:
@@ -219,30 +228,23 @@ def modal(page: ft.Page, title: str, body: ft.Control, actions: list[ft.Control]
         actions_alignment=ft.MainAxisAlignment.END,
         shape=ft.RoundedRectangleBorder(radius=12),
     )
-    page.overlay.append(dialog)
-    dialog.open = True
-    page.update()
+    open_dialog(page, dialog)
     return dialog
 
 
 def dismiss(page: ft.Page, dialog: ft.Control) -> None:
-    """关闭弹窗并把它移出 ``page.overlay``。
+    """关闭弹窗：只置 ``open = False`` 并 update，**不要**手动从 overlay 移除。
 
-    只置 ``open = False`` 会把隐藏的 AlertDialog 永久留在 overlay 里，
-    每次开窗都新增一个，长期使用后控件树与增量消息持续膨胀。
+    Flet 0.86 的弹窗关闭由 Flutter 侧动画驱动，官方实现（``Page.pop_dialog`` /
+    ``_wrap_dialog_on_dismiss``）也只在 ``on_dismiss`` 回调里把控件移出栈；
+    在关闭的同一帧删除控件会丢掉 dismiss 回调，表现为「点了取消/保存但弹窗不关」。
+    走 ``show_dialog`` 打开时，控件会在 dismiss 后由 Flet 自动从栈中清理。
     """
     try:
         dialog.open = False
     except Exception:
         logger.debug("设置弹窗关闭状态失败", exc_info=True)
-    try:
-        # Flet 控件按值比较（`==` 相等），必须按身份移除，否则可能误删参数相同的另一个弹窗。
-        for index, control in enumerate(page.overlay):
-            if control is dialog:
-                del page.overlay[index]
-                break
-    except Exception:
-        logger.debug("弹窗移出 overlay 失败", exc_info=True)
+        return
     page.update()
 
 

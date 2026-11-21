@@ -1,7 +1,7 @@
 """UI 助手组件测试：弹窗生命周期与后台查询槽。
 
 用极简 FakePage 替代真实 Flet 页面：``run_thread``/``run_task`` 同步执行，
-使后台化逻辑可以在无 GUI 环境下断言。
+使后台化与弹窗逻辑可以在无 GUI 环境下断言。
 """
 
 from __future__ import annotations
@@ -12,13 +12,15 @@ import unittest
 import flet as ft
 
 from app.ui.async_utils import background_section
-from app.ui.widgets import close_modal, confirm, modal
+from app.ui.widgets import close_modal, confirm, modal, open_dialog
 
 
 def _walk(control):
-    """遍历控件树（含 content 与 controls），用于断言错误占位的内容。"""
+    """遍历控件树（含 content / controls / actions），用于断言占位内容。"""
     yield control
     for child in getattr(control, "controls", None) or []:
+        yield from _walk(child)
+    for child in getattr(control, "actions", None) or []:
         yield from _walk(child)
     content = getattr(control, "content", None)
     if content is not None and not isinstance(content, str):
@@ -26,13 +28,23 @@ def _walk(control):
 
 
 class FakePage:
+    """模拟 Flet 0.86 的受管 dialog 栈（page.show_dialog）。"""
+
     def __init__(self) -> None:
         self.overlay: list = []
+        self.dialogs: list = []
         self.snack_bar = None
         self.updates = 0
 
     def update(self) -> None:
         self.updates += 1
+
+    def show_dialog(self, dialog) -> None:
+        if dialog in self.dialogs:
+            raise RuntimeError("Dialog is already opened")
+        dialog.open = True
+        self.dialogs.append(dialog)
+        self.update()
 
     def run_thread(self, handler) -> None:
         handler()
@@ -42,47 +54,64 @@ class FakePage:
         asyncio.run(coro)
 
 
-class ModalLifecycleTests(unittest.TestCase):
-    def test_modal_is_appended_and_removed_on_close(self) -> None:
+class LegacyPage(FakePage):
+    """模拟 0.86 之前没有 show_dialog 的 Flet：退回 overlay 方案。"""
+
+    show_dialog = None
+
+
+class DialogLifecycleTests(unittest.TestCase):
+    def test_modal_uses_managed_stack_when_available(self) -> None:
         page = FakePage()
         dialog = modal(page, "标题", ft.Text("内容"), [])
-        self.assertIn(dialog, page.overlay)
         self.assertTrue(dialog.open)
+        self.assertIn(dialog, page.dialogs)
+        self.assertEqual(page.overlay, [])
+
+    def test_dismiss_closes_without_unmounting(self) -> None:
+        """关闭只置 open=False：提前从栈里删除会丢掉 Flet 的 dismiss 回调，导致关不掉。"""
+        page = FakePage()
+        dialog = modal(page, "标题", ft.Text("内容"), [])
+        before = page.updates
 
         close_modal(page, dialog)
         self.assertFalse(dialog.open)
-        self.assertFalse(any(control is dialog for control in page.overlay))
+        self.assertIn(dialog, page.dialogs)
+        self.assertEqual(page.updates, before + 1)
 
-    def test_dismiss_removes_only_the_target_dialog(self) -> None:
-        """Flet 控件按值相等，关闭时应按身份移除，不能误删参数相同的另一个弹窗。"""
-        page = FakePage()
-        first = modal(page, "标题", ft.Text("内容"), [])
-        second = modal(page, "标题", ft.Text("内容"), [])
-        self.assertEqual(first, second)  # 值相等，正是容易踩坑的场景
-
-        close_modal(page, first)
-        self.assertFalse(any(control is first for control in page.overlay))
-        self.assertTrue(any(control is second for control in page.overlay))
-        self.assertTrue(second.open)
-
-    def test_repeated_close_is_safe(self) -> None:
+    def test_repeated_dismiss_is_safe(self) -> None:
         page = FakePage()
         dialog = modal(page, "标题", ft.Text("内容"), [])
         close_modal(page, dialog)
-        before = page.updates
-        close_modal(page, dialog)  # 已不在 overlay 中，不应抛异常
-        self.assertEqual(page.updates, before + 1)
-        self.assertEqual(page.overlay, [])
+        close_modal(page, dialog)
+        self.assertFalse(dialog.open)
 
-    def test_confirm_dialog_does_not_leave_overlay_residue(self) -> None:
+    def test_confirm_cancel_closes_dialog(self) -> None:
         page = FakePage()
         triggered: list[bool] = []
         confirm(page, "确定删除？", lambda: triggered.append(True))
-        dialog = page.overlay[-1]
-        cancel = dialog.actions[0]
-        cancel.on_click(None)
-        self.assertNotIn(dialog, page.overlay)
+        dialog = page.dialogs[-1]
+
+        dialog.actions[0].on_click(None)
+        self.assertFalse(dialog.open)
         self.assertEqual(triggered, [])
+
+    def test_confirm_accept_runs_action_and_closes(self) -> None:
+        page = FakePage()
+        triggered: list[bool] = []
+        confirm(page, "确定删除？", lambda: triggered.append(True))
+        dialog = page.dialogs[-1]
+
+        dialog.actions[1].on_click(None)
+        self.assertFalse(dialog.open)
+        self.assertEqual(triggered, [True])
+
+    def test_open_dialog_falls_back_to_overlay(self) -> None:
+        page = LegacyPage()
+        dialog = ft.AlertDialog(title=ft.Text("标题"))
+        open_dialog(page, dialog)
+        self.assertTrue(dialog.open)
+        self.assertIn(dialog, page.overlay)
 
 
 class BackgroundSectionTests(unittest.TestCase):
