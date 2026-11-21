@@ -52,18 +52,19 @@ class LifeServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         reset_db()
 
-    def test_add_toggle_delete(self) -> None:
-        event_id = life.add_event("写完一本书")
+    def test_add_update_delete(self) -> None:
+        event_id = life.add_event("写完一本书", target_date=date(2026, 5, 1))
         self.assertIsNotNone(event_id)
         self.assertEqual([row["title"] for row in life.list_events()], ["写完一本书"])
 
-        self.assertTrue(life.toggle_event(event_id))
+        self.assertTrue(life.update_event(event_id, "带父母去旅行", date(2027, 3, 8)))
         row = life.list_events()[0]
-        self.assertTrue(row["done"])
-        self.assertIsNotNone(row["done_at"])
+        self.assertEqual(row["title"], "带父母去旅行")
+        self.assertEqual(row["target_date"], date(2027, 3, 8))
 
-        self.assertFalse(life.toggle_event(event_id))
-        self.assertFalse(life.list_events()[0]["done"])
+        # 日期可以清空
+        self.assertTrue(life.update_event(event_id, "带父母去旅行", None))
+        self.assertIsNone(life.list_events()[0]["target_date"])
 
         self.assertTrue(life.delete_event(event_id))
         self.assertEqual(life.list_events(), [])
@@ -72,28 +73,37 @@ class LifeServiceTests(unittest.TestCase):
         self.assertIsNone(life.add_event("   "))
         self.assertEqual(life.list_events(), [])
 
+    def test_update_rejects_empty_title_or_missing_id(self) -> None:
+        event_id = life.add_event("写完一本书")
+        self.assertFalse(life.update_event(event_id, "   ", None))
+        self.assertFalse(life.update_event("nope", "标题", None))
+        self.assertFalse(life.delete_event("nope"))
+
     def test_title_is_capped_at_fifteen_chars(self) -> None:
         event_id = life.add_event("一" * 40)
         self.assertIsNotNone(event_id)
         self.assertEqual(life.list_events()[0]["title"], "一" * 15)
+
+    def test_parse_target_date(self) -> None:
+        self.assertIsNone(life.parse_target_date(""))
+        self.assertIsNone(life.parse_target_date("   "))
+        self.assertEqual(life.parse_target_date("2026-11-21"), date(2026, 11, 21))
+        for bad in ("2026-1-1", "2026/11/21", "2026-13-01", "2026-02-30", "明天"):
+            with self.assertRaises(ValueError, msg=bad):
+                life.parse_target_date(bad)
 
     def test_order_is_target_date_desc(self) -> None:
         today = date.today()
         life.add_event("无日期")
         life.add_event("年底的目标", target_date=today + timedelta(days=30))
         life.add_event("本月目标", target_date=today + timedelta(days=3))
-        done_id = life.add_event("已完成")
-        life.toggle_event(done_id)
+        life.add_event("没定日子")
 
         # 有日期的按日期新的在上；没日期的沉底，按创建时间倒序
         self.assertEqual(
             [row["title"] for row in life.list_events()],
-            ["年底的目标", "本月目标", "已完成", "无日期"],
+            ["年底的目标", "本月目标", "没定日子", "无日期"],
         )
-
-    def test_toggle_missing_returns_none(self) -> None:
-        self.assertIsNone(life.toggle_event("nope"))
-        self.assertFalse(life.delete_event("nope"))
 
 
 class DiaryLayoutTests(unittest.TestCase):
@@ -120,22 +130,10 @@ class DiaryLayoutTests(unittest.TestCase):
         self.assertTrue(fields[0].expand)
         self.assertEqual(fields[0].value, "今天状态不错")
 
-    def test_life_panel_renders_events_and_add_button(self) -> None:
+    def test_life_panel_renders_events_with_edit_and_delete(self) -> None:
         events = [
-            {
-                "id": "e1",
-                "title": "带父母去旅行",
-                "done": False,
-                "done_at": None,
-                "target_date": date(2026, 5, 1),
-            },
-            {
-                "id": "e2",
-                "title": "写完一本书",
-                "done": True,
-                "done_at": None,
-                "target_date": None,
-            },
+            {"id": "e1", "title": "带父母去旅行", "target_date": date(2026, 5, 1)},
+            {"id": "e2", "title": "写完一本书", "target_date": None},
         ]
         _, _, life_panel = self._row(events).controls
         texts = [c.value for c in walk(life_panel) if isinstance(c, ft.Text)]
@@ -144,8 +142,29 @@ class DiaryLayoutTests(unittest.TestCase):
         self.assertIn("写完一本书", texts)
         self.assertIn("2026-05-01", texts)
         self.assertIn("未定", texts)
-        # 不再有勾选框，改为点击标题切换完成
+        # 没有勾选框，也没有"点击标题切换完成"的入口
         self.assertEqual([c for c in walk(life_panel) if isinstance(c, ft.Checkbox)], [])
+        # 每行一个编辑 + 一个删除按钮
+        buttons = [c for c in walk(life_panel) if isinstance(c, ft.IconButton)]
+        tooltips = [b.tooltip for b in buttons]
+        self.assertEqual(tooltips.count("编辑"), 2)
+        self.assertEqual(tooltips.count("删除"), 2)
+        self.assertIn("新增人生大事", tooltips)
+
+    def test_life_title_is_not_truncated(self) -> None:
+        long_title = "十五个字以内的人生大事标题"
+        events = [{"id": "e1", "title": long_title, "target_date": None}]
+        _, _, life_panel = self._row(events).controls
+        titles = [
+            c
+            for c in walk(life_panel)
+            if isinstance(c, ft.Text) and c.value == long_title
+        ]
+        self.assertEqual(len(titles), 1)
+        # 完整换行显示：不限制行数、不省略
+        self.assertIsNone(titles[0].max_lines)
+        self.assertNotEqual(titles[0].overflow, ft.TextOverflow.ELLIPSIS)
+        self.assertEqual([c for c in walk(life_panel) if getattr(c, "tooltip", "") == "点击标记完成 / 取消完成"], [])
 
     def test_editor_shows_inserted_images(self) -> None:
         payload = _payload()
@@ -153,6 +172,46 @@ class DiaryLayoutTests(unittest.TestCase):
         _, editor, _ = diary._render(self.page, lambda: None, payload).controls[1].controls
         images = [c for c in walk(editor) if isinstance(c, ft.Image)]
         self.assertEqual([image.src for image in images], ["http://h/files/a.jpg"])
+
+    def _open_add_dialog(self, panel) -> ft.AlertDialog:
+        add_button = [
+            c
+            for c in walk(panel)
+            if isinstance(c, ft.IconButton) and c.tooltip == "新增人生大事"
+        ][0]
+        add_button.on_click(None)
+        return self.page.dialogs[-1]
+
+    def test_add_dialog_saves_manual_date(self) -> None:
+        refreshed: list[int] = []
+        panel = diary._life_panel(self.page, lambda: refreshed.append(1), [])
+        dialog = self._open_add_dialog(panel)
+        fields = [c for c in walk(dialog.content) if isinstance(c, ft.TextField)]
+        self.assertEqual(len(fields), 2)
+
+        fields[0].value = "带父母去旅行"
+        fields[1].value = "2026-05-01"
+        dialog.actions[1].on_click(None)
+
+        rows = life.list_events()
+        self.assertEqual([row["title"] for row in rows], ["带父母去旅行"])
+        self.assertEqual(rows[0]["target_date"], date(2026, 5, 1))
+        self.assertFalse(dialog.open)
+        self.assertEqual(refreshed, [1])
+
+    def test_add_dialog_rejects_bad_date_format(self) -> None:
+        panel = diary._life_panel(self.page, lambda: None, [])
+        dialog = self._open_add_dialog(panel)
+        fields = [c for c in walk(dialog.content) if isinstance(c, ft.TextField)]
+
+        fields[0].value = "带父母去旅行"
+        fields[1].value = "2026-5-1"
+        dialog.actions[1].on_click(None)
+
+        self.assertEqual(life.list_events(), [])
+        self.assertTrue(dialog.open)
+        texts = [c.value for c in walk(dialog.content) if isinstance(c, ft.Text)]
+        self.assertIn("日期格式应为 YYYY-MM-DD，例如 2026-11-21", texts)
 
     def test_life_panel_empty_state(self) -> None:
         _, _, life_panel = self._row().controls

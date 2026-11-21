@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import threading
-from datetime import date, datetime
+from datetime import date
 
 import flet as ft
 from sqlalchemy import func, or_, select
@@ -12,7 +12,7 @@ from sqlalchemy import func, or_, select
 from ..db.models import Diary
 from ..db.repo import update
 from ..db.session import session_scope
-from ..icons import ACTIONS, ico
+from ..icons import ACTIONS
 from ..services import life
 from ..services.dates import diary_title, iso_week, month_grid, shift_month
 from ..services.diary import ensure_diary
@@ -127,40 +127,16 @@ def _editor(page: ft.Page, data: dict, refresh) -> ft.Control:
 
 
 def _life_panel(page: ft.Page, refresh, events: list[dict]) -> ft.Control:
-    """人生大事：长期目标清单，宽度固定是编辑区的一半（用 expand 1:2 实现）。"""
+    """人生大事：只做新增 / 编辑 / 删除，按日期倒序展示，宽度是编辑区的一半。"""
 
-    def add_dialog(_) -> None:
-        chosen: dict[str, date] = {"value": date.today()}
-        date_label = ft.Text(chosen["value"].isoformat(), size=11, color=th.TEXT)
+    def form_dialog(event: dict | None = None) -> None:
+        """新增与编辑共用同一个对话框；``event`` 为 None 表示新增。"""
+        editing = event is not None
+        target = event.get("target_date") if event else None
 
-        picker = ft.DatePicker(
-            value=chosen["value"],
-            first_date=date(1950, 1, 1),
-            last_date=date(2100, 12, 31),
-            help_text="选择日期",
-            cancel_text="取消",
-            confirm_text="确定",
-            on_change=lambda e: pick_date(),
-        )
-
-        def pick_date() -> None:
-            value = picker.value
-            if value is None:
-                return
-            chosen["value"] = value.date() if isinstance(value, datetime) else value
-            date_label.value = chosen["value"].isoformat()
-            date_label.update()
-
-        def open_picker(e) -> None:
-            page.show_dialog(picker)
-
-        def submit() -> None:
-            if life.add_event(field.value or "", chosen["value"]):
-                dismiss(page, dialog)
-                refresh()
-
-        field = ft.TextField(
-            hint_text="15 字以内，比如：写完一本书",
+        title_field = ft.TextField(
+            value=event["title"] if event else "",
+            label="事件（15 字以内）",
             autofocus=True,
             max_length=life.MAX_TITLE,
             border_color=th.DIVIDER,
@@ -169,39 +145,51 @@ def _life_panel(page: ft.Page, refresh, events: list[dict]) -> ft.Control:
             text_style=ft.TextStyle(size=12, color=th.TEXT),
             on_submit=lambda e: submit(),
         )
+        date_field = ft.TextField(
+            value=target.isoformat() if target else "",
+            label="日期（YYYY-MM-DD，可留空）",
+            hint_text="2026-11-21",
+            border_color=th.DIVIDER,
+            focused_border_color=th.PRIMARY,
+            color=th.TEXT,
+            text_style=ft.TextStyle(size=12, color=th.TEXT),
+            on_submit=lambda e: submit(),
+        )
+        error_text = ft.Text("", size=10, color=th.DANGER)
+
+        def submit() -> None:
+            title = (title_field.value or "").strip()
+            if not title:
+                error_text.value = "事件不能为空"
+                page.update()
+                return
+            try:
+                day = life.parse_target_date(date_field.value or "")
+            except ValueError as exc:
+                error_text.value = str(exc)
+                page.update()
+                return
+            saved = (
+                life.update_event(event["id"], title, day)
+                if editing
+                else life.add_event(title, day)
+            )
+            if saved:
+                dismiss(page, dialog)
+                refresh()
 
         dialog = modal(
             page,
-            "新增人生大事",
-            ft.Column(
-                [
-                    field,
-                    ft.Row(
-                        [
-                            ft.OutlinedButton(
-                                "选择日期",
-                                icon=ico(ACTIONS["calendar"]),
-                                on_click=open_picker,
-                            ),
-                            date_label,
-                        ],
-                        spacing=8,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    ft.Text("回车或点「添加」保存", size=10, color=th.TEXT_MUTED),
-                ],
-                spacing=10,
-                tight=True,
-            ),
+            "编辑人生大事" if editing else "新增人生大事",
+            ft.Column([title_field, date_field, error_text], spacing=10, tight=True),
             [
                 ft.TextButton("取消", on_click=lambda e: dismiss(page, dialog)),
-                primary_button("添加", lambda e: submit()),
+                primary_button("保存" if editing else "添加", lambda e: submit()),
             ],
             width=420,
         )
 
     def row(event: dict) -> ft.Control:
-        done = bool(event["done"])
         target = event.get("target_date")
         return ft.Row(
             [
@@ -211,32 +199,18 @@ def _life_panel(page: ft.Page, refresh, events: list[dict]) -> ft.Control:
                         size=10,
                         color=th.TEXT_MUTED,
                     ),
-                    width=70,
+                    width=74,
                 ),
-                ft.Container(
-                    content=ft.Text(
-                        event["title"],
-                        size=12,
-                        max_lines=1,
-                        overflow=ft.TextOverflow.ELLIPSIS,
-                        expand=True,
-                        style=(
-                            ft.TextStyle(color=th.TEXT_MUTED, decoration=ft.TextDecoration.LINE_THROUGH)
-                            if done
-                            else ft.TextStyle(color=th.TEXT)
-                        ),
-                    ),
-                    expand=True,
-                    on_click=lambda e, i=event["id"]: (life.toggle_event(i), refresh()),
-                    tooltip="点击标记完成 / 取消完成",
-                ),
+                # 不设 max_lines / overflow：标题完整换行显示，不出现省略号
+                ft.Text(event["title"], size=12, color=th.TEXT, expand=True),
+                icon_button(ACTIONS["edit"], lambda e, ev=event: form_dialog(ev), "编辑"),
                 icon_button(
                     ACTIONS["delete"],
                     lambda e, i=event["id"]: (life.delete_event(i), refresh()),
                     "删除",
                 ),
             ],
-            spacing=4,
+            spacing=2,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
 
@@ -248,7 +222,7 @@ def _life_panel(page: ft.Page, refresh, events: list[dict]) -> ft.Control:
     return card(
         ft.Column([divider(), body], spacing=6, expand=True),
         title="人生大事",
-        trailing=icon_button(ACTIONS["add"], add_dialog, "新增人生大事"),
+        trailing=icon_button(ACTIONS["add"], lambda e: form_dialog(), "新增人生大事"),
         expand=1,
     )
 
