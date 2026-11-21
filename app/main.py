@@ -203,7 +203,7 @@ def main(page: ft.Page) -> None:
                 syncing["value"] = False
                 refresh_status()
                 if sync_client.status.startswith("已同步"):
-                    refresh()  # 拉取到新数据后刷新当前模块
+                    refresh(force=False)  # 拉取到新数据后刷新当前模块（笔记编辑页除外）
                 else:
                     page.update()
 
@@ -275,8 +275,12 @@ def main(page: ft.Page) -> None:
         state["preview_note"] = note
         navigate("note_preview")
 
-    def refresh() -> None:
+    def refresh(force: bool = True) -> None:
         current = state["current"]
+        if not force and current == "note_preview":
+            # 后台同步完成不做整页重建：编辑页被重建会用控件初值覆盖正在输入的内容。
+            page.update()
+            return
         if current == "home":
             body.content = home.build(page, refresh, open_diary_day, open_note_preview)
         elif current == "todo":
@@ -314,7 +318,7 @@ def main(page: ft.Page) -> None:
         )
     )
     refresh()
-    bind_sync(page, refresh_status, refresh)
+    bind_sync(page, refresh_status, lambda: refresh(force=False))
 
 
 def run() -> None:

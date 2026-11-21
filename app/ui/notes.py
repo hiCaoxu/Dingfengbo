@@ -33,12 +33,37 @@ _preview_timer: threading.Timer | None = None
 # 每次打开笔记自增；在途的旧渲染（timer 已触发、协程已入队）据此作废。
 _preview_generation = 0
 
+# 自动保存：编辑页原先只在 on_blur 落库，输入期间若页面被重建（同步完成会整页刷新）
+# 或用 Ctrl+W 关闭窗口，未失焦的内容就会丢。这里按停顿自动落库。
+_AUTOSAVE_DEBOUNCE_MS = 700
+_autosave_timer: threading.Timer | None = None
+
 
 def _cancel_preview_timer() -> None:
     global _preview_timer
     if _preview_timer is not None:
         _preview_timer.cancel()
         _preview_timer = None
+
+
+def _cancel_autosave_timer() -> None:
+    global _autosave_timer
+    if _autosave_timer is not None:
+        _autosave_timer.cancel()
+        _autosave_timer = None
+
+
+def _note_snapshot(note: Note) -> tuple[str, str, str, str]:
+    """编辑页一律以数据库最新值为准（id/title/content/tags）。
+
+    同步完成会触发整页刷新并重建编辑页；若用打开笔记时的对象快照渲染，
+    重建就会把用户刚输入的内容覆盖回旧值——这是「写着写着内容消失」的根因。
+    """
+    with session_scope() as session:
+        fresh = session.get(Note, note.id)
+        if fresh is not None:
+            return fresh.id, fresh.title, fresh.content, fresh.tags
+    return note.id, note.title, note.content, note.tags
 
 
 def _code_block(code: str, lang: str) -> ft.Control:
@@ -119,29 +144,30 @@ def render_markdown(markdown: str) -> ft.Control:
     return render_blocks(parse(markdown or ""))
 
 
-def save_content(note_id: str, value: str) -> None:
+def _save_fields(note_id: str, **fields) -> bool:
+    """只在值真的变化时写库并标脏，避免自动保存反复推高 updated_at、产生无意义同步。"""
     with session_scope() as session:
         note = session.get(Note, note_id)
-        if note:
-            update(session, note, content=value)
+        if note is None:
+            return False
+        if all(getattr(note, key) == value for key, value in fields.items()):
+            return False
+        update(session, note, **fields)
     mark_pending_write()
+    return True
+
+
+def save_content(note_id: str, value: str) -> None:
+    _save_fields(note_id, content=value)
 
 
 def save_title(note_id: str, value: str) -> None:
-    with session_scope() as session:
-        note = session.get(Note, note_id)
-        if note:
-            update(session, note, title=value)
-    mark_pending_write()
+    _save_fields(note_id, title=value)
 
 
 def save_tags(note_id: str, value: str) -> None:
     parts = [p.strip() for p in (value or "").replace("，", ",").split(",") if p.strip()]
-    with session_scope() as session:
-        note = session.get(Note, note_id)
-        if note:
-            update(session, note, tags=json.dumps(parts, ensure_ascii=False))
-    mark_pending_write()
+    _save_fields(note_id, tags=json.dumps(parts, ensure_ascii=False))
 
 
 def _parse_tags(raw: str) -> list[str]:
@@ -186,14 +212,31 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
     generation = _preview_generation
     # 切换笔记时立即作废上一篇的在途渲染，否则旧正文会被写进新笔记的预览区。
     _cancel_preview_timer()
+    _cancel_autosave_timer()
+    note_id, title_text, content_text, tags_raw = _note_snapshot(note)
+
+    def _autosave() -> None:
+        """一次把三个字段都落库：单字段定时器会互相取消，最后一个赢，前面的改动就丢了。"""
+        save_title(note_id, title_field.value or "")
+        save_tags(note_id, tags_field.value or "")
+        save_content(note_id, source.value or "")
+
+    def _schedule_save() -> None:
+        global _autosave_timer
+        _cancel_autosave_timer()
+        _autosave_timer = threading.Timer(_AUTOSAVE_DEBOUNCE_MS / 1000, _autosave)
+        _autosave_timer.daemon = True
+        _autosave_timer.start()
+
     title_field = ft.TextField(
-        value=note.title,
+        value=title_text,
         border=ft.InputBorder.NONE,
         border_width=0,
         filled=False,
         color=TEXT,
         text_style=ft.TextStyle(size=16, color=TEXT, weight="bold"),
-        on_blur=lambda e: save_title(note.id, e.control.value or ""),
+        on_change=lambda e: _schedule_save(),
+        on_blur=lambda e: save_title(note_id, e.control.value or ""),
     )
     with session_scope() as session:
         # 只为标签补全取 tags 列，避免把全部正文搬进内存。
@@ -201,15 +244,18 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
             session.scalars(select(Note.tags).where(Note.is_deleted.is_(False))).all()
         )
     tags_field = ft.TextField(
-        value=tags_text(note.tags),
+        value=tags_text(tags_raw),
         border=ft.InputBorder.NONE,
         border_width=0,
         filled=False,
         color=TEXT_MUTED,
         text_style=ft.TextStyle(size=11, color=TEXT_MUTED),
         hint_text="标签（逗号分隔，路径用 /）",
-        on_change=lambda e: _on_tags_change(e.control.value or ""),
-        on_blur=lambda e: save_tags(note.id, e.control.value or ""),
+        on_change=lambda e: (
+            _schedule_save(),
+            _on_tags_change(e.control.value or ""),
+        ),
+        on_blur=lambda e: save_tags(note_id, e.control.value or ""),
     )
     suggestion_row = ft.Row([], wrap=True, spacing=6)
 
@@ -239,13 +285,15 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
             base = ""
         tags_field.value = (base + " " + suggestion).strip()
         tags_field.update()
+        # Flet 里直接赋 value 不会触发 on_change，这里补一次落库。
+        _schedule_save()
         suggestion_row.controls = []
         suggestion_row.visible = False
         suggestion_row.update()
         page.update()
-    _preview = ft.Container(content=render_markdown(note.content), expand=True)
+    _preview = ft.Container(content=render_markdown(content_text), expand=True)
     source = ft.TextField(
-        value=note.content,
+        value=content_text,
         multiline=True,
         expand=True,
         border=ft.InputBorder.NONE,
@@ -254,8 +302,11 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
         color=TEXT,
         text_style=ft.TextStyle(size=12, color=TEXT, font_family="Consolas", height=1.5),
         hint_text="输入 Markdown，右侧实时预览；代码块使用 ```python 语法",
-        on_change=lambda e: _update_preview(e.control.value or ""),
-        on_blur=lambda e: save_content(note.id, e.control.value or ""),
+        on_change=lambda e: (
+            _schedule_save(),
+            _update_preview(e.control.value or ""),
+        ),
+        on_blur=lambda e: save_content(note_id, e.control.value or ""),
     )
 
     def _render_preview(value: str, generation: int) -> None:
@@ -298,9 +349,17 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
         _preview_timer.daemon = True
         _preview_timer.start()
 
+    def go_back(e) -> None:
+        # 返回前先落库：on_blur 在控件被替换时不一定触发，别指望它。
+        _cancel_autosave_timer()
+        save_title(note_id, title_field.value or "")
+        save_tags(note_id, tags_field.value or "")
+        save_content(note_id, source.value or "")
+        on_back(e)
+
     return ft.Column(
         [
-            section_header("编辑笔记", ft.TextButton("返回", on_click=on_back)),
+            section_header("编辑笔记", ft.TextButton("返回", on_click=go_back)),
             card(
                 ft.Column(
                     [
