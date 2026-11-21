@@ -119,7 +119,8 @@ def open_rule_form(page: ft.Page, rule=None, on_done=None) -> ft.AlertDialog:
                       "每周" if rule and rule.period == "week" else "每月", width=120)
     day = form_field("执行日（1-31 或周几 1-7）", str(rule.day) if rule else "1", width=200)
     account = dropdown("账户", list(account_options) or ["（无账户）"], current_account, width=220)
-    active = ft.Checkbox(label="启用", value=bool(rule.active) if rule else True)
+    active = ft.Checkbox(label="启用", value=bool(rule.active) if rule else True,
+                         label_style=th.checkbox_label_style())
     note = form_field("备注", rule.note if rule else "")
 
     def save(_) -> None:

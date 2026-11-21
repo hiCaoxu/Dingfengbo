@@ -294,6 +294,7 @@ def open_sync_detail(page: ft.Page, refresh_status=None) -> ft.AlertDialog:
                     label=table_label(table),
                     value=table in selected,
                     data=table,
+                    label_style=th.checkbox_label_style(),
                 )
             )
         controls: list[ft.Control] = [

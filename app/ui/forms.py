@@ -184,8 +184,10 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
     unit_dd = dropdown(
         "单位", list(UNIT_LABELS.values()), UNIT_LABELS.get(str(cfg.get("unit") or "day"), "天"), width=120
     )
-    skip_weekends_cb = ft.Checkbox(label="跳过双休日", value=bool(cfg.get("skip_weekends")))
-    skip_holidays_cb = ft.Checkbox(label="跳过法定节假日", value=bool(cfg.get("skip_holidays")))
+    skip_weekends_cb = ft.Checkbox(label="跳过双休日", value=bool(cfg.get("skip_weekends")),
+                                   label_style=th.checkbox_label_style())
+    skip_holidays_cb = ft.Checkbox(label="跳过法定节假日", value=bool(cfg.get("skip_holidays")),
+                                   label_style=th.checkbox_label_style())
 
     weekday_row = ft.Row(spacing=6, wrap=True)
     month_day_row = ft.Row(spacing=6, wrap=True)
@@ -922,16 +924,19 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
     token.can_reveal_password = True
     height = form_field("身高 cm", str(settings.get("height_cm", DEFAULT_HEIGHT_CM)))
     gender = dropdown("性别", ["男", "女"], settings.get("gender", "男"))
-    enabled = ft.Checkbox(label="启用自动同步", value=bool(settings.get("sync_enabled", True)))
+    enabled = ft.Checkbox(label="启用自动同步", value=bool(settings.get("sync_enabled", True)),
+                          label_style=th.checkbox_label_style())
 
     # ---- 外观与系统集成
     theme_dd = dropdown("主题", ["亮色", "暗色"],
                         "暗色" if settings.get("theme_mode") == "dark" else "亮色", width=140)
     autostart = ft.Checkbox(label="开机自启（Windows）",
-                            value=bool(settings.get("autostart", False)))
+                            value=bool(settings.get("autostart", False)),
+                            label_style=th.checkbox_label_style())
     close_to_tray = ft.Checkbox(
         label="关闭窗口时收到托盘（需安装 pystray，否则最小化到任务栏）",
         value=bool(settings.get("close_to_tray", False)),
+        label_style=th.checkbox_label_style(),
     )
 
     # 模块显示与排序：上移/下移即时生效，保存后写入设置

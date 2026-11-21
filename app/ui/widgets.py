@@ -38,10 +38,13 @@ def card(
             )
         )
     body = header + ([content] if content is not None else [])
-    # 固定高度的卡片：内容用 expand 撑满剩余空间，多出来的部分在卡片内部滚动，
-    # 而不是把卡片顶出一截和同行的卡片底边不齐。
-    if height is not None and isinstance(content, ft.Column) and content.expand is None:
-        content.expand = True
+    # 固定高度的卡片：内容用 expand 撑满剩余空间，超出部分在卡片内部滚动，
+    # 而不是把卡片顶出一截、和同行的卡片底边不齐或叠到下方卡片上。
+    if height is not None and isinstance(content, ft.Column):
+        if content.expand is None:
+            content.expand = True
+        if content.scroll is None:
+            content.scroll = ft.ScrollMode.AUTO
     fills = bool(expand) or height is not None
     # expand 必须一路传给内层 Column：否则卡片高度撑满了，内部带 expand 的
     # 列表/滚动区拿不到高度，Flet 会渲染成一块空白。

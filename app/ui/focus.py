@@ -186,6 +186,7 @@ def render(
                     vertical_alignment=ft.CrossAxisAlignment.STRETCH,
                     spacing=8,
                 ),
+                ft.Container(expand=True),
                 ft.Row(
                     [
                         primary_button("记录锻炼", lambda e: navigate("health"), "fitness_center"),
@@ -196,6 +197,7 @@ def render(
                 ),
             ],
             spacing=10,
+            expand=True,
         ),
         title="健康摘要",
         expand=1,
@@ -219,6 +221,7 @@ def render(
                             max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
                     for message in data["budget_alerts"][:2]
                 ],
+                ft.Container(expand=True),
                 ft.Row(
                     [
                         primary_button("记一笔", lambda e: navigate("finance"), "payments"),
@@ -305,6 +308,7 @@ def render(
                     size=th.FONT_CAPTION, color=th.TEXT_MUTED, max_lines=4,
                     overflow=ft.TextOverflow.ELLIPSIS,
                 ),
+                ft.Container(expand=True),
                 primary_button("生成今日建议", ai_brief, "AUTO_AWESOME_OUTLINED"),
             ],
             spacing=10,

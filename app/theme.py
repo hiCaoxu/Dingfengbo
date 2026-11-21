@@ -140,6 +140,16 @@ def caption_style(color: str | None = None) -> TextStyle:
     return TextStyle(size=FONT_CAPTION, color=color or TEXT_MUTED)
 
 
+def checkbox_label_style() -> TextStyle:
+    """Checkbox/Switch 的 label 文字样式。
+
+    Flet 的 Checkbox label 不显式给色时，会走内部默认样式；在浅色主题下文字
+    与卡片背景同色（白字白底）导致「开机自启」「关闭到托盘」这类开关看不见。
+    这里统一用主题文字色，明暗两套都可见。
+    """
+    return TextStyle(size=FONT_CAPTION, color=TEXT)
+
+
 def card_padding() -> ft.Padding:
     return ft.Padding.all(CARD_PADDING)
 
