@@ -23,6 +23,10 @@ for package in ("flet", "flet_desktop", "matplotlib", "zhdate"):
 # 内置压缩包后 exe 首次启动无需联网下载。
 datas.append((os.path.join(SPEC_DIR, "flet-windows.zip"), "flet_desktop/app"))
 
+# 霞鹜文楷字体（assets/fonts）：app/main.py 按 __file__ 推导 assets 目录，
+# 打包后同样落在 _MEIPASS/assets，路径一致。
+datas.append((os.path.join(ROOT, "assets"), "assets"))
+
 hiddenimports = []
 for package in ("app", "flet", "flet_desktop"):
     hiddenimports += collect_submodules(package)

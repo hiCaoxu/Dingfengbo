@@ -280,6 +280,19 @@ class TodoReminder(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
 
 
+class LifeEvent(SyncMixin, Base):
+    """人生大事：长期目标/里程碑清单，完成时间留痕，不设「到期」压力。"""
+
+    __tablename__ = "life_events"
+
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    note: Mapped[str] = mapped_column(Text, default="")
+    target_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    done: Mapped[bool] = mapped_column(Boolean, default=False)
+    done_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
 SYNC_MODELS = (
     Todo,
     Diary,
@@ -296,6 +309,7 @@ SYNC_MODELS = (
     Habit,
     HabitLog,
     RecordLink,
+    LifeEvent,
 )
 
 MODEL_BY_TABLE = {m.__tablename__: m for m in SYNC_MODELS}
@@ -317,6 +331,7 @@ TABLE_LABELS = {
     "habits": "习惯",
     "habit_logs": "打卡",
     "record_links": "关联",
+    "life_events": "人生大事",
 }
 
 

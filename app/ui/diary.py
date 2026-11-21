@@ -12,13 +12,23 @@ from ..db.models import Diary
 from ..db.repo import update
 from ..db.session import session_scope
 from ..icons import ACTIONS, ico
+from ..services import life
 from ..services.dates import diary_title, iso_week, month_grid, shift_month
 from ..services.diary import ensure_diary
 from ..services.sync import mark_pending_write
 from .. import theme as th
 from .async_utils import background_section
 from .state import state
-from .widgets import card, divider, empty, icon_button, primary_button, section_header
+from .widgets import (
+    card,
+    dismiss,
+    divider,
+    empty,
+    icon_button,
+    modal,
+    primary_button,
+    section_header,
+)
 
 _state = state.diary
 _EDITOR_LOCK = threading.Lock()
@@ -51,17 +61,17 @@ def _editor_data(day: date) -> dict:
 def _editor(data: dict, refresh) -> ft.Control:
     diary_id, title, content = data["id"], data["title"], data["content"]
     has_diary = bool((content or "").strip())
+    # 正文占满卡片剩余高度（不再用 min_lines 撑），和卡片同高
     field = ft.TextField(
         value=content,
         multiline=True,
-        min_lines=14,
-        max_lines=24,
         border=ft.InputBorder.NONE,
         border_width=0,
         filled=False,
         color=th.TEXT,
         text_style=ft.TextStyle(size=13, color=th.TEXT, height=1.6),
         on_blur=lambda e: save_content(diary_id, e.control.value),
+        expand=True,
     )
     return card(
         ft.Column(
@@ -79,9 +89,91 @@ def _editor(data: dict, refresh) -> ft.Control:
                 field,
             ],
             spacing=10,
+            expand=True,
         ),
         title="日记编辑",
-        expand=True,
+        expand=2,
+    )
+
+
+def _life_panel(page: ft.Page, refresh, events: list[dict]) -> ft.Control:
+    """人生大事：长期目标清单，宽度固定是编辑区的一半（用 expand 1:2 实现）。"""
+
+    def add_dialog(_) -> None:
+        field = ft.TextField(
+            hint_text="比如：写完一本书、带父母去一次远方",
+            autofocus=True,
+            border_color=th.DIVIDER,
+            focused_border_color=th.PRIMARY,
+            color=th.TEXT,
+            text_style=ft.TextStyle(size=12, color=th.TEXT),
+            on_submit=lambda e: submit(),
+        )
+
+        def submit() -> None:
+            if life.add_event(field.value or ""):
+                dismiss(page, dialog)
+                refresh()
+
+        dialog = modal(
+            page,
+            "新增人生大事",
+            ft.Column(
+                [
+                    field,
+                    ft.Text("回车或点「添加」保存", size=10, color=th.TEXT_MUTED),
+                ],
+                spacing=8,
+                tight=True,
+            ),
+            [
+                ft.TextButton("取消", on_click=lambda e: dismiss(page, dialog)),
+                primary_button("添加", lambda e: submit()),
+            ],
+            width=420,
+        )
+
+    def row(event: dict) -> ft.Control:
+        done = bool(event["done"])
+        return ft.Row(
+            [
+                ft.Checkbox(
+                    value=done,
+                    on_change=lambda e, i=event["id"]: (life.toggle_event(i), refresh()),
+                ),
+                ft.Text(
+                    event["title"],
+                    size=12,
+                    color=th.TEXT_MUTED if done else th.TEXT,
+                    max_lines=2,
+                    overflow=ft.TextOverflow.ELLIPSIS,
+                    expand=True,
+                    style=(
+                        ft.TextStyle(color=th.TEXT_MUTED, decoration=ft.TextDecoration.LINE_THROUGH)
+                        if done
+                        else None
+                    ),
+                ),
+                icon_button(
+                    ACTIONS["delete"],
+                    lambda e, i=event["id"]: (life.delete_event(i), refresh()),
+                    "删除",
+                ),
+            ],
+            spacing=4,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+
+    body = (
+        ft.Column([row(event) for event in events], spacing=2, scroll=ft.ScrollMode.AUTO, expand=True)
+        if events
+        else empty("还没有目标，先写下第一件")
+    )
+    return card(
+        ft.Column([divider(), body], spacing=6, expand=True),
+        title="人生大事",
+        trailing=icon_button(ACTIONS["add"], add_dialog, "新增人生大事"),
+        expand=1,
     )
 
 
@@ -276,12 +368,13 @@ def _list_view(refresh, data) -> ft.Control:
 
 
 def _load_page() -> dict:
-    """日记页一次性取齐：当前视图数据 + 当前选中日期的编辑内容。"""
+    """日记页一次性取齐：当前视图数据 + 当前选中日期的编辑内容 + 人生大事。"""
     view = _state["view"]
     return {
         "view": view,
         "main": _month_query() if view == "月历" else _list_query(),
         "editor": _editor_data(_state["selected"]),
+        "life": life.list_events(),
     }
 
 
@@ -311,7 +404,16 @@ def _render(page: ft.Page, refresh, payload) -> ft.Control:
     return ft.Column(
         [
             section_header("日记", tabs),
-            ft.Row([main, _editor(payload["editor"], refresh)], spacing=14, expand=True),
+            ft.Row(
+                [
+                    main,
+                    _editor(payload["editor"], refresh),
+                    _life_panel(page, refresh, payload.get("life") or []),
+                ],
+                spacing=14,
+                expand=True,
+                vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+            ),
         ],
         spacing=12,
         expand=True,

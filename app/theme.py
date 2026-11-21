@@ -99,3 +99,88 @@ def card_padding() -> ft.Padding:
 
 def icon_size() -> int:
     return 20
+
+
+# ---------------------------------------------------------------- 字体
+# 中文用「霞鹜文楷」，外文用「Consolas」。
+# Flutter 只在主字体缺字形时才走 font_family_fallback，所以主字体必须是没有
+# 中文字形的 Consolas，中文回退到随包分发的霞鹜文楷（assets/fonts）。
+FONT_LATIN = "Consolas"
+FONT_CJK = "LXGW WenKai"
+# 相对 ft.run(assets_dir=...) 的路径
+FONT_CJK_ASSET = "fonts/LXGWWenKai-Regular.ttf"
+FONT_FALLBACK = [FONT_CJK]
+
+_FONT_PATCHED = False
+
+
+def apply_fonts(page: ft.Page) -> None:
+    """注册霞鹜文楷，并把「外文 Consolas + 中文霞鹜」注入所有文本控件。"""
+    fonts = dict(page.fonts or {})
+    fonts[FONT_CJK] = FONT_CJK_ASSET
+    page.fonts = fonts
+    _patch_control_fonts()
+
+
+def _with_font(kwargs: dict) -> None:
+    kwargs.setdefault("font_family", FONT_LATIN)
+    if not kwargs.get("font_family_fallback"):
+        kwargs["font_family_fallback"] = list(FONT_FALLBACK)
+
+
+def _patch_control_fonts() -> None:
+    """给 ``ft.Text`` / ``ft.TextStyle`` 补默认字体。
+
+    全项目有近 300 处 ``ft.Text(...)``，逐个加字体参数不现实；这里在构造入口
+    统一补上 font_family / font_family_fallback，控件显式指定时不覆盖。
+    """
+    global _FONT_PATCHED
+    if _FONT_PATCHED:
+        return
+    _FONT_PATCHED = True
+
+    text_init = ft.Text.__init__
+
+    def text_init_patched(self, *args, **kwargs):
+        _with_font(kwargs)
+        text_init(self, *args, **kwargs)
+
+    ft.Text.__init__ = text_init_patched
+
+    style_init = ft.TextStyle.__init__
+
+    def style_init_patched(self, *args, **kwargs):
+        _with_font(kwargs)
+        style_init(self, *args, **kwargs)
+
+    ft.TextStyle.__init__ = style_init_patched
+
+
+def _text_theme() -> ft.TextTheme:
+    """内部控件（输入框、下拉、按钮）走 TextTheme，同样带上中文回退。"""
+
+    def style() -> ft.TextStyle:
+        return ft.TextStyle(font_family=FONT_LATIN, font_family_fallback=list(FONT_FALLBACK))
+
+    return ft.TextTheme(
+        body_large=style(),
+        body_medium=style(),
+        body_small=style(),
+        label_large=style(),
+        label_medium=style(),
+        label_small=style(),
+        title_large=style(),
+        title_medium=style(),
+        title_small=style(),
+        headline_small=style(),
+    )
+
+
+def build_theme(seed: str | None = None) -> ft.Theme:
+    """统一构造页面主题（字体已内含，切换主题时重建即可）。"""
+    return ft.Theme(
+        color_scheme_seed=seed or PRIMARY,
+        font_family=FONT_LATIN,
+        text_theme=_text_theme(),
+        visual_density=ft.VisualDensity.COMPACT,
+    )

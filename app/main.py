@@ -6,6 +6,7 @@ import asyncio
 import logging
 import threading
 from datetime import date, datetime
+from pathlib import Path
 
 import flet as ft
 
@@ -34,6 +35,9 @@ from .ui import theme_switch
 from .ui.widgets import icon_button
 
 logger = logging.getLogger(__name__)
+
+# assets 用绝对路径：打包后工作目录可能不是项目根
+ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
 
 # 全部可用模块；实际顺序与显隐由设置里的 module_order / hidden_modules 决定。
 MODULES = [
@@ -124,11 +128,9 @@ def main(page: ft.Page) -> None:
     page.window.bgcolor = th.BG
     # 隐藏系统标题栏，改用自定义标题栏（可拖动 + 最小化/最大化/关闭按钮）
     page.window.title_bar_hidden = True
-    page.theme = ft.Theme(
-        color_scheme_seed=th.PRIMARY,
-        font_family="Microsoft YaHei",
-        visual_density=ft.VisualDensity.COMPACT,
-    )
+    # 中文霞鹜文楷 + 外文 Consolas（见 theme.apply_fonts）
+    th.apply_fonts(page)
+    page.theme = th.build_theme()
 
     state = {"current": "home", "preview_note": None, "palette": False}
     sync_text = ft.Text(sync_client.status, size=11, color=th.TEXT_MUTED)
@@ -149,13 +151,14 @@ def main(page: ft.Page) -> None:
     slogan_text = ft.Text("刻意练习  要事第一  持续精进", size=18, color=th.PRIMARY, weight="bold")
     dot = ft.Container(width=7, height=7, bgcolor=th.PRIMARY, border_radius=4)
 
+    def toggle_maximize(_=None) -> None:
+        """最大化/还原：标题栏按钮和顶栏双击共用。"""
+        page.window.maximized = not page.window.maximized
+        page.update()
+
     def window_buttons() -> ft.Row:
         def minimize(_):
             page.window.minimized = True
-            page.update()
-
-        def toggle_maximize(_):
-            page.window.maximized = not page.window.maximized
             page.update()
 
         def close(_):
@@ -199,16 +202,17 @@ def main(page: ft.Page) -> None:
             [
                 ft.Column(
                     [
-                        ft.Row(
-                            [greeting_text, ft.Text("·", size=16, color=th.DIVIDER), slogan_text],
-                            spacing=10,
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                        ),
+                        greeting_text,
                         date_text,
                     ],
                     spacing=4,
                 ),
-                ft.Container(expand=True),
+                # 座右铭单独放在左右两块之间，居中显示
+                ft.Container(
+                    content=slogan_text,
+                    expand=True,
+                    alignment=ft.Alignment.CENTER,
+                ),
                 header_row,
                 ft.Container(width=1, height=20, bgcolor=th.DIVIDER,
                              margin=ft.Margin.symmetric(horizontal=6)),
@@ -221,7 +225,8 @@ def main(page: ft.Page) -> None:
     )
     build_header_row()
 
-    header = ft.WindowDragArea(content=header_box, maximizable=True)
+    # 双击顶栏空白处 = 最大化/还原（on_double_tap 由 Flet 的 WindowDragArea 提供）
+    header = ft.WindowDragArea(content=header_box, maximizable=True, on_double_tap=toggle_maximize)
 
     nav_column = ft.Column(spacing=2, expand=True)
     nav_box = ft.Container(
@@ -234,11 +239,7 @@ def main(page: ft.Page) -> None:
         save_settings({"theme_mode": th.current_mode()})
         page.bgcolor = th.BG
         page.window.bgcolor = th.BG
-        page.theme = ft.Theme(
-            color_scheme_seed=th.PRIMARY,
-            font_family="Microsoft YaHei",
-            visual_density=ft.VisualDensity.COMPACT,
-        )
+        page.theme = th.build_theme()
         header_box.bgcolor = th.BG
         greeting_text.color = th.TEXT
         slogan_text.color = th.PRIMARY
@@ -477,10 +478,11 @@ def main(page: ft.Page) -> None:
 
 
 def run() -> None:
+    # assets 里放霞鹜文楷字体，必须用绝对路径注册，否则换工作目录就找不到
     if hasattr(ft, "run"):
-        ft.run(main)
+        ft.run(main, assets_dir=str(ASSETS_DIR))
     else:
-        ft.app(target=main)
+        ft.app(target=main, assets_dir=str(ASSETS_DIR))
 
 
 if __name__ == "__main__":
