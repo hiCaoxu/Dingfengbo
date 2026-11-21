@@ -3,3 +3,5 @@ fastapi>=0.110,<1.0
 uvicorn[standard]>=0.29,<1.0
 SQLAlchemy>=2.0,<3.0
 pydantic>=2.6,<3.0
+# /api/upload 接收 multipart
+python-multipart>=0.0.9

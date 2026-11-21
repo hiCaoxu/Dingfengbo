@@ -15,7 +15,7 @@ from ..db.models import LifeEvent, utcnow
 from ..db.repo import create, soft_delete, update
 from ..db.session import session_scope
 
-MAX_TITLE = 200
+MAX_TITLE = 15  # 一行放下，不缩成两行
 
 
 def _row(event: LifeEvent) -> dict[str, Any]:
@@ -30,23 +30,18 @@ def _row(event: LifeEvent) -> dict[str, Any]:
 
 
 def list_events() -> list[dict[str, Any]]:
-    """未完成在前（目标日期近的靠上、无日期的靠后），已完成按完成时间倒序沉底。"""
+    """按事件日期倒序（新的在上），没填日期的排在最后。"""
     with session_scope() as session:
         events = session.scalars(
             select(LifeEvent)
             .where(LifeEvent.is_deleted.is_(False))
             .order_by(
-                LifeEvent.done,
-                LifeEvent.sort_order,
                 LifeEvent.target_date.is_(None),
-                LifeEvent.target_date,
-                LifeEvent.created_at,
+                LifeEvent.target_date.desc(),
+                LifeEvent.created_at.desc(),
             )
         ).all()
-        rows = [_row(event) for event in events]
-        done_rows = [row for row in rows if row["done"]]
-        done_rows.sort(key=lambda row: row["done_at"] or 0, reverse=True)
-        return [row for row in rows if not row["done"]] + done_rows
+        return [_row(event) for event in events]
 
 
 def add_event(

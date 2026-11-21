@@ -72,7 +72,12 @@ class LifeServiceTests(unittest.TestCase):
         self.assertIsNone(life.add_event("   "))
         self.assertEqual(life.list_events(), [])
 
-    def test_order_unfinished_first_then_due_date(self) -> None:
+    def test_title_is_capped_at_fifteen_chars(self) -> None:
+        event_id = life.add_event("一" * 40)
+        self.assertIsNotNone(event_id)
+        self.assertEqual(life.list_events()[0]["title"], "一" * 15)
+
+    def test_order_is_target_date_desc(self) -> None:
         today = date.today()
         life.add_event("无日期")
         life.add_event("年底的目标", target_date=today + timedelta(days=30))
@@ -80,9 +85,10 @@ class LifeServiceTests(unittest.TestCase):
         done_id = life.add_event("已完成")
         life.toggle_event(done_id)
 
+        # 有日期的按日期新的在上；没日期的沉底，按创建时间倒序
         self.assertEqual(
             [row["title"] for row in life.list_events()],
-            ["本月目标", "年底的目标", "无日期", "已完成"],
+            ["年底的目标", "本月目标", "已完成", "无日期"],
         )
 
     def test_toggle_missing_returns_none(self) -> None:
@@ -116,16 +122,37 @@ class DiaryLayoutTests(unittest.TestCase):
 
     def test_life_panel_renders_events_and_add_button(self) -> None:
         events = [
-            {"id": "e1", "title": "带父母去旅行", "done": False, "done_at": None},
-            {"id": "e2", "title": "写完一本书", "done": True, "done_at": None},
+            {
+                "id": "e1",
+                "title": "带父母去旅行",
+                "done": False,
+                "done_at": None,
+                "target_date": date(2026, 5, 1),
+            },
+            {
+                "id": "e2",
+                "title": "写完一本书",
+                "done": True,
+                "done_at": None,
+                "target_date": None,
+            },
         ]
         _, _, life_panel = self._row(events).controls
         texts = [c.value for c in walk(life_panel) if isinstance(c, ft.Text)]
         self.assertIn("人生大事", texts)
         self.assertIn("带父母去旅行", texts)
         self.assertIn("写完一本书", texts)
-        checkboxes = [c for c in walk(life_panel) if isinstance(c, ft.Checkbox)]
-        self.assertEqual([c.value for c in checkboxes], [False, True])
+        self.assertIn("2026-05-01", texts)
+        self.assertIn("未定", texts)
+        # 不再有勾选框，改为点击标题切换完成
+        self.assertEqual([c for c in walk(life_panel) if isinstance(c, ft.Checkbox)], [])
+
+    def test_editor_shows_inserted_images(self) -> None:
+        payload = _payload()
+        payload["editor"]["content"] = "今天\n![](http://h/files/a.jpg)"
+        _, editor, _ = diary._render(self.page, lambda: None, payload).controls[1].controls
+        images = [c for c in walk(editor) if isinstance(c, ft.Image)]
+        self.assertEqual([image.src for image in images], ["http://h/files/a.jpg"])
 
     def test_life_panel_empty_state(self) -> None:
         _, _, life_panel = self._row().controls

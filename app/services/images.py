@@ -96,6 +96,8 @@ def upload_bytes(data: bytes, filename: str = "image.jpg") -> str:
         raise UploadError(f"连接同步服务器失败：{exc.__class__.__name__}") from exc
     if response.status_code in (401, 403):
         raise UploadError("同步令牌无效，图片上传被拒绝")
+    if response.status_code == 404:
+        raise UploadError("同步服务端版本过旧（缺少 /api/upload），请重新部署 server")
     if response.status_code == 413:
         raise UploadError("图片过大，服务器拒绝接收")
     if response.status_code >= 400:

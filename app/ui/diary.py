@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import re
 import threading
-from datetime import date
+from datetime import date, datetime
 
 import flet as ft
 from sqlalchemy import func, or_, select
@@ -33,6 +34,8 @@ from .widgets import (
 
 _state = state.diary
 _EDITOR_LOCK = threading.Lock()
+# 正文里的 Markdown 图片：![](...)
+_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)")
 
 
 def set_selected(day: date) -> None:
@@ -78,8 +81,24 @@ def _editor(page: ft.Page, data: dict, refresh) -> ft.Control:
         text = field.value or ""
         separator = "\n" if text and not text.endswith("\n") else ""
         field.value = f"{text}{separator}![]({url})\n"
-        field.update()
         save_content(diary_id, field.value)
+        # 重建卡片，让下方配图区立刻出现新图片
+        refresh()
+
+    images = _IMAGE_RE.findall(content or "")
+    image_strip = (
+        ft.Row(
+            [
+                ft.Image(src=url, width=76, height=76, fit=ft.BoxFit.COVER, border_radius=6)
+                for url in images
+            ],
+            spacing=6,
+            run_spacing=6,
+            wrap=True,
+        )
+        if images
+        else None
+    )
 
     return card(
         ft.Column(
@@ -97,6 +116,7 @@ def _editor(page: ft.Page, data: dict, refresh) -> ft.Control:
                 ft.Text("光标离开正文即自动保存", size=10, color=th.TEXT_MUTED),
                 divider(),
                 field,
+                *([image_strip] if image_strip else []),
             ],
             spacing=10,
             expand=True,
@@ -110,9 +130,39 @@ def _life_panel(page: ft.Page, refresh, events: list[dict]) -> ft.Control:
     """人生大事：长期目标清单，宽度固定是编辑区的一半（用 expand 1:2 实现）。"""
 
     def add_dialog(_) -> None:
+        chosen: dict[str, date] = {"value": date.today()}
+        date_label = ft.Text(chosen["value"].isoformat(), size=11, color=th.TEXT)
+
+        picker = ft.DatePicker(
+            value=chosen["value"],
+            first_date=date(1950, 1, 1),
+            last_date=date(2100, 12, 31),
+            help_text="选择日期",
+            cancel_text="取消",
+            confirm_text="确定",
+            on_change=lambda e: pick_date(),
+        )
+
+        def pick_date() -> None:
+            value = picker.value
+            if value is None:
+                return
+            chosen["value"] = value.date() if isinstance(value, datetime) else value
+            date_label.value = chosen["value"].isoformat()
+            date_label.update()
+
+        def open_picker(e) -> None:
+            page.show_dialog(picker)
+
+        def submit() -> None:
+            if life.add_event(field.value or "", chosen["value"]):
+                dismiss(page, dialog)
+                refresh()
+
         field = ft.TextField(
-            hint_text="比如：写完一本书、带父母去一次远方",
+            hint_text="15 字以内，比如：写完一本书",
             autofocus=True,
+            max_length=life.MAX_TITLE,
             border_color=th.DIVIDER,
             focused_border_color=th.PRIMARY,
             color=th.TEXT,
@@ -120,20 +170,27 @@ def _life_panel(page: ft.Page, refresh, events: list[dict]) -> ft.Control:
             on_submit=lambda e: submit(),
         )
 
-        def submit() -> None:
-            if life.add_event(field.value or ""):
-                dismiss(page, dialog)
-                refresh()
-
         dialog = modal(
             page,
             "新增人生大事",
             ft.Column(
                 [
                     field,
+                    ft.Row(
+                        [
+                            ft.OutlinedButton(
+                                "选择日期",
+                                icon=ico(ACTIONS["calendar"]),
+                                on_click=open_picker,
+                            ),
+                            date_label,
+                        ],
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
                     ft.Text("回车或点「添加」保存", size=10, color=th.TEXT_MUTED),
                 ],
-                spacing=8,
+                spacing=10,
                 tight=True,
             ),
             [
@@ -145,24 +202,33 @@ def _life_panel(page: ft.Page, refresh, events: list[dict]) -> ft.Control:
 
     def row(event: dict) -> ft.Control:
         done = bool(event["done"])
+        target = event.get("target_date")
         return ft.Row(
             [
-                ft.Checkbox(
-                    value=done,
-                    on_change=lambda e, i=event["id"]: (life.toggle_event(i), refresh()),
-                ),
-                ft.Text(
-                    event["title"],
-                    size=12,
-                    color=th.TEXT_MUTED if done else th.TEXT,
-                    max_lines=2,
-                    overflow=ft.TextOverflow.ELLIPSIS,
-                    expand=True,
-                    style=(
-                        ft.TextStyle(color=th.TEXT_MUTED, decoration=ft.TextDecoration.LINE_THROUGH)
-                        if done
-                        else None
+                ft.Container(
+                    content=ft.Text(
+                        target.isoformat() if target else "未定",
+                        size=10,
+                        color=th.TEXT_MUTED,
                     ),
+                    width=70,
+                ),
+                ft.Container(
+                    content=ft.Text(
+                        event["title"],
+                        size=12,
+                        max_lines=1,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                        expand=True,
+                        style=(
+                            ft.TextStyle(color=th.TEXT_MUTED, decoration=ft.TextDecoration.LINE_THROUGH)
+                            if done
+                            else ft.TextStyle(color=th.TEXT)
+                        ),
+                    ),
+                    expand=True,
+                    on_click=lambda e, i=event["id"]: (life.toggle_event(i), refresh()),
+                    tooltip="点击标记完成 / 取消完成",
                 ),
                 icon_button(
                     ACTIONS["delete"],

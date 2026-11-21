@@ -153,7 +153,7 @@ def main(page: ft.Page) -> None:
 
     def toggle_maximize(_=None) -> None:
         """最大化/还原：标题栏按钮和顶栏双击共用。"""
-        page.window.maximized = not page.window.maximized
+        page.window.maximized = not bool(page.window.maximized)
         page.update()
 
     def window_buttons() -> ft.Row:
@@ -225,8 +225,13 @@ def main(page: ft.Page) -> None:
     )
     build_header_row()
 
-    # 双击顶栏空白处 = 最大化/还原（on_double_tap 由 Flet 的 WindowDragArea 提供）
-    header = ft.WindowDragArea(content=header_box, maximizable=True, on_double_tap=toggle_maximize)
+    # 双击顶栏空白处 = 最大化/还原；拖动交给 start_dragging。
+    # 不用 WindowDragArea：它的 on_double_tap 在 Windows 上收不到事件（原生拖动区把手势吃掉了）。
+    header = ft.GestureDetector(
+        content=header_box,
+        on_double_tap=lambda e: toggle_maximize(),
+        on_pan_start=lambda e: page.run_task(page.window.start_dragging),
+    )
 
     nav_column = ft.Column(spacing=2, expand=True)
     nav_box = ft.Container(
