@@ -70,8 +70,19 @@ python -m pytest -q          # 或：python -m unittest discover -s tests -t .
 - `_internal\` 是程序本体的一部分，必须和 exe 待在同一目录：只把 exe 单独拷到桌面会启动失败。
 - 升级 = 用新版文件夹替换旧文件夹；数据始终在 `D:\Data\Dingfengbo\`，不受影响。
 - 需要开机自启时，把 `定风波.exe` 的快捷方式放入 `shell:startup` 目录（Win+R 输入 `shell:startup`）。
-- 用 onedir 而非 onefile：onefile 每次启动都要把约 40MB 内容（含 18.42MB 霞鹜文楷字体）解压到临时目录，冷启动主要耗在这里；onedir 直接读磁盘，首启快、杀软扫描也少。代价是发布物从单个 exe 变成文件夹。字体仍整包分发，如需进一步瘦身可再做 `fonttools` 子集化（常用汉字 + Latin，需维护字符集）。
+- 用 onedir 而非 onefile：onefile 每次启动都要把全部内容解压到临时目录，冷启动主要耗在这里；onedir 直接读磁盘，首启快、杀软扫描也少。代价是发布物从单个 exe 变成文件夹。
 - exe 带版本资源，右键属性可查看版本号。
+
+### 字体子集化
+
+`assets\fonts` 里放的是裁过的霞鹜文楷（18.42MB → 3.46MB，7727 个字形），不是全量字体：
+
+- 字符范围 = ASCII / Latin-1 / 通用与 CJK 标点 / 全角字符 + **GB2312 全集**（6763 汉字）+ 源码与 README 里实际出现的所有字符 + 脚本里 `EXTRA_CHARS` 手工补充的字。界面文案由此不会缺字。
+- 全量原字体保留在 `packaging\fonts\LXGWWenKai-Regular.ttf`（不进包，仅供重新子集化）。
+- 重新生成：`python packaging\subset_font.py`；只校验覆盖与体积：`python packaging\subset_font.py --check`。
+- 用户输入的 GB2312 之外生僻字（罕见人名等）不会被裁掉——它们由 Flutter 回退到系统字体渲染，字形与正文不同但不影响可读性。需要固定字形时，把字加进 `packaging\subset_font.py` 的 `EXTRA_CHARS` 再重跑脚本。
+- `tests\test_font_subset.py` 会反查 cmap，确保「代码里出现过的字」一个不缺。
+- 许可：霞鹜文楷为 SIL OFL 1.1，`assets\fonts\OFL.txt` 随 assets 一起打包分发；子集从原字体直接生成、未改动源码，字体内部的版权与许可字段也完整保留。
 
 ## 同步机制
 
