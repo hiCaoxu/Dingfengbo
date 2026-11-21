@@ -36,14 +36,14 @@ _cache_guard = threading.Lock()
 
 def _cache_get(key: tuple) -> bytes | None:
     with _cache_guard:
-        return _chart_cache.get(key)
+        return _chart_cache.get((th.current_mode(), key))
 
 
 def _cache_put(key: tuple, value: bytes) -> None:
     with _cache_guard:
         if len(_chart_cache) >= _CACHE_MAX:
             _chart_cache.pop(next(iter(_chart_cache)))
-        _chart_cache[key] = value
+        _chart_cache[(th.current_mode(), key)] = value
 
 
 def _encode(fig: plt.Figure, tight: bool = True) -> bytes:
@@ -55,7 +55,7 @@ def _encode(fig: plt.Figure, tight: bool = True) -> bytes:
     """
     buffer = io.BytesIO()
     kwargs = {"bbox_inches": "tight"} if tight else {}
-    fig.savefig(buffer, format="png", dpi=110, facecolor="white", **kwargs)
+    fig.savefig(buffer, format="png", dpi=110, facecolor=th.CHART_BG, **kwargs)
     plt.close(fig)
     return buffer.getvalue()
 
@@ -76,7 +76,7 @@ def _resolve_ylim(
 
 
 def _style(ax: plt.Axes) -> None:
-    ax.set_facecolor("white")
+    ax.set_facecolor(th.CHART_BG)
     ax.grid(axis="y", color=th.DIVIDER, linewidth=0.8, alpha=0.9)
     ax.set_axisbelow(True)
     for spine in ("top", "right", "left"):
@@ -199,7 +199,15 @@ def pie_chart(items: dict[str, float], title: str = "", cache_key: Any = None) -
     with _RENDER_LOCK:
         fig, ax = plt.subplots(figsize=(4.2, 3.0))
         if key_items:
-            colors = [th.PRIMARY, th.ACCENT, "#8FB69A", "#D9B98A", "#7E9BB5", "#C9C2B6"]
+            # 配色全部取自当前主题：写死 #8FB69A 这类浅色在暗色主题下几乎糊成一团。
+            colors = [
+                th.PRIMARY,
+                th.ACCENT,
+                th.HEATMAP_LEVELS[4],
+                th.HEATMAP_LEVELS[3],
+                th.HEATMAP_LEVELS[2],
+                th.TEXT_MUTED,
+            ]
             labels = [key for key, _ in key_items]
             values = [value for _, value in key_items]
             ax.pie(
@@ -209,7 +217,7 @@ def pie_chart(items: dict[str, float], title: str = "", cache_key: Any = None) -
                 startangle=90,
                 colors=[colors[i % len(colors)] for i in range(len(key_items))],
                 textprops={"color": th.TEXT, "fontsize": 9},
-                wedgeprops={"width": 0.55, "edgecolor": "white"},
+                wedgeprops={"width": 0.55, "edgecolor": th.CHART_BG},
             )
         else:
             ax.text(0.5, 0.5, "暂无数据", ha="center", va="center", color=th.TEXT_MUTED, transform=ax.transAxes)

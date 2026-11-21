@@ -40,6 +40,19 @@ class SyncClient:
         base = load_settings().get("server_url", DEFAULT_SERVER_URL).rstrip("/")
         return base + path
 
+    def wait_idle(self, timeout: float = 15.0) -> bool:
+        """等待进行中的同步结束，返回是否等到了空闲。
+
+        恢复备份要先关连接池再整库替换，正好撞上后台 pull 就会写进已关闭的库、
+        报 ``database is closed``。恢复与停机前先 ``wait_idle``，把「正在同步」
+        等成「没有同步」再动手。
+        """
+        if self._lock.acquire(timeout=timeout):
+            self._lock.release()
+            return True
+        logger.warning("等待同步结束超时（%.0f 秒），继续执行", timeout)
+        return False
+
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {load_settings().get('sync_token', '')}"}
 

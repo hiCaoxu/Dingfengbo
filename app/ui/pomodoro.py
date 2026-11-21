@@ -15,7 +15,7 @@ from ..db.session import session_scope
 from ..services.notify import notify
 from ..services.sync import mark_pending_write
 from .. import theme as th
-from .widgets import dismiss, dropdown, modal, primary_button, snack
+from .widgets import confirm, dismiss, dropdown, modal, primary_button, snack
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,11 @@ def _fmt(seconds: int) -> str:
 
 
 def _record(minutes: int, todo_id: str, title: str) -> None:
-    """完成一次番茄：给关联待办累加计数并触发同步。"""
+    """完成一次番茄：给关联待办累加计数并触发同步。
+
+    计数是「读-加-写」，多端同时完成同一任务的番茄时可能互相覆盖（LWW 只留一份）。
+    这里接受这个损失：番茄数只是激励性指标，为它引入独立的计数事件表不值当。
+    """
     if not todo_id:
         return
     try:
@@ -80,11 +84,16 @@ def _run_timer(
         async def done() -> None:
             try:
                 if finished:
-                    _record(minutes, todo_id, title)
-                    notify(
-                        "番茄钟结束",
-                        f"完成 {minutes} 分钟专注" + (f"：{title}" if title else ""),
-                    )
+                    # 写库 + 系统通知都在后台线程：notify 走 PowerShell Toast，
+                    # 最坏要等十几秒，放在事件循环里会把整个窗口冻住。
+                    def effects() -> None:
+                        _record(minutes, todo_id, title)
+                        notify(
+                            "番茄钟结束",
+                            f"完成 {minutes} 分钟专注" + (f"：{title}" if title else ""),
+                        )
+
+                    page.run_thread(effects)
                     status_text.value = f"已完成 {minutes} 分钟，休息一下"
                     status_text.color = th.ACCENT
                     remain_text.value = _fmt(minutes * 60)
@@ -92,6 +101,7 @@ def _run_timer(
                     status_text.value = "已停止"
                     status_text.color = th.TEXT_MUTED
                 start_btn.disabled = False
+                start_btn.text = "开始"
                 stop_btn.disabled = True
                 page.update()
                 if finished and refresh is not None:
@@ -134,10 +144,25 @@ def open_pomodoro_dialog(page: ft.Page, refresh=None):
 
     def stop(_=None):
         _session["active"] = False
+        # 立即恢复按钮状态：计时线程要等下一次 tick 才会发现已停止。
+        start_btn.text = "开始"
+        start_btn.disabled = False
+        stop_btn.disabled = True
+        status_text.value = "已停止"
+        status_text.color = th.TEXT_MUTED
+        page.update()
 
     def close(_):
-        _session["active"] = False
-        dismiss(page, dialog)
+        if not _session["active"]:
+            dismiss(page, dialog)
+            return
+        # 正在计时却顺手点了关闭，等于悄悄丢掉一次专注：先问一句。
+        elapsed = max(0, _session["total"] - _session["remaining"])
+        confirm(
+            page,
+            f"番茄钟正在计时（已过 {_fmt(elapsed)}），关闭会丢弃本次专注。确定关闭？",
+            lambda: (stop(), dismiss(page, dialog)),
+        )
 
     start_btn = primary_button("开始", lambda e: start(e))
     stop_btn = ft.TextButton("停止", on_click=stop, disabled=True)
@@ -153,6 +178,8 @@ def open_pomodoro_dialog(page: ft.Page, refresh=None):
         status_text.value = "专注中：" + (title or "自由专注")
         status_text.color = th.PRIMARY
         start_btn.disabled = True
+        # 运行中把按钮文案改掉，弹窗里一眼能看出计时没停。
+        start_btn.text = "计时中…"
         stop_btn.disabled = False
         page.update()
         _run_timer(

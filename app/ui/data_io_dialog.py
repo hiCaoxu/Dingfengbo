@@ -209,8 +209,9 @@ def open_data_io_dialog(page: ft.Page, refresh=None) -> ft.AlertDialog:
                 spacing=8,
             ),
             ft.Text(
-                "JSON 导入按「最后写入获胜」合并，适合换机或从旧备份恢复；"
-                "CSV 按列名匹配，缺列用默认值，单行失败不影响其他行。",
+                "JSON 导入按「最后写入获胜」合并，适合换机或从旧备份恢复；导入的行会重新进入待同步队列。"
+                "CSV 按列名匹配、缺列用默认值，已有记录按 ID 或业务键（日期 / 习惯+日期）去重，"
+                "文件里更旧的行不会覆盖较新的数据，单行失败不影响其他行。",
                 size=10,
                 color=th.TEXT_MUTED,
             ),

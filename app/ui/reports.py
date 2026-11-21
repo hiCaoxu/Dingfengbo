@@ -61,7 +61,7 @@ def _render(page: ft.Page, refresh, report: dict) -> ft.Control:
             ft.Button(
                 PERIODS[key],
                 bgcolor=th.PRIMARY if period == key else th.PRIMARY_LIGHT,
-                color="#FFFFFF" if period == key else th.TEXT_MUTED,
+                color=th.ON_PRIMARY if period == key else th.TEXT_MUTED,
                 elevation=0,
                 on_click=lambda e, k=key: set_period(k),
                 style=ft.ButtonStyle(

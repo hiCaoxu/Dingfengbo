@@ -16,7 +16,9 @@ import hashlib
 import logging
 import os
 import re
+import threading
 import time
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -34,7 +36,26 @@ _USER_AGENT = (
 )
 _MAX_BYTES = 8 * 1024 * 1024
 _RETRY_AFTER = 600  # 秒：失败后这段时间内不再重试
-_failed: dict[str, float] = {}
+# 失败记录：封面是在工作线程里并发下载的，读写都要加锁；条目按插入顺序淘汰，
+# 否则「看过几千个封面地址」就会把这张表撑成内存泄漏。
+_FAILED_MAX = 512
+_failed: OrderedDict[str, float] = OrderedDict()
+_failed_guard = threading.Lock()
+
+
+def _recently_failed(url: str) -> bool:
+    """近期下载失败过就跳过（失败冷却），避免反复打同一个坏地址。"""
+    with _failed_guard:
+        at = _failed.get(url)
+    return bool(at) and time.time() - at < _RETRY_AFTER
+
+
+def _mark_failed(url: str) -> None:
+    with _failed_guard:
+        _failed[url] = time.time()
+        _failed.move_to_end(url)
+        while len(_failed) > _FAILED_MAX:
+            _failed.popitem(last=False)
 
 _WRAPPERS = (('"', '"'), ("'", "'"), ("“", "”"), ("‘", "’"), ("《", "》"))
 
@@ -107,7 +128,7 @@ def cached_cover(
                 return existing
 
     now = time.time()
-    if now - _failed.get(url, 0.0) < _RETRY_AFTER:
+    if _recently_failed(url):
         return None
 
     try:
@@ -123,7 +144,7 @@ def cached_cover(
     except Exception:
         # 只记录域名与状态，避免把带签名的完整 URL 写进日志。
         logger.info("封面下载失败：%s", urlsplit(url).netloc or url)
-        _failed[url] = now
+        _mark_failed(url)
         return None
 
     target_dir.mkdir(parents=True, exist_ok=True)

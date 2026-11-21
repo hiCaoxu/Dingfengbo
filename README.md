@@ -70,6 +70,7 @@ python -m pytest -q          # 或：python -m unittest discover -s tests -t .
 - 升级 = 用新版本 exe 覆盖旧 exe；数据始终在 `D:\Data\Dingfengbo\`，不受影响。
 - 需要开机自启时，把 exe 快捷方式放入 `shell:startup` 目录（Win+R 输入 `shell:startup`）。
 - 单文件模式首次启动需解压到临时目录，冷启动较慢；exe 带版本资源，右键属性可查看版本号。
+- 体积代价：exe 约 40MB 里有 18.42MB 是整包霞鹜文楷字体（每次启动都要解压），冷启动主要花在这里。可选优化留作后续决策——`fonttools` 子集化（只保留常用汉字 + Latin，需维护字符集）或改 `onedir` 模式（首启快、产物是文件夹），两者都会改变发布物形态，暂不改。
 
 ## 同步机制
 
@@ -119,6 +120,8 @@ python -m pytest -q          # 或：python -m unittest discover -s tests -t .
 脚本仅创建远程目录 `/opt/dingfengbo-sync` 并启动容器 `dingfengbo-sync`，不改动主机已有环境。数据卷为 `/opt/dingfengbo-sync/data`，容器监听 `8000:8000`，并以非 root 用户运行。桌面端「设置」里的服务地址填 `http://<服务器IP>:8000`。
 
 若公网无法访问，需在云厂商安全组放行 TCP 8000（服务器内部 `ufw` 无需改动）；腾讯云轻量应用服务器可在「防火墙」中添加规则。
+
+上传的图片落在数据卷的 `files/`，`/files/<摘要>.<后缀>` 直接静态访问（文件名即内容摘要，不可猜，无需鉴权），响应带 `Cache-Control: immutable` 长缓存。**`files/` 只增不删**：服务端无法判断某张图是否仍被记录引用，因此不做自动清理，需要定期看磁盘占用，必要时先备份数据卷再按修改时间人工清理旧图（旧图会 404，客户端重新上传即可）。
 
 ### 可选：Caddy 自动 HTTPS 反代
 

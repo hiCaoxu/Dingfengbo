@@ -58,11 +58,18 @@ def _tags_of(raw: str | None) -> list[str]:
 
 
 def _todo_section(session: Session, start: date, end: date) -> dict[str, Any]:
-    rows = list(
-        session.scalars(
-            select(Todo).where(Todo.is_deleted.is_(False), Todo.is_template.is_(False))
-        )
-    )
+    # 只要统计用得上的列：任务正文（content）在报告里一个字都不显示，
+    # select(Todo) 却会把它整行物化成 ORM 对象。
+    rows = session.execute(
+        select(
+            Todo.title,
+            Todo.completed,
+            Todo.completed_at,
+            Todo.created_at,
+            Todo.due_date,
+            Todo.tags,
+        ).where(Todo.is_deleted.is_(False), Todo.is_template.is_(False))
+    ).all()
     completed = 0
     created = 0
     tags: Counter[str] = Counter()
@@ -95,13 +102,12 @@ def _todo_section(session: Session, start: date, end: date) -> dict[str, Any]:
 
 
 def _diary_section(session: Session, start: date, end: date) -> dict[str, Any]:
-    rows = list(
-        session.scalars(
-            select(Diary).where(
-                Diary.is_deleted.is_(False), Diary.date >= start, Diary.date <= end
-            )
+    # 正文仍然要（算字数、判断是否算「写了」），但不拉 tags / 图片等其他列。
+    rows = session.execute(
+        select(Diary.content, Diary.title).where(
+            Diary.is_deleted.is_(False), Diary.date.between(start, end)
         )
-    )
+    ).all()
     written = [item for item in rows if (item.content or "").strip()]
     lengths = [len((item.content or "").strip()) for item in written]
     return {
@@ -114,7 +120,9 @@ def _diary_section(session: Session, start: date, end: date) -> dict[str, Any]:
 
 
 def _note_section(session: Session, start: date, end: date) -> dict[str, Any]:
-    rows = list(session.scalars(select(Note).where(Note.is_deleted.is_(False))))
+    rows = session.execute(
+        select(Note.created_at, Note.updated_at, Note.tags).where(Note.is_deleted.is_(False))
+    ).all()
     created = 0
     updated = 0
     tags: Counter[str] = Counter()
@@ -133,34 +141,26 @@ def _note_section(session: Session, start: date, end: date) -> dict[str, Any]:
 
 
 def _health_section(session: Session, start: date, end: date) -> dict[str, Any]:
-    exercises = list(
-        session.scalars(
-            select(Exercise).where(
-                Exercise.is_deleted.is_(False), Exercise.date >= start, Exercise.date <= end
-            )
+    exercises = session.execute(
+        select(Exercise.kind, Exercise.minutes, Exercise.calories).where(
+            Exercise.is_deleted.is_(False), Exercise.date.between(start, end)
         )
-    )
-    diets = list(
-        session.scalars(
-            select(Diet).where(
-                Diet.is_deleted.is_(False), Diet.date >= start, Diet.date <= end
-            )
+    ).all()
+    diets = session.execute(
+        select(Diet.calories, Diet.date).where(
+            Diet.is_deleted.is_(False), Diet.date.between(start, end)
         )
-    )
-    weights = list(
-        session.scalars(
-            select(Weight)
-            .where(Weight.is_deleted.is_(False), Weight.date >= start, Weight.date <= end)
-            .order_by(Weight.date)
+    ).all()
+    weights = session.execute(
+        select(Weight.kg, Weight.date)
+        .where(Weight.is_deleted.is_(False), Weight.date.between(start, end))
+        .order_by(Weight.date)
+    ).all()
+    sleeps = session.execute(
+        select(Sleep.hours, Sleep.quality).where(
+            Sleep.is_deleted.is_(False), Sleep.date.between(start, end)
         )
-    )
-    sleeps = list(
-        session.scalars(
-            select(Sleep).where(
-                Sleep.is_deleted.is_(False), Sleep.date >= start, Sleep.date <= end
-            )
-        )
-    )
+    ).all()
     by_kind: Counter[str] = Counter(item.kind for item in exercises)
     weight_delta = (
         round(float(weights[-1].kg) - float(weights[0].kg), 2) if len(weights) >= 2 else None
@@ -219,7 +219,12 @@ def _finance_section(session: Session, start: date, end: date) -> dict[str, Any]
 
 
 def _fun_section(session: Session, start: date, end: date) -> dict[str, Any]:
-    rows = list(session.scalars(select(Entertainment).where(Entertainment.is_deleted.is_(False))))
+    rows = session.execute(
+        select(
+            Entertainment.title, Entertainment.kind,
+            Entertainment.status, Entertainment.updated_at,
+        ).where(Entertainment.is_deleted.is_(False))
+    ).all()
     finished: list[str] = []
     watching: list[str] = []
     for item in rows:
@@ -233,22 +238,21 @@ def _fun_section(session: Session, start: date, end: date) -> dict[str, Any]:
 
 def _habit_section(session: Session, start: date, end: date) -> dict[str, Any]:
     habits = {
-        item.id: item.name
-        for item in session.scalars(select(Habit).where(Habit.is_deleted.is_(False)))
-    }
-    logs = list(
-        session.scalars(
-            select(HabitLog).where(
-                HabitLog.is_deleted.is_(False),
-                HabitLog.done.is_(True),
-                HabitLog.date >= start,
-                HabitLog.date <= end,
-            )
+        row.id: row.name
+        for row in session.execute(
+            select(Habit.id, Habit.name).where(Habit.is_deleted.is_(False))
         )
-    )
+    }
+    logs = session.execute(
+        select(HabitLog.habit_id).where(
+            HabitLog.is_deleted.is_(False),
+            HabitLog.done.is_(True),
+            HabitLog.date.between(start, end),
+        )
+    ).all()
     per_habit: Counter[str] = Counter()
-    for log in logs:
-        name = habits.get(log.habit_id)
+    for row in logs:
+        name = habits.get(row.habit_id)
         if name:
             per_habit[name] += 1
     return {"checkins": len(logs), "per_habit": per_habit.most_common(8)}

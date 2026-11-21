@@ -69,7 +69,7 @@ def _editor(page: ft.Page, data: dict, refresh) -> ft.Control:
     field = ft.TextField(
         value=content,
         multiline=True,
-        border=ft.InputBorder.NONE,
+        border=ft.NoInputBorder(),
         border_width=0,
         filled=False,
         color=th.TEXT,
@@ -293,7 +293,7 @@ def _month_view(refresh, data) -> ft.Control:
             cells.append(
                 ft.Container(
                     content=body,
-                    bgcolor=th.PRIMARY_LIGHT if selected else ("#FFFFFF" if in_month else "#F7F4EF"),
+                    bgcolor=th.PRIMARY_LIGHT if selected else (th.CARD if in_month else th.SUBTLE),
                     border=ft.Border.all(1, th.DIVIDER),
                     border_radius=4,
                     padding=3,

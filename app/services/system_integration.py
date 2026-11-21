@@ -193,10 +193,25 @@ async def _show(page) -> None:
 
 
 async def _sync(page) -> None:
-    try:
-        from .sync import sync_client
+    """托盘「立即同步」：网络请求必须在后台线程，协程里同步调用会冻结整个 UI。"""
+    from .sync import sync_client
 
-        sync_client.sync_once()
-        page.update()
-    except Exception:
-        logger.exception("托盘同步失败")
+    def worker() -> None:
+        try:
+            sync_client.sync_once()
+        except Exception:
+            logger.exception("托盘同步失败")
+            return
+
+        async def apply() -> None:
+            try:
+                page.update()
+            except Exception:
+                logger.debug("托盘同步后刷新页面失败", exc_info=True)
+
+        try:
+            page.run_task(apply)
+        except Exception:
+            logger.debug("托盘同步结果回 UI 线程失败", exc_info=True)
+
+    page.run_thread(worker)

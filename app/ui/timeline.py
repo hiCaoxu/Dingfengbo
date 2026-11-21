@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import date, timedelta
 
 import flet as ft
@@ -118,8 +119,7 @@ def open_links_dialog(page: ft.Page, item: TimelineItem, refresh) -> ft.AlertDia
         render_links()
         page.update()
 
-    def render_targets(text: str = "") -> None:
-        rows = link_targets(text, limit=20)
+    def render_targets(rows: list[dict]) -> None:
         controls: list[ft.Control] = []
         for row in rows:
             if row["table"] == item.table and row["record_id"] == item.record_id:
@@ -169,10 +169,42 @@ def open_links_dialog(page: ft.Page, item: TimelineItem, refresh) -> ft.AlertDia
         page.update()
         snack(page, "已建立关联", th.PRIMARY)
 
-    search_field.on_change = lambda e: render_targets(search_field.value or "")
+    # 输入即查询会每击键打一次四表 LIKE：加 250ms 防抖，且查询放到后台线程，
+    # 结果回 UI 线程前检查弹窗是否已关闭（关闭后丢弃，避免操作已销毁控件）。
+    pending: dict = {"timer": None, "closed": False}
+
+    def query_in_background(text: str) -> None:
+        try:
+            rows = link_targets(text, limit=20)
+        except Exception:
+            logger.warning("关联候选查询失败", exc_info=True)
+            return
+        if pending["closed"]:
+            return
+
+        async def apply() -> None:
+            if pending["closed"]:
+                return
+            render_targets(rows)
+
+        try:
+            page.run_task(apply)
+        except Exception:
+            logger.debug("关联弹窗已关闭，丢弃候选结果")
+
+    def schedule_query(_=None) -> None:
+        timer = pending["timer"]
+        if timer is not None:
+            timer.cancel()
+        timer = threading.Timer(0.25, query_in_background, args=(search_field.value or "",))
+        timer.daemon = True
+        pending["timer"] = timer
+        timer.start()
+
+    search_field.on_change = schedule_query
 
     render_links()
-    render_targets("")
+    query_in_background("")
 
     dialog = modal(
         page,
@@ -199,6 +231,10 @@ def open_links_dialog(page: ft.Page, item: TimelineItem, refresh) -> ft.AlertDia
     def _close() -> None:
         from .widgets import close_modal
 
+        pending["closed"] = True
+        timer = pending["timer"]
+        if timer is not None:
+            timer.cancel()
         close_modal(page, dialog)
         if refresh is not None:
             refresh()

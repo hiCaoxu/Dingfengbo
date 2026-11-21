@@ -68,7 +68,7 @@ def inline_spans(text: str) -> list[ft.TextSpan]:
             spans.append(
                 ft.TextSpan(
                     part[1:-1],
-                    style=ft.TextStyle(size=12, color=th.PRIMARY, font_family="Consolas", bgcolor="#F4F6F3"),
+                    style=ft.TextStyle(size=12, color=th.PRIMARY, font_family="Consolas", bgcolor=th.TABLE_HEAD),
                 )
             )
         elif part.startswith("*") and part.endswith("*"):

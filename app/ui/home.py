@@ -17,6 +17,7 @@ from ..services.finance import money, month_summary, total_assets
 from ..services.sync import mark_pending_write
 from .. import theme as th
 from ..db.repo import create
+from .async_utils import RenderToken, background_section
 from .forms import open_quick_action
 from .widgets import card, empty, section_header, tag_chip
 
@@ -35,6 +36,9 @@ from .state import state
 
 _HOME_STATE = state.home
 
+# 首页渲染序号：切模块/切月份后，上一轮迟到的查询结果据此丢弃。
+_HOME_TOKEN = RenderToken()
+
 
 def _calendar_card(selected: date, set_date, width: int | None = None, height: int | None = None) -> ft.Container:
     header = ft.Container(
@@ -42,7 +46,7 @@ def _calendar_card(selected: date, set_date, width: int | None = None, height: i
             [
                 ft.Text(
                     f"{selected.year}年{selected.month}月",
-                    size=15, color="#FFFFFF", weight="bold",
+                    size=15, color=th.ON_PRIMARY, weight="bold",
                 ),
             ],
             alignment=ft.MainAxisAlignment.CENTER,
@@ -245,7 +249,7 @@ def _view_switch(refresh) -> ft.Row:
             ft.Button(
                 "今日聚焦",
                 bgcolor=th.PRIMARY if _HOME_STATE["view"] == "focus" else th.PRIMARY_LIGHT,
-                color="#FFFFFF" if _HOME_STATE["view"] == "focus" else th.TEXT_MUTED,
+                color=th.ON_PRIMARY if _HOME_STATE["view"] == "focus" else th.TEXT_MUTED,
                 elevation=0,
                 on_click=lambda e: set_view("focus"),
                 style=ft.ButtonStyle(
@@ -256,7 +260,7 @@ def _view_switch(refresh) -> ft.Row:
             ft.Button(
                 "数据概览",
                 bgcolor=th.PRIMARY if _HOME_STATE["view"] == "overview" else th.PRIMARY_LIGHT,
-                color="#FFFFFF" if _HOME_STATE["view"] == "overview" else th.TEXT_MUTED,
+                color=th.ON_PRIMARY if _HOME_STATE["view"] == "overview" else th.TEXT_MUTED,
                 elevation=0,
                 on_click=lambda e: set_view("overview"),
                 style=ft.ButtonStyle(
@@ -305,30 +309,14 @@ def build(page: ft.Page, refresh, on_open_diary, on_open_note, navigate=None) ->
     # 历史状态可能残留未来年份（旧版本允许切换），进来先纠正。
     if _HOME_STATE["year"] > today.year:
         _HOME_STATE["year"] = today.year
-    holder = ft.Container(
-        content=ft.Container(
-            content=ft.Text("加载中…", size=12, color=th.TEXT_MUTED),
-            alignment=ft.Alignment.CENTER,
-            expand=True,
-        ),
-        expand=True,
-    )
     view = _HOME_STATE["view"]
+    _HOME_TOKEN.bump()  # 新一轮渲染，上一轮迟到的结果自动作废
 
-    def load() -> None:
+    def load():
         if view == "focus":
             from ..services.focus import today_focus
 
-            data = today_focus(today)
-
-            async def show_focus() -> None:
-                holder.content = _focus_page(
-                    page, refresh, data, on_open_diary, on_open_note, navigate
-                )
-                page.update()
-
-            page.run_task(show_focus)
-            return
+            return {"view": "focus", "focus": today_focus(today)}
         with session_scope() as session:
             summary = month_summary(session, today.year, today.month)
             assets = total_assets(session)
@@ -354,18 +342,27 @@ def build(page: ft.Page, refresh, on_open_diary, on_open_note, navigate=None) ->
                 select(Note).where(Note.is_deleted.is_(False))
                 .order_by(func.random()).limit(1)
             )
+        return {
+            "view": "home",
+            "summary": summary,
+            "assets": assets,
+            "todo_today": todo_today,
+            "todo_soon": todo_soon,
+            "note": note,
+        }
 
-        async def apply() -> None:
-            holder.content = _render_home(
-                page, refresh, on_open_diary, on_open_note,
-                summary, assets, todo_today, todo_soon, note,
+    def render(payload: dict) -> ft.Control:
+        if payload.get("view") == "focus":
+            return _focus_page(
+                page, refresh, payload["focus"], on_open_diary, on_open_note, navigate
             )
-            page.update()
+        return _render_home(
+            page, refresh, on_open_diary, on_open_note,
+            payload["summary"], payload["assets"],
+            payload["todo_today"], payload["todo_soon"], payload["note"],
+        )
 
-        page.run_task(apply)
-
-    page.run_thread(load)
-    return holder
+    return background_section(page, load, render, "加载首页…", token=_HOME_TOKEN)
 
 
 def _render_home(page, refresh, on_open_diary, on_open_note,

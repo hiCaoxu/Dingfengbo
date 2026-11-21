@@ -8,10 +8,13 @@
 
 from __future__ import annotations
 
-import calendar as pycal
 from collections import Counter
 from datetime import date, timedelta
 from typing import Any, Iterable
+
+# 日历网格只保留一份实现（dates.month_grid）：这里曾与 dates.py 各写一份，
+# 改动时容易只改一处，待办与日记的日历就对不上了。re-export 兼容既有调用方。
+from .dates import month_grid  # noqa: F401
 
 URGENT_WINDOW_DAYS = 1
 
@@ -59,17 +62,7 @@ def shift_month(year: int, month: int, delta: int) -> tuple[int, int]:
     return index // 12, index % 12 + 1
 
 
-def month_grid(year: int, month: int) -> list[list[date]]:
-    """整月网格：周一为一周起点，行数 5 或 6，首尾包含邻月日期。"""
-    first = date(year, month, 1)
-    start = first - timedelta(days=first.weekday())
-    last = date(year, month, pycal.monthrange(year, month)[1])
-    end = last + timedelta(days=6 - last.weekday())
-    total = (end - start).days + 1
-    return [
-        [start + timedelta(days=week * 7 + weekday) for weekday in range(7)]
-        for week in range(total // 7)
-    ]
+
 
 
 def counts_by_date(items: Iterable[Any]) -> dict[date, int]:

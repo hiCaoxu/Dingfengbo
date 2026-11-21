@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from ..db.models import (
@@ -93,146 +93,186 @@ def collect(
     def want(module: str) -> bool:
         return module in selected
 
+    # 时间轴只显示摘要，所以每张表都只取用得到的列，并把日期过滤下推到 SQL：
+    # select(Todo) 会把整行（含长正文）物化成 ORM 对象，一年几千条记录时
+    # 既慢又占内存，而这里 90% 的字段根本用不到。
+    # updated_at 是 UTC，本地日期要多留两天余量再交给 Python 精确判断。
+    utc_start = datetime.combine(start - timedelta(days=2), time.min)
     with session_scope() as session:
         if want("todo"):
-            for item in session.scalars(
-                select(Todo).where(
+            rows = session.execute(
+                select(
+                    Todo.id, Todo.title, Todo.due_date, Todo.due_time,
+                    Todo.completed, Todo.priority, Todo.tags, Todo.created_at,
+                ).where(
                     Todo.is_deleted.is_(False),
                     Todo.is_template.is_(False),
-                    Todo.created_at >= datetime.combine(start, time.min),
+                    or_(
+                        Todo.due_date.between(start, end),
+                        and_(
+                            Todo.due_date.is_(None),
+                            Todo.created_at >= utc_start,
+                        ),
+                    ),
                 )
-            ):
-                day = item.due_date or local_date_from_utc(item.created_at)
+            )
+            for row in rows:
+                day = row.due_date or local_date_from_utc(row.created_at)
                 if start <= day <= end:
                     items.append(
                         TimelineItem(
-                            "todo", "todos", item.id, day, item.title,
-                            ("已完成" if item.completed else "进行中")
-                            + (f" · {item.priority}" if item.priority else ""),
-                            _tags(item.tags) + ([item.priority] if item.priority else []),
-                            item.due_time or "",
+                            "todo", "todos", row.id, day, row.title,
+                            ("已完成" if row.completed else "进行中")
+                            + (f" · {row.priority}" if row.priority else ""),
+                            _tags(row.tags) + ([row.priority] if row.priority else []),
+                            row.due_time or "",
                         )
                     )
         if want("diary"):
-            for item in session.scalars(
-                select(Diary).where(
-                    Diary.is_deleted.is_(False), Diary.date >= start, Diary.date <= end
+            rows = session.execute(
+                select(Diary.id, Diary.date, Diary.title, Diary.content).where(
+                    Diary.is_deleted.is_(False), Diary.date.between(start, end)
                 )
-            ):
+            )
+            for row in rows:
                 items.append(
                     TimelineItem(
-                        "diary", "diaries", item.id, item.date, item.title,
-                        _clip(item.content, 80),
+                        "diary", "diaries", row.id, row.date, row.title,
+                        _clip(row.content, 80),
                     )
                 )
         if want("notes"):
-            for item in session.scalars(select(Note).where(Note.is_deleted.is_(False))):
-                day = local_date_from_utc(item.updated_at)
+            rows = session.execute(
+                select(Note.id, Note.title, Note.content, Note.tags, Note.updated_at).where(
+                    Note.is_deleted.is_(False), Note.updated_at >= utc_start
+                )
+            )
+            for row in rows:
+                day = local_date_from_utc(row.updated_at)
                 if start <= day <= end:
                     items.append(
                         TimelineItem(
-                            "notes", "notes", item.id, day, item.title or "未命名笔记",
-                            _clip(item.content, 80), _tags(item.tags),
+                            "notes", "notes", row.id, day, row.title or "未命名笔记",
+                            _clip(row.content, 80), _tags(row.tags),
                         )
                     )
         if want("exercise"):
-            for item in session.scalars(
-                select(Exercise).where(
-                    Exercise.is_deleted.is_(False), Exercise.date >= start, Exercise.date <= end
-                )
-            ):
+            rows = session.execute(
+                select(
+                    Exercise.id, Exercise.date, Exercise.kind, Exercise.minutes,
+                    Exercise.calories, Exercise.note,
+                ).where(Exercise.is_deleted.is_(False), Exercise.date.between(start, end))
+            )
+            for row in rows:
                 items.append(
                     TimelineItem(
-                        "exercise", "exercises", item.id, item.date,
-                        f"{item.kind} {int(item.minutes or 0)} 分钟",
-                        f"{round(float(item.calories or 0))} 千卡" + (f" · {item.note}" if item.note else ""),
-                        [item.kind],
+                        "exercise", "exercises", row.id, row.date,
+                        f"{row.kind} {int(row.minutes or 0)} 分钟",
+                        f"{round(float(row.calories or 0))} 千卡"
+                        + (f" · {row.note}" if row.note else ""),
+                        [row.kind],
                     )
                 )
         if want("diet"):
-            for item in session.scalars(
-                select(Diet).where(
-                    Diet.is_deleted.is_(False), Diet.date >= start, Diet.date <= end
+            rows = session.execute(
+                select(Diet.id, Diet.date, Diet.meal, Diet.food, Diet.calories).where(
+                    Diet.is_deleted.is_(False), Diet.date.between(start, end)
                 )
-            ):
+            )
+            for row in rows:
                 items.append(
                     TimelineItem(
-                        "diet", "diets", item.id, item.date,
-                        f"{item.meal} · {item.food}",
-                        f"{round(float(item.calories or 0))} 千卡", [item.meal],
+                        "diet", "diets", row.id, row.date,
+                        f"{row.meal} · {row.food}",
+                        f"{round(float(row.calories or 0))} 千卡", [row.meal],
                     )
                 )
         if want("weight"):
-            for item in session.scalars(
-                select(Weight).where(
-                    Weight.is_deleted.is_(False), Weight.date >= start, Weight.date <= end
+            rows = session.execute(
+                select(Weight.id, Weight.date, Weight.kg, Weight.body_fat).where(
+                    Weight.is_deleted.is_(False), Weight.date.between(start, end)
                 )
-            ):
+            )
+            for row in rows:
                 items.append(
                     TimelineItem(
-                        "weight", "weights", item.id, item.date, f"体重 {float(item.kg):g} kg",
-                        f"体脂 {float(item.body_fat):g}%" if item.body_fat else "",
+                        "weight", "weights", row.id, row.date, f"体重 {float(row.kg):g} kg",
+                        f"体脂 {float(row.body_fat):g}%" if row.body_fat else "",
                     )
                 )
         if want("sleep"):
-            for item in session.scalars(
-                select(Sleep).where(
-                    Sleep.is_deleted.is_(False), Sleep.date >= start, Sleep.date <= end
-                )
-            ):
+            rows = session.execute(
+                select(
+                    Sleep.id, Sleep.date, Sleep.hours, Sleep.bedtime,
+                    Sleep.wake_time, Sleep.quality,
+                ).where(Sleep.is_deleted.is_(False), Sleep.date.between(start, end))
+            )
+            for row in rows:
                 items.append(
                     TimelineItem(
-                        "sleep", "sleeps", item.id, item.date,
-                        f"睡眠 {float(item.hours or 0):g} 小时",
-                        f"{item.bedtime} → {item.wake_time} · 质量 {item.quality}/5",
+                        "sleep", "sleeps", row.id, row.date,
+                        f"睡眠 {float(row.hours or 0):g} 小时",
+                        f"{row.bedtime} → {row.wake_time} · 质量 {row.quality}/5",
                     )
                 )
         if want("fun"):
-            for item in session.scalars(
-                select(Entertainment).where(Entertainment.is_deleted.is_(False))
-            ):
-                day = local_date_from_utc(item.updated_at)
+            rows = session.execute(
+                select(
+                    Entertainment.id, Entertainment.title, Entertainment.kind,
+                    Entertainment.status, Entertainment.updated_at,
+                ).where(
+                    Entertainment.is_deleted.is_(False),
+                    Entertainment.updated_at >= utc_start,
+                )
+            )
+            for row in rows:
+                day = local_date_from_utc(row.updated_at)
                 if start <= day <= end:
                     items.append(
                         TimelineItem(
-                            "fun", "entertainments", item.id, day, item.title,
-                            f"{item.kind} · {item.status}", [item.kind, item.status],
+                            "fun", "entertainments", row.id, day, row.title,
+                            f"{row.kind} · {row.status}", [row.kind, row.status],
                         )
                     )
         if want("finance"):
-            for item in session.scalars(
-                select(Transaction).where(
-                    Transaction.is_deleted.is_(False),
-                    Transaction.date >= start,
-                    Transaction.date <= end,
-                )
-            ):
-                sign = "+" if item.kind == "income" else "-"
+            rows = session.execute(
+                select(
+                    Transaction.id, Transaction.date, Transaction.kind,
+                    Transaction.category, Transaction.amount, Transaction.note,
+                ).where(Transaction.is_deleted.is_(False), Transaction.date.between(start, end))
+            )
+            for row in rows:
+                sign = "+" if row.kind == "income" else "-"
                 items.append(
                     TimelineItem(
-                        "finance", "transactions", item.id, item.date,
-                        f"{item.category or '未分类'} {sign}¥{float(item.amount or 0):,.2f}",
-                        _clip(item.note, 50), [item.category] if item.category else [],
+                        "finance", "transactions", row.id, row.date,
+                        f"{row.category or '未分类'} {sign}¥{float(row.amount or 0):,.2f}",
+                        _clip(row.note, 50), [row.category] if row.category else [],
                     )
                 )
         if want("habit"):
             habits = {
-                item.id: item.name
-                for item in session.scalars(select(Habit).where(Habit.is_deleted.is_(False)))
+                row.id: row.name
+                for row in session.execute(
+                    select(Habit.id, Habit.name).where(Habit.is_deleted.is_(False))
+                )
             }
-            for log in session.scalars(
-                select(HabitLog).where(
+            logs = session.execute(
+                select(HabitLog.id, HabitLog.habit_id, HabitLog.date, HabitLog.note).where(
                     HabitLog.is_deleted.is_(False),
                     HabitLog.done.is_(True),
-                    HabitLog.date >= start,
-                    HabitLog.date <= end,
+                    HabitLog.date.between(start, end),
                 )
-            ):
-                name = habits.get(log.habit_id)
+            )
+            for row in logs:
+                name = habits.get(row.habit_id)
                 if not name:
                     continue
                 items.append(
-                    TimelineItem("habit", "habit_logs", log.id, log.date, f"打卡：{name}", log.note or "", [name])
+                    TimelineItem(
+                        "habit", "habit_logs", row.id, row.date,
+                        f"打卡：{name}", row.note or "", [name],
+                    )
                 )
 
     if tag:
@@ -248,26 +288,31 @@ def tag_counts(days: int = 365, today: date | None = None) -> list[tuple[str, in
     counts: dict[str, int] = defaultdict(int)
     sources: dict[str, set[str]] = defaultdict(set)
     with session_scope() as session:
-        for item in session.scalars(
-            select(Todo).where(
+        # 只要 tags / kind / status / name 这几列：聚合标签不需要正文。
+        for row in session.execute(
+            select(Todo.tags).where(
                 Todo.is_deleted.is_(False), Todo.created_at >= datetime.combine(start, time.min)
             )
         ):
-            for tag in _tags(item.tags):
+            for tag in _tags(row.tags):
                 counts[tag] += 1
                 sources[tag].add("任务")
-        for item in session.scalars(select(Note).where(Note.is_deleted.is_(False))):
-            for tag in _tags(item.tags):
+        for row in session.execute(select(Note.tags).where(Note.is_deleted.is_(False))):
+            for tag in _tags(row.tags):
                 counts[tag] += 1
                 sources[tag].add("笔记")
-        for item in session.scalars(select(Entertainment).where(Entertainment.is_deleted.is_(False))):
-            for tag in (item.kind, item.status):
+        for row in session.execute(
+            select(Entertainment.kind, Entertainment.status).where(
+                Entertainment.is_deleted.is_(False)
+            )
+        ):
+            for tag in (row.kind, row.status):
                 if tag:
                     counts[tag] += 1
                     sources[tag].add("娱乐")
-        for habit in session.scalars(select(Habit).where(Habit.is_deleted.is_(False))):
-            counts[habit.name] += 0
-            sources[habit.name].add("习惯")
+        for row in session.execute(select(Habit.name).where(Habit.is_deleted.is_(False))):
+            counts[row.name] += 0
+            sources[row.name].add("习惯")
     ordered = sorted(counts.items(), key=lambda item: -item[1])
     return [(tag, count, sources[tag]) for tag, count in ordered if count > 0]
 
@@ -382,19 +427,21 @@ def link_targets(query: str = "", limit: int = 20) -> list[dict[str, Any]]:
             (Entertainment, "entertainments", Entertainment.title),
         ]
         for model, table, column in candidates:
-            stmt = select(model).where(model.is_deleted.is_(False))
+            # 只取 id 与标题列：候选列表不需要正文，也顺手消掉了逐行 record_title
+            # 的 N+1 查询（每行一次 session.get）。
+            stmt = select(model.id, column).where(model.is_deleted.is_(False))
             if keyword:
                 stmt = stmt.where(column.contains(keyword, autoescape=True))
             if table == "diaries":
                 stmt = stmt.order_by(Diary.date.desc())
             else:
                 stmt = stmt.order_by(model.updated_at.desc())
-            for obj in session.scalars(stmt.limit(limit)):
+            for row in session.execute(stmt.limit(limit)):
                 result.append(
                     {
                         "table": table,
-                        "record_id": obj.id,
-                        "title": record_title(session, table, obj.id),
+                        "record_id": row.id,
+                        "title": str(row[1] or "") or table_label(table),
                         "label": table_label(table),
                     }
                 )

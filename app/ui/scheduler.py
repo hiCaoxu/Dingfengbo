@@ -29,6 +29,11 @@ _reminder_timer: threading.Timer | None = None
 
 REMINDER_INTERVAL = 60  # 秒：每分钟检查一次到点提醒
 
+# 恢复备份、停机等破坏性窗口里暂停自动同步：否则后台 pull 会写进即将被整库替换的
+# 连接（database is closed），或者把用户在恢复界面上的操作搅进半新半旧的库。
+_paused = threading.Event()
+_pause_reason = ""
+
 
 def bind(
     page: ft.Page,
@@ -56,7 +61,32 @@ def _on_interval() -> None:
     _start_interval()
 
 
+def pause_auto_sync(reason: str) -> None:
+    """暂停自动同步（启动同步、周期同步、写后同步一并暂停）。"""
+    global _pause_reason
+    _pause_reason = reason
+    _paused.set()
+    logger.info("自动同步已暂停：%s", reason)
+
+
+def resume_auto_sync() -> None:
+    global _pause_reason
+    if not _paused.is_set():
+        return
+    _paused.clear()
+    _pause_reason = ""
+    logger.info("自动同步已恢复")
+
+
+def auto_sync_paused() -> bool:
+    return _paused.is_set()
+
+
 def _run_sync_async() -> None:
+    if _paused.is_set():
+        logger.debug("自动同步已暂停（%s），跳过本次", _pause_reason)
+        return
+
     def worker() -> None:
         sync_client.sync_once()
         if _page is not None:
@@ -124,7 +154,7 @@ def _show_reminder_snack(count: int) -> None:
 def schedule_sync(delay_ms: int = 10_000) -> None:
     """写后触发；短时间内的多次写入合并为一次。"""
     global _pending_timer
-    if _page is None:
+    if _page is None or _paused.is_set():
         return
     if _pending_timer is not None:
         _pending_timer.cancel()

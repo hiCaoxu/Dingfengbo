@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import json
 import logging
 import os
@@ -92,6 +93,12 @@ _DEFAULT_SETTINGS: dict[str, Any] = {
 
 # settings.json 会被同步线程（游标落盘）与设置界面并发读写，统一串行化避免互相覆盖。
 _SETTINGS_LOCK = threading.Lock()
+
+# settings.json 的解析结果按 (mtime_ns, size) 缓存。load_settings() 在导航重建、
+# Ctrl+数字跳转这类高频路径上被反复调用，每次都读盘 + DPAPI 解密（ctypes 调
+# CryptUnprotectData）代价不小。外部改写文件会改变 mtime，缓存自动失效；
+# save_settings 写完主动清空，避免同一时间戳精度内命中旧值。
+_SETTINGS_CACHE: tuple[tuple[int, int], dict[str, Any]] | None = None
 
 
 _B64_PREFIX = "b64:"
@@ -192,8 +199,17 @@ def _deobfuscate_token(value: str) -> str:
 
 
 def load_settings() -> dict[str, Any]:
+    global _SETTINGS_CACHE
+    try:
+        stat = SETTINGS_PATH.stat()
+        stamp: tuple[int, int] | None = (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        stamp = None
+    if stamp is not None and _SETTINGS_CACHE is not None and _SETTINGS_CACHE[0] == stamp:
+        # 命中缓存也要返回深拷贝：调用方（同步游标、设置界面）会就地改字段。
+        return copy.deepcopy(_SETTINGS_CACHE[1])
     settings = dict(_DEFAULT_SETTINGS)
-    if SETTINGS_PATH.exists():
+    if stamp is not None:
         try:
             loaded = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
             if isinstance(loaded, dict):
@@ -206,10 +222,13 @@ def load_settings() -> dict[str, Any]:
     ai_key = settings.get("ai_api_key")
     if ai_key:
         settings["ai_api_key"] = _deobfuscate_token(str(ai_key))
+    if stamp is not None:
+        _SETTINGS_CACHE = (stamp, copy.deepcopy(settings))
     return settings
 
 
 def save_settings(settings: dict[str, Any]) -> None:
+    global _SETTINGS_CACHE
     with _SETTINGS_LOCK:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         merged = load_settings()
@@ -223,6 +242,8 @@ def save_settings(settings: dict[str, Any]) -> None:
             json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         os.replace(tmp, SETTINGS_PATH)
+        # 主动失效：同一 mtime 精度下连续写入可能拿到旧缓存。
+        _SETTINGS_CACHE = None
 
 
 def get_setting(key: str, default: Any = None) -> Any:

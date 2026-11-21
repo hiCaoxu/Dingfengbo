@@ -51,12 +51,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 图片落盘目录：与数据库同级的 files/
-
+# 图片落盘目录：与数据库同级的 files/（可用 DINGFENGBO_SERVER_FILES 覆盖）。
+# 清理策略：上传只增不删——文件名是内容摘要，可能仍被多端记录的图片引用，
+# 服务端无法判断「已无人引用」，因此不做自动删除。磁盘占用需人工巡检：
+# 定期备份 data 卷后，可按修改时间清理半年前的 *.jpg/png/webp 并接受旧图 404。
 FILES_DIR = Path(os.environ.get("DINGFENGBO_SERVER_FILES", DB_PATH.parent / "files"))
 FILES_DIR.mkdir(parents=True, exist_ok=True)
+
+
+class _ImmutableStaticFiles(StaticFiles):
+    """图片文件名就是内容摘要，内容永不改变，可以放心长缓存。
+
+    不加这个头时每次打开日记/笔记都要回源取一遍封面，图片多了明显变慢。
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
 # 文件名是内容摘要，本身不可猜，直接静态暴露，客户端拿到的就是可长期引用的链接。
-app.mount("/files", StaticFiles(directory=str(FILES_DIR)), name="files")
+app.mount("/files", _ImmutableStaticFiles(directory=str(FILES_DIR)), name="files")
 
 
 class PullCursor(BaseModel):
@@ -294,6 +310,11 @@ async def upload(
     摘要去重：同一张图重复上传只占一份空间，地址保持稳定。
     """
     owner = owner_of(authorization)
+    # 先看声明的长度：超大请求体等到 read() 才发现，已经被完整接收/落盘了一遍。
+    # 留 4KB 余量给 multipart 边界与头部。
+    declared = request.headers.get("content-length", "").strip()
+    if declared.isdigit() and int(declared) > MAX_UPLOAD_BYTES + 4096:
+        raise HTTPException(status_code=413, detail="图片过大（超过 12MB）")
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="文件为空")

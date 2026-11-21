@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import case, or_, select
 from sqlalchemy.orm import Session
 
 from ..db.models import Diary, Entertainment, Note, Todo, Transaction
@@ -171,6 +171,18 @@ def _like(column, keyword: str):
     return column.contains(keyword, autoescape=True)
 
 
+def _title_first(column, keywords: list[str]):
+    """标题命中优先，下推到 SQL 的 ``ORDER BY``。
+
+    每张表只取 ``limit * 3`` 行候选再在 Python 里按分数截断。候选窗口按时间排序时，
+    正文命中但标题不命中的新记录会把标题命中的老记录挤出窗口——分数再高也看不到。
+    这里先把标题命中的行排到前面，窗口才真的覆盖「最可能相关」的那批记录。
+    """
+    if not keywords:
+        return None
+    return case((or_(*[_like(column, k) for k in keywords]), 0), else_=1)
+
+
 def _search_todos(session: Session, query: Query, limit: int) -> list[Hit]:
     stmt = select(Todo).where(Todo.is_deleted.is_(False), Todo.is_template.is_(False))
     if query.keywords:
@@ -185,7 +197,12 @@ def _search_todos(session: Session, query: Query, limit: int) -> list[Hit]:
         stmt = stmt.where(Todo.due_date >= query.since)
     if query.until:
         stmt = stmt.where(Todo.due_date <= query.until)
-    stmt = stmt.order_by(Todo.completed, Todo.due_date, Todo.updated_at.desc()).limit(limit * 3)
+    order: list = [Todo.completed]
+    title_first = _title_first(Todo.title, query.keywords)
+    if title_first is not None:
+        order.append(title_first)
+    order += [Todo.due_date, Todo.updated_at.desc()]
+    stmt = stmt.order_by(*order).limit(limit * 3)
     hits: list[Hit] = []
     for item in session.scalars(stmt):
         status = "已完成" if item.completed else ("有截止日" if item.due_date else "无截止日")
@@ -214,7 +231,12 @@ def _search_notes(session: Session, query: Query, limit: int) -> list[Hit]:
             | or_(*[_like(Note.content, k) for k in query.keywords])
             | or_(*[_like(Note.tags, k) for k in query.keywords])
         )
-    stmt = stmt.order_by(Note.updated_at.desc()).limit(limit * 3)
+    order: list = []
+    title_first = _title_first(Note.title, query.keywords)
+    if title_first is not None:
+        order.append(title_first)
+    order.append(Note.updated_at.desc())
+    stmt = stmt.order_by(*order).limit(limit * 3)
     return [
         Hit(
             module="notes",
@@ -241,7 +263,12 @@ def _search_diaries(session: Session, query: Query, limit: int) -> list[Hit]:
         stmt = stmt.where(Diary.date >= query.since)
     if query.until:
         stmt = stmt.where(Diary.date <= query.until)
-    stmt = stmt.order_by(Diary.date.desc()).limit(limit * 3)
+    order: list = []
+    title_first = _title_first(Diary.title, query.keywords)
+    if title_first is not None:
+        order.append(title_first)
+    order.append(Diary.date.desc())
+    stmt = stmt.order_by(*order).limit(limit * 3)
     return [
         Hit(
             module="diary",
@@ -269,7 +296,12 @@ def _search_transactions(session: Session, query: Query, limit: int) -> list[Hit
         stmt = stmt.where(Transaction.date >= query.since)
     if query.until:
         stmt = stmt.where(Transaction.date <= query.until)
-    stmt = stmt.order_by(Transaction.date.desc(), Transaction.updated_at.desc()).limit(limit * 3)
+    order: list = []
+    title_first = _title_first(Transaction.category, query.keywords)
+    if title_first is not None:
+        order.append(title_first)
+    order += [Transaction.date.desc(), Transaction.updated_at.desc()]
+    stmt = stmt.order_by(*order).limit(limit * 3)
     hits: list[Hit] = []
     for item in session.scalars(stmt):
         sign = "+" if item.kind == "income" else "-"
@@ -296,7 +328,12 @@ def _search_entertainments(session: Session, query: Query, limit: int) -> list[H
             or_(*[_like(Entertainment.title, k) for k in query.keywords])
             | or_(*[_like(Entertainment.note, k) for k in query.keywords])
         )
-    stmt = stmt.order_by(Entertainment.updated_at.desc()).limit(limit * 3)
+    order: list = []
+    title_first = _title_first(Entertainment.title, query.keywords)
+    if title_first is not None:
+        order.append(title_first)
+    order.append(Entertainment.updated_at.desc())
+    stmt = stmt.order_by(*order).limit(limit * 3)
     return [
         Hit(
             module="fun",

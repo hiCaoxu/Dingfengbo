@@ -40,18 +40,49 @@ def _error_state(on_retry: Callable[[], None]) -> ft.Control:
     )
 
 
+class RenderToken:
+    """页面渲染序号：每次重建界面 ``bump()`` 一次，后台任务拿着旧序号即作废。
+
+    慢查询晚到时界面可能已经换了一版（切模块、切月份、切筛选），旧结果写回去
+    就是把用户刚看到的新数据刷成旧数据；序号比对是这里唯一可靠的守卫。
+    """
+
+    def __init__(self) -> None:
+        self._value = 0
+
+    def bump(self) -> int:
+        self._value += 1
+        return self._value
+
+    def current(self) -> int:
+        return self._value
+
+    def is_current(self, value: int) -> bool:
+        return value == self._value
+
+
 def background_section(
     page: ft.Page,
     loader: Callable[[], object],
     renderer: Callable[[object], ft.Control],
     placeholder: str = "加载中…",
+    token: RenderToken | None = None,
 ) -> ft.Container:
     """先返回占位容器，后台执行 loader，再在 UI 线程用 renderer 替换内容。
 
     失败时渲染「加载失败 + 重试」，而不是把占位槽永远停在「加载中…」——
-    静默的无限加载比报错更难排查。
+    静默的无限加载比报错更难排查。``token`` 提供跨重建的过期判定：同一槽位
+    连续加载以最后一次为准，整页重建后旧结果直接丢弃。
     """
     holder = ft.Container(content=_placeholder(placeholder), expand=True)
+    state = {"attempt": 0}
+
+    def is_stale(attempt: int, token_value: int | None) -> bool:
+        if attempt != state["attempt"]:
+            return True  # 同一槽位已经有更新的一次加载
+        if token is not None and token_value is not None and not token.is_current(token_value):
+            return True  # 整页已重建
+        return False
 
     def retry() -> None:
         holder.content = _placeholder(placeholder)
@@ -59,12 +90,18 @@ def background_section(
         page.run_thread(load)
 
     def load() -> None:
+        state["attempt"] += 1
+        attempt = state["attempt"]
+        token_value = token.current() if token is not None else None
         try:
             data = loader()
         except Exception:
             logger.exception("后台查询失败")
 
             async def show_error() -> None:
+                if is_stale(attempt, token_value):
+                    logger.debug("过期的查询失败结果已丢弃")
+                    return
                 try:
                     holder.content = _error_state(retry)
                     page.update()
@@ -78,6 +115,9 @@ def background_section(
             return
 
         async def apply() -> None:
+            if is_stale(attempt, token_value):
+                logger.debug("过期的后台查询结果已丢弃")
+                return
             try:
                 holder.content = renderer(data)
                 page.update()

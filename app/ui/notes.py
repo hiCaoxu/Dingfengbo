@@ -95,7 +95,7 @@ def _code_block(code: str, lang: str) -> ft.Control:
         )
     return ft.Container(
         content=ft.Column(rows, spacing=0, scroll=ft.ScrollMode.AUTO),
-        bgcolor="#F7F8F6",
+        bgcolor=th.SUBTLE,
         border=ft.Border.all(1, th.DIVIDER),
         border_radius=8,
         padding=ft.Padding.symmetric(vertical=8, horizontal=10),
@@ -111,7 +111,7 @@ def _table(header: list[str], rows: list[list[str]]) -> ft.Control:
         ],
         border=ft.Border.all(1, th.DIVIDER),
         border_radius=8,
-        heading_row_color="#F4F6F3",
+        heading_row_color=th.TABLE_HEAD,
     )
     return ft.Row([table], scroll=ft.ScrollMode.AUTO)
 
@@ -251,7 +251,7 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
 
     title_field = ft.TextField(
         value=title_text,
-        border=ft.InputBorder.NONE,
+        border=ft.NoInputBorder(),
         border_width=0,
         filled=False,
         color=th.TEXT,
@@ -266,7 +266,7 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
         )
     tags_field = ft.TextField(
         value=tags_text(tags_raw),
-        border=ft.InputBorder.NONE,
+        border=ft.NoInputBorder(),
         border_width=0,
         filled=False,
         color=th.TEXT_MUTED,
@@ -317,7 +317,7 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
         value=content_text,
         multiline=True,
         expand=True,
-        border=ft.InputBorder.NONE,
+        border=ft.NoInputBorder(),
         border_width=0,
         filled=False,
         color=th.TEXT,

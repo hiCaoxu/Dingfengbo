@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -207,8 +208,28 @@ def restore_database(backup_path: Path | str, db_path: Path | None = None) -> di
     return {"restored": target, "safety": safety}
 
 
+# 导出包里不允许出现凭证：zip 常被随手丢进云盘或发给别人，带上 token 等于
+# 把同步服务端和模型账号一起送出去。导入时缺凭证只会要求重新填一次。
+_CREDENTIAL_KEYS = ("sync_token", "ai_api_key")
+
+
+def _redacted_settings() -> dict | None:
+    """读一份脱敏后的设置副本；读不到就返回 None（导出包里不放设置）。"""
+    try:
+        data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        logger.debug("读取设置文件失败，导出包不含设置", exc_info=True)
+        return None
+    if not isinstance(data, dict):
+        return None
+    for key in _CREDENTIAL_KEYS:
+        if key in data:
+            data[key] = ""
+    return data
+
+
 def export_full_data(dest_zip: Path | str, db_path: Path | None = None) -> Path:
-    """导出完整数据：数据库一致性快照 + settings.json（打包为 zip）。"""
+    """导出完整数据：数据库一致性快照 + 脱敏后的 settings.json（打包为 zip）。"""
     dest = Path(dest_zip)
     dest.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="dfb-export-") as tmp:
@@ -217,8 +238,11 @@ def export_full_data(dest_zip: Path | str, db_path: Path | None = None) -> Path:
         )
         with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.write(snapshot, arcname="dingfengbo.db")
-            if SETTINGS_PATH.exists():
-                archive.write(SETTINGS_PATH, arcname="settings.json")
+            settings = _redacted_settings()
+            if settings is not None:
+                archive.writestr(
+                    "settings.json", json.dumps(settings, ensure_ascii=False, indent=2)
+                )
     logger.info("已导出完整数据：%s", dest)
     return dest
 

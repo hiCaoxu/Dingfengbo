@@ -221,7 +221,7 @@ def open_draft_dialog(page: ft.Page, drafts: list, on_saved=None) -> ft.AlertDia
             snack(page, "没有可保存的草稿", th.TEXT_MUTED)
             return
         bar = ft.SnackBar(
-            ft.Text(f"已保存 {len(saved)} 条记录", color="#FFFFFF", size=12),
+            ft.Text(f"已保存 {len(saved)} 条记录", color=th.ON_PRIMARY, size=12),
             bgcolor=th.PRIMARY,
             action="撤销",
             on_action=lambda e: _undo(saved),

@@ -13,6 +13,7 @@ from .models import (
     MODEL_BY_TABLE,
     Base,
     Diary,
+    HabitLog,
     SyncConflict,
     SyncIssue,
     SyncMixin,
@@ -330,6 +331,34 @@ def _parse(column, value: Any) -> Any:
 
 _VERSION_AGNOSTIC_FIELDS = {"owner_id", "sync_status", "sync_seq"}
 
+# 业务键合并：两个客户端各自新建的同一天记录 id 不同，但业务上是同一行。
+# Diary 按日期唯一；HabitLog 按 (习惯, 日期) 唯一（「同天只保留一条」的承诺）。
+_MERGE_KEYS: dict[type, tuple[str, ...]] = {
+    Diary: ("date",),
+    HabitLog: ("habit_id", "date"),
+}
+
+
+def _find_merge_target(session: Session, model, owner: str, data: dict[str, Any]):
+    """按业务键找本地等价行；该模型不参与合并或键缺失时返回 None。"""
+    keys = _MERGE_KEYS.get(model)
+    if not keys:
+        return None
+    conditions = [model.owner_id == owner]
+    for key in keys:
+        raw = data.get(key)
+        if not raw:
+            return None
+        column = getattr(model, key)
+        if key == "date":
+            try:
+                conditions.append(column == date.fromisoformat(str(raw)[:10]))
+            except ValueError:
+                return None
+        else:
+            conditions.append(column == str(raw))
+    return session.scalar(select(model).where(*conditions))
+
 
 def _same_version(obj: SyncMixin, model, data: dict[str, Any]) -> bool:
     """比较业务字段，忽略归属与同步元数据，用于幂等推送确认。"""
@@ -362,12 +391,10 @@ def apply_remote(
         owner = str(data.get("owner_id", "local"))
         record_id = str(data["id"])
         obj = session.get(model, record_id)
-        merged_by_date = False
-        if obj is None and model is Diary and data.get("date"):
-            obj = session.scalar(
-                select(Diary).where(Diary.owner_id == owner, Diary.date == date.fromisoformat(data["date"][:10]))
-            )
-            merged_by_date = obj is not None
+        merged = False
+        if obj is None:
+            obj = _find_merge_target(session, model, owner, data)
+            merged = obj is not None
         if obj is None:
             obj = model()
             session.add(obj)
@@ -381,8 +408,8 @@ def apply_remote(
                 _record_conflict(session, str(table), record_id, obj.updated_at, remote_time)
             continue
         for column in model.__table__.columns:
-            # 按 (owner,date) 合并出的本地行保留本地主键，避免被远端 id 改写行身份。
-            if column.name == "id" and merged_by_date:
+            # 按业务键（日期 / 习惯+日期）合并出的本地行保留本地主键，避免被远端 id 改写行身份。
+            if column.name == "id" and merged:
                 continue
             if column.name in data:
                 setattr(obj, column.name, _parse(column, data[column.name]))

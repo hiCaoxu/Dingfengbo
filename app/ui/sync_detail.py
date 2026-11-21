@@ -72,7 +72,7 @@ def open_sync_detail(page: ft.Page, refresh_status=None) -> ft.AlertDialog:
             ft.Button(
                 label,
                 bgcolor=th.PRIMARY if active["view"] == label else th.PRIMARY_LIGHT,
-                color="#FFFFFF" if active["view"] == label else th.TEXT_MUTED,
+                color=th.ON_PRIMARY if active["view"] == label else th.TEXT_MUTED,
                 elevation=0,
                 on_click=lambda e, name=label: switch(name),
                 style=ft.ButtonStyle(

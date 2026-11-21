@@ -37,7 +37,7 @@ def _user_bubble(text: str) -> ft.Control:
         [
             ft.Container(expand=True),
             ft.Container(
-                ft.Text(text, size=13, color="#FFFFFF"),
+                ft.Text(text, size=13, color=th.CARD),
                 bgcolor=th.PRIMARY,
                 border_radius=12,
                 padding=ft.Padding.symmetric(vertical=10, horizontal=14),
@@ -385,7 +385,7 @@ def build(page: ft.Page, refresh) -> ft.Control:
             ft.Container(
                 messages_column,
                 expand=True,
-                bgcolor="#FBFAF7",
+                bgcolor=th.SUBTLE,
                 border=th.card_border(),
                 border_radius=12,
                 padding=ft.Padding.all(14),

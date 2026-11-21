@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from app.db.models import Note, Todo
 from app.db.session import session_scope
@@ -77,6 +77,29 @@ class SearchTests(unittest.TestCase):
         grouped = search("体检", today=date.today())
         hits = flatten(grouped)
         self.assertEqual(hits, sorted(hits, key=lambda hit: -hit.score))
+
+    def test_title_match_survives_candidate_window(self) -> None:
+        # 候选窗口只有 limit*3 行：标题命中的老记录不能被一堆更新更近的正文命中挤掉。
+        with session_scope() as session:
+            session.add(
+                Note(
+                    title="体检报告",
+                    content="无关内容",
+                    tags="[]",
+                    updated_at=datetime(2020, 1, 1),
+                )
+            )
+            session.add_all(
+                Note(
+                    title=f"流水笔记 {index}",
+                    content="体检相关的一句话",
+                    tags="[]",
+                    updated_at=datetime(2026, 1, 1),
+                )
+                for index in range(20)
+            )
+        titles = [hit.title for hit in search("体检", today=date.today()).get("notes", [])]
+        self.assertIn("体检报告", titles)
 
 
 class SearchDataKindsTests(unittest.TestCase):

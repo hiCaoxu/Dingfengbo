@@ -10,6 +10,7 @@ from __future__ import annotations
 import calendar
 from datetime import date, timedelta
 from typing import Any
+from uuid import NAMESPACE_URL, uuid5
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -20,6 +21,16 @@ from ..db.session import session_scope
 
 PERIOD_LABELS = {"month": "每月", "week": "每周"}
 MAX_CATCH_UP = 12  # 一次最多补生成 12 期，避免长期未启动后爆量
+
+
+def occurrence_id(rule_id: str, due: date) -> str:
+    """周期交易的确定性主键：同一 (规则, 到期日) 在任何设备都会算出同一个 id。
+
+    ``next_date`` 只能保证本机不重复生成；两台设备先后离线启动时各自 ``create``
+    会得到两笔不同 UUID 的「本月房租」，同步后双份入账。改用确定性 id 后，
+    生成变成「每个 (规则, 到期日) 全宇宙只可能发生一次」。
+    """
+    return str(uuid5(NAMESPACE_URL, f"recur:{rule_id}:{due.isoformat()}"))
 
 
 def month_key(day: date | None = None) -> str:
@@ -47,7 +58,11 @@ def budgets(month: str | None = None) -> list[Budget]:
 
 
 def upsert_budget(month: str, category: str, amount: float, note: str = "") -> None:
-    """同一月份同一分类只保留一条（手动查再改，避免唯一约束在同步时冲突）。"""
+    """同一月份同一分类只保留一条（手动查再改，避免唯一约束在同步时冲突）。
+
+    ``month`` 为空表示长期条目；长期与月度同时存在时由 ``overview`` 按「月度优先」
+    取一条，写入侧不做合并，避免用户想改长期值时被月度值挡住。
+    """
     month = month or month_key()
     category = (category or "").strip()
     with session_scope() as session:
@@ -100,14 +115,23 @@ def overview(today: date | None = None) -> dict[str, Any]:
         actual = spending_by_category(session, start, end)
         month_expense = sum(actual.values())
 
-        total_budget = 0.0
-        categories: dict[str, float] = {}
+        # 同一分类可能同时存在「长期」与「本月」两条：月度条目覆盖长期条目，
+        # 不能相加，否则长期 1000 + 本月 1500 会变成 2500 的假上限。
+        monthly: dict[str, float] = {}
+        standing: dict[str, float] = {}
+        total_monthly = 0.0
+        total_standing = 0.0
         for row in rows:
             amount = float(row.amount or 0)
             if row.category:
-                categories[row.category] = categories.get(row.category, 0.0) + amount
+                bucket = monthly if row.month else standing
+                bucket[row.category] = bucket.get(row.category, 0.0) + amount
+            elif row.month:
+                total_monthly += amount
             else:
-                total_budget += amount
+                total_standing += amount
+        categories = {**standing, **monthly}
+        total_budget = total_monthly or total_standing
 
     items = []
     for category, amount in sorted(categories.items(), key=lambda item: -item[1]):
@@ -236,19 +260,24 @@ def generate_due(today: date | None = None) -> int:
                 continue
             guard = 0
             while rule.next_date and rule.next_date <= today and guard < MAX_CATCH_UP:
-                create(
-                    session,
-                    Transaction,
-                    kind=rule.kind or "expense",
-                    amount=float(rule.amount or 0),
-                    category=rule.category or "",
-                    account_id=account_id,
-                    date=rule.next_date,
-                    note=f"[周期] {rule.name}",
-                )
-                rule.last_generated = rule.next_date
-                rule.next_date = next_occurrence(rule, rule.next_date)
-                created += 1
+                due = rule.next_date
+                record_id = occurrence_id(rule.id, due)
+                # 先查再建：另一台设备可能已经用同一个 id 生成过这笔账。
+                if session.get(Transaction, record_id) is None:
+                    create(
+                        session,
+                        Transaction,
+                        id=record_id,
+                        kind=rule.kind or "expense",
+                        amount=float(rule.amount or 0),
+                        category=rule.category or "",
+                        account_id=account_id,
+                        date=due,
+                        note=f"[周期] {rule.name}",
+                    )
+                    created += 1
+                rule.last_generated = due
+                rule.next_date = next_occurrence(rule, due)
                 guard += 1
             if guard == MAX_CATCH_UP:
                 # 长期未启动：直接跳到下一个未来日期，避免下次启动继续补历史。

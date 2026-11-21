@@ -382,15 +382,15 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
 
     def save(_):
         if not title.value or not title.value.strip():
-            snack(page, "请填写标题", "#C97B63")
+            snack(page, "请填写标题", th.ACCENT)
             return
         due_time_value = (due_time.value or "").strip()
         if due_time_value and not valid_hm(due_time_value):
-            snack(page, "到期时间格式应为 HH:MM（如 09:30）", "#C97B63")
+            snack(page, "到期时间格式应为 HH:MM（如 09:30）", th.ACCENT)
             return
         remind_time_value = (remind_time.value or "").strip()
         if remind_time_value and not valid_hm(remind_time_value):
-            snack(page, "提醒时间格式应为 HH:MM（如 09:00）", "#C97B63")
+            snack(page, "提醒时间格式应为 HH:MM（如 09:00）", th.ACCENT)
             return
         offsets = sorted(remind_offsets)
         days_before = max(offsets) if offsets else -1
@@ -402,18 +402,18 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
             else:
                 parsed = parse_lunar(raw)
                 if not parsed:
-                    snack(page, "农历日期格式不正确，例如「九月初九」或「9-9」", "#C97B63")
+                    snack(page, "农历日期格式不正确，例如「九月初九」或「9-9」", th.ACCENT)
                     return
                 due_date = lunar_to_gregorian(*parsed)
                 if due_date is None:
-                    snack(page, "农历日期无效", "#C97B63")
+                    snack(page, "农历日期无效", th.ACCENT)
                     return
                 lunar_reminder = raw
         else:
             try:
                 due_date = _date(due.value)
             except ValueError:
-                snack(page, "到期日期格式不正确", "#C97B63")
+                snack(page, "到期日期格式不正确", th.ACCENT)
                 return
             lunar_reminder = ""
         rule = RULE_BY_LABEL.get(repeat.value or "不循环", "none")
@@ -423,10 +423,10 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
             try:
                 interval = int((interval_field.value or "1").strip())
             except ValueError:
-                snack(page, "间隔需为数字", "#C97B63")
+                snack(page, "间隔需为数字", th.ACCENT)
                 return
             if interval < 1:
-                snack(page, "间隔至少为 1", "#C97B63")
+                snack(page, "间隔至少为 1", th.ACCENT)
                 return
             custom_config: dict = {"unit": unit, "interval": interval}
             if skip_weekends_cb.value:
@@ -435,7 +435,7 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
                 custom_config["skip_holidays"] = True
             if unit == "week":
                 if not selected["weekdays"]:
-                    snack(page, "请至少选择一个星期", "#C97B63")
+                    snack(page, "请至少选择一个星期", th.ACCENT)
                     return
                 custom_config["weekdays"] = sorted(selected["weekdays"])
             elif unit == "month":
@@ -443,7 +443,7 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
                 custom_config["month_mode"] = mode
                 if mode == "day":
                     if not selected["month_days"] and not selected["month_last_day"]:
-                        snack(page, "请选择每月日期或「最后一天」", "#C97B63")
+                        snack(page, "请选择每月日期或「最后一天」", th.ACCENT)
                         return
                     custom_config["month_days"] = sorted(selected["month_days"])
                     custom_config["month_last_day"] = bool(selected["month_last_day"])
@@ -535,7 +535,7 @@ def open_note_dialog(page: ft.Page, note: Note | None = None, on_done: Callable 
 
     def save(_):
         if not (title.value or "").strip():
-            snack(page, "请填写标题", "#C97B63")
+            snack(page, "请填写标题", th.ACCENT)
             return
         fields = dict(title=title.value.strip(), tags=_tags(tags.value or ""), content=content.value or "")
         save_record(Note, note.id if note else None, fields)
@@ -565,12 +565,12 @@ def open_account_dialog(page: ft.Page, account: Account | None = None, on_done: 
 
     def save(_):
         if not (name.value or "").strip():
-            snack(page, "请填写账户名称", "#C97B63")
+            snack(page, "请填写账户名称", th.ACCENT)
             return
         try:
             amount = round(float(balance.value or 0), 2)
         except ValueError:
-            snack(page, "余额格式不正确", "#C97B63")
+            snack(page, "余额格式不正确", th.ACCENT)
             return
         fields = dict(name=name.value.strip(), kind=kind.value, initial_balance=amount)
         save_record(Account, account.id if account else None, fields)
@@ -598,7 +598,7 @@ def open_transaction_dialog(page: ft.Page, kind: str = "expense", tx: Transactio
                 missing.append((account_id, f"{deleted.name}（已删除）"))
     account_options = accounts + missing
     if not account_options:
-        snack(page, "请先新增账户", "#C97B63")
+        snack(page, "请先新增账户", th.ACCENT)
         return None
     account_ids = [str(account_id) for account_id, _ in account_options]
     kind_value = tx.kind if tx else kind
@@ -646,22 +646,22 @@ def open_transaction_dialog(page: ft.Page, kind: str = "expense", tx: Transactio
         try:
             value = round(float(amount.value or 0), 2)
         except ValueError:
-            snack(page, "金额格式不正确", "#C97B63")
+            snack(page, "金额格式不正确", th.ACCENT)
             return
         if value <= 0:
-            snack(page, "金额需大于 0", "#C97B63")
+            snack(page, "金额需大于 0", th.ACCENT)
             return
         try:
             record_date = _date(date_field.value, date.today()) or date.today()
         except ValueError:
-            snack(page, "日期格式不正确", "#C97B63")
+            snack(page, "日期格式不正确", th.ACCENT)
             return
         mapped = {"支出": "expense", "收入": "income", "转账": "transfer"}[kind_dd.value]
         account_id = str(account_dd.value)
         if mapped == "transfer" and (
             len(account_ids) < 2 or not to_dd.value or str(to_dd.value) == account_id
         ):
-            snack(page, "转账需要选择两个不同账户", "#C97B63")
+            snack(page, "转账需要选择两个不同账户", th.ACCENT)
             return
         fields = dict(
             kind=mapped,
@@ -704,14 +704,14 @@ def open_exercise_dialog(page: ft.Page, item: Exercise | None = None, on_done: C
         try:
             mins = int(float(minutes.value or 0))
         except ValueError:
-            snack(page, "时长格式不正确", "#C97B63")
+            snack(page, "时长格式不正确", th.ACCENT)
             return
         try:
             kcal = float(calories.value) if calories.value else None
             record_date = _date(day.value, date.today()) or date.today()
             distance_km = float(distance.value) if distance.value else None
         except ValueError:
-            snack(page, "日期、距离或热量格式不正确", "#C97B63")
+            snack(page, "日期、距离或热量格式不正确", th.ACCENT)
             return
         if kcal is None:
             # 估算需要体重：优先取最近一次体重记录，没有才退回默认值。
@@ -763,7 +763,7 @@ def open_diet_dialog(page: ft.Page, item: Diet | None = None, on_done: Callable 
                 with session_scope() as session:
                     kcal = calorie_of(session, food.value or "", weight)
         except ValueError:
-            snack(page, "请输入正确的日期、重量和热量", "#C97B63")
+            snack(page, "请输入正确的日期、重量和热量", th.ACCENT)
             return
         fields = dict(date=record_date, meal=meal.value,
                       food=food.value, grams=weight, calories=kcal, note=note.value or "")
@@ -791,16 +791,16 @@ def open_weight_dialog(page: ft.Page, item: Weight | None = None, on_done: Calla
         try:
             weight = float(kg.value or 0)
         except ValueError:
-            snack(page, "体重格式不正确", "#C97B63")
+            snack(page, "体重格式不正确", th.ACCENT)
             return
         if weight <= 0:
-            snack(page, "体重需大于 0", "#C97B63")
+            snack(page, "体重需大于 0", th.ACCENT)
             return
         try:
             record_date = _date(day.value, date.today()) or date.today()
             body_fat = float(fat.value) if fat.value else None
         except ValueError:
-            snack(page, "日期或体脂率格式不正确", "#C97B63")
+            snack(page, "日期或体脂率格式不正确", th.ACCENT)
             return
         fields = dict(date=record_date, kg=weight, body_fat=body_fat)
         save_record(Weight, item.id if item else None, fields)
@@ -825,12 +825,12 @@ def open_sleep_dialog(page: ft.Page, item: Sleep | None = None, on_done: Callabl
         hours = parse_hours(bedtime.value or "", wake.value or "")
         if hours == 0:
             # 校验失败保留弹窗，避免用户已填内容丢失。
-            snack(page, "时间格式应为 HH:MM", "#C97B63")
+            snack(page, "时间格式应为 HH:MM", th.ACCENT)
             return
         try:
             record_date = _date(day.value, date.today()) or date.today()
         except ValueError:
-            snack(page, "日期格式不正确", "#C97B63")
+            snack(page, "日期格式不正确", th.ACCENT)
             return
         try:
             quality_val = int(quality.value)
@@ -882,15 +882,15 @@ def open_entertainment_dialog(page: ft.Page, item: Entertainment | None = None, 
 
     def save(_):
         if not (title.value or "").strip():
-            snack(page, "请填写标题", "#C97B63")
+            snack(page, "请填写标题", th.ACCENT)
             return
         try:
             score = float(rating.value) if (rating.value or "").strip() else None
         except ValueError:
-            snack(page, "评分需为 0-10 的数字", "#C97B63")
+            snack(page, "评分需为 0-10 的数字", th.ACCENT)
             return
         if score is not None and not 0 <= score <= 10:
-            snack(page, "评分需在 0-10 之间", "#C97B63")
+            snack(page, "评分需在 0-10 之间", th.ACCENT)
             return
         fields = dict(
             title=title.value.strip(), kind=kind.value, status=status.value,
@@ -1123,17 +1123,30 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
     backup_text = ft.Text(f"最近备份：{last_backup}", size=11, color=th.TEXT_MUTED)
 
     def backup_now(_):
-        try:
-            path = backup_database(label="manual")
-        except Exception:
-            logger.exception("手动备份失败")
-            snack(page, "备份失败，详见日志", th.ACCENT)
-            return
-        today_text = date.today().isoformat()
-        save_settings({"last_backup_date": today_text})
-        backup_text.value = f"最近备份：{today_text}（{path.name}）"
-        # 下面 snack 会触发整页 update，无需单独刷新这个 Text。
-        snack(page, f"已备份：{path.name}", th.PRIMARY)
+        # 备份要拷贝整个 SQLite 文件，放事件循环里会卡住窗口，改到后台线程执行。
+        def worker() -> None:
+            try:
+                path = backup_database(label="manual")
+            except Exception:
+                logger.exception("手动备份失败")
+
+                async def fail() -> None:
+                    backup_text.value = "最近备份：失败，详见日志"
+                    snack(page, "备份失败，详见日志", th.ACCENT)
+
+                page.run_task(fail)
+                return
+            today_text = date.today().isoformat()
+            save_settings({"last_backup_date": today_text})
+
+            async def done() -> None:
+                backup_text.value = f"最近备份：{today_text}（{path.name}）"
+                # 下面 snack 会触发整页 update，无需单独刷新这个 Text。
+                snack(page, f"已备份：{path.name}", th.PRIMARY)
+
+            page.run_task(done)
+
+        page.run_thread(worker)
 
     def open_backups(_):
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)

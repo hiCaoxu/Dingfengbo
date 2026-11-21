@@ -13,6 +13,12 @@ from flet import Border, TextStyle
 LIGHT = {
     "BG": "#FAF7F2",
     "CARD": "#FFFFFF",
+    # SUBTLE：比卡片再浅/再深一档的块底色（日历空白格、对话气泡、代码块）
+    "SUBTLE": "#F7F4EF",
+    # TABLE_HEAD：列表表头、行强调底色
+    "TABLE_HEAD": "#F4F6F3",
+    # CHART_BG：matplotlib 画布底色，必须和卡片同色，否则暗色下图表是白板
+    "CHART_BG": "#FFFFFF",
     "TEXT": "#2E2A26",
     "TEXT_MUTED": "#8C857C",
     "DIVIDER": "#EDE8DF",
@@ -28,6 +34,9 @@ LIGHT = {
 DARK = {
     "BG": "#1B1A18",
     "CARD": "#252422",
+    "SUBTLE": "#201F1D",
+    "TABLE_HEAD": "#2A2825",
+    "CHART_BG": "#252422",
     "TEXT": "#EDE8E1",
     "TEXT_MUTED": "#9C948A",
     "DIVIDER": "#3A3833",

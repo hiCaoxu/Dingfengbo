@@ -61,7 +61,7 @@ def primary_button(text: str, on_click: Callable, icon: str | None = None, **kwa
             tight=True,
         ),
         bgcolor=th.PRIMARY,
-        color="#FFFFFF",
+        color=th.ON_PRIMARY,
         elevation=0,
         on_click=on_click,
         style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=8), padding=ft.Padding.symmetric(vertical=10, horizontal=14)),
@@ -124,7 +124,7 @@ def divider() -> ft.Container:
 
 
 def snack(page: ft.Page, message: str, color: str = th.TEXT) -> None:
-    page.snack_bar = ft.SnackBar(ft.Text(message, color="#FFFFFF", size=12), bgcolor=color)
+    page.snack_bar = ft.SnackBar(ft.Text(message, color=th.ON_PRIMARY, size=12), bgcolor=color)
     page.snack_bar.open = True
     page.update()
 

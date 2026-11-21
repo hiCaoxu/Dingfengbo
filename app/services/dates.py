@@ -6,8 +6,11 @@
 from __future__ import annotations
 
 import calendar
+import logging
 import re
 from datetime import date, datetime, time, timedelta, timezone
+
+logger = logging.getLogger(__name__)
 
 WEEKDAY_CN = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
 
@@ -39,6 +42,9 @@ def lunar_text(value: date) -> str:
         cleaned = re.sub(r"^[〇零一二三四五六七八九十百千]+年", "", raw).strip()
         return cleaned or raw
     except Exception:
+        # zhdate 对超出支持范围（1900-2100 之外）的日期会抛异常：农历只是装饰，
+        # 显示不出来不影响功能，但不能静默无痕，至少留一条 debug 供排查。
+        logger.debug("农历换算失败：%s", value, exc_info=True)
         return ""
 
 
@@ -116,6 +122,7 @@ def lunar_to_gregorian(year: int, month: int, day: int) -> date | None:
 
         return ZhDate(year, month, day).to_datetime().date()
     except Exception:
+        logger.debug("农历转公历失败：%s-%s-%s", year, month, day, exc_info=True)
         return None
 
 
@@ -204,6 +211,7 @@ def next_lunar_due(value: date, rule: str) -> date | None:
             day = days
         return ZhDate(year, month, day).to_datetime().date()
     except Exception:
+        logger.debug("农历循环推进失败：%s (%s)", value, rule, exc_info=True)
         return None
 
 
