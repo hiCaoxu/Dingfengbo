@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import math
 import threading
 from typing import Any
 
@@ -45,11 +46,33 @@ def _cache_put(key: tuple, value: bytes) -> None:
         _chart_cache[key] = value
 
 
-def _encode(fig: plt.Figure) -> bytes:
+def _encode(fig: plt.Figure, tight: bool = True) -> bytes:
+    """输出 PNG。
+
+    ``tight=False`` 时按 figsize × dpi 输出**固定像素尺寸**：柱状图/折线图的标签
+    数量会变，用 ``bbox_inches="tight"`` 会裁掉不同宽度的空白，导致图片尺寸随数据
+    抖动（视觉上柱子忽粗忽细、卡片对齐漂移）。固定画布 + ``tight_layout`` 兼顾对齐。
+    """
     buffer = io.BytesIO()
-    fig.savefig(buffer, format="png", dpi=110, bbox_inches="tight", facecolor="white")
+    kwargs = {"bbox_inches": "tight"} if tight else {}
+    fig.savefig(buffer, format="png", dpi=110, facecolor="white", **kwargs)
     plt.close(fig)
     return buffer.getvalue()
+
+
+def _resolve_ylim(
+    values: list[float], y_range: tuple[float, float] | None
+) -> tuple[float, float] | None:
+    """固定纵轴范围；数据越界时自动扩展，避免把点裁到画布外。"""
+    if y_range is None:
+        return None
+    low, high = float(y_range[0]), float(y_range[1])
+    if values:
+        low = min(low, math.floor(min(values)))
+        high = max(high, math.ceil(max(values)))
+    if high <= low:
+        high = low + 1
+    return low, high
 
 
 def _style(ax: plt.Axes) -> None:
@@ -68,12 +91,15 @@ def line_chart(
     title: str = "",
     height: float = 2.6,
     cache_key: Any = None,
+    y_range: tuple[float, float] | None = None,
 ) -> bytes:
     """折线图 PNG bytes。
 
     ``cache_key`` 约定：一旦提供就**完全替代**内容比对（命中即直接返回旧图），
     所以它必须包含「数据一变就变」的单调量，例如 ``(行数, max(updated_at))``。
     传不严谨的 key（如只传固定字符串）会拿到陈旧图表且没有任何告警。
+
+    ``y_range`` 用于固定纵轴（如体重 50-70），数据越界时自动扩展以免裁掉数据点。
     """
     key_series = tuple(
         (
@@ -84,10 +110,17 @@ def line_chart(
         )
         for item in series
     )
-    key = (cache_key, title, height) if cache_key is not None else (tuple(labels), key_series, title, height)
+    key = (
+        (cache_key, title, height, y_range)
+        if cache_key is not None
+        else (tuple(labels), key_series, title, height, y_range)
+    )
     cached = _cache_get(key)
     if cached is not None:
         return cached
+
+    all_values = [float(value) for _n, values, _c, _f in key_series for value in values]
+    ylim = _resolve_ylim(all_values, y_range)
 
     with _RENDER_LOCK:
         fig, ax = plt.subplots(figsize=(6.4, height))
@@ -96,12 +129,17 @@ def line_chart(
             if fill:
                 ax.fill_between(range(len(labels)), values, alpha=0.12, color=color)
         _style(ax)
+        if len(labels) > 7:
+            # 14 天的日期标签横排会互相挤压，斜置并缩一号字。
+            ax.tick_params(axis="x", labelrotation=45, labelsize=8)
+        if ylim is not None:
+            ax.set_ylim(*ylim)
         if title:
             ax.set_title(title, color=TEXT, fontsize=11, loc="left", pad=8)
         if len(series) > 1:
             ax.legend(frameon=False, fontsize=9, labelcolor=TEXT_MUTED)
         fig.tight_layout()
-        data = _encode(fig)
+        data = _encode(fig, tight=False)
     _cache_put(key, data)
     return data
 
@@ -113,7 +151,11 @@ def bar_chart(
     color: str = PRIMARY,
     cache_key: Any = None,
 ) -> bytes:
-    """柱状图 PNG bytes；``cache_key`` 契约同 :func:`line_chart`。"""
+    """柱状图 PNG bytes；``cache_key`` 契约同 :func:`line_chart`。
+
+    画布尺寸与横轴范围都固定：柱子数量变化时单根柱子的宽度不变，
+    四张图在 2×2 网格里也保持同一像素尺寸。
+    """
     key_values = tuple(float(value) for value in values)
     key = (cache_key, title, color) if cache_key is not None else (tuple(labels), key_values, title, color)
     cached = _cache_get(key)
@@ -122,12 +164,18 @@ def bar_chart(
 
     with _RENDER_LOCK:
         fig, ax = plt.subplots(figsize=(6.4, 2.6))
-        ax.bar(labels, key_values, color=color, width=0.55, alpha=0.9)
+        ax.bar(range(len(key_values)), key_values, color=color, width=0.62, alpha=0.9)
+        ax.set_xticks(range(len(labels)))
+        ax.set_xticklabels(labels)
+        # 固定横轴边界：否则只有几天数据时 matplotlib 会把少数柱子拉宽填满画布。
+        ax.set_xlim(-0.5, max(len(key_values), 1) - 0.5)
         _style(ax)
+        if len(labels) > 7:
+            ax.tick_params(axis="x", labelrotation=45, labelsize=8)
         if title:
             ax.set_title(title, color=TEXT, fontsize=11, loc="left", pad=8)
         fig.tight_layout()
-        data = _encode(fig)
+        data = _encode(fig, tight=False)
     _cache_put(key, data)
     return data
 

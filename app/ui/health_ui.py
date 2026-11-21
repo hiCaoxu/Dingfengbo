@@ -210,6 +210,23 @@ def _summary_card(title: str, value: str, subtitle: str, accent: bool = False) -
     )
 
 
+def _quick_record_row(page: ft.Page, refresh) -> ft.Control:
+    """汇总页的分类快捷记录：不必先进二级页再选分类。"""
+    return ft.Row(
+        [
+            ft.Text("快捷记录", size=11, color=TEXT_MUTED),
+            *[
+                ft.TextButton(
+                    f"+ {name}",
+                    on_click=lambda e, tab=name: _TABS[tab][1](page, None, refresh),
+                )
+                for name in _TABS
+            ],
+        ],
+        spacing=6,
+    )
+
+
 def _chart_grid(page: ft.Page, data: dict) -> ft.Control:
     """四张图表 2×2 排布：汇总页的信息密度比竖排更高，也不至于要滚很久。"""
     weights, sleeps = data["weights"], data["sleeps"]
@@ -218,15 +235,22 @@ def _chart_grid(page: ft.Page, data: dict) -> ft.Control:
     def labels_of(rows):
         return [r.date.strftime("%m-%d") for r in rows[-14:]]
 
-    def daily_totals(rows, attribute: str):
+    def daily_buckets(rows, attribute: str, days: int = 14):
+        """按自然日补齐空档：柱状图始终 14 根柱子，宽度才不会随天数变化。"""
         totals = defaultdict(float)
         for row in rows:
             totals[row.date] += getattr(row, attribute)
-        days = sorted(totals)[-14:]
-        return [day.strftime("%m-%d") for day in days], [totals[day] for day in days]
+        start = date.today() - timedelta(days=days - 1)
+        labels: list[str] = []
+        values: list[float] = []
+        for offset in range(days):
+            day = start + timedelta(days=offset)
+            labels.append(day.strftime("%m-%d"))
+            values.append(totals.get(day, 0.0))
+        return labels, values
 
-    exercise_labels, exercise_minutes = daily_totals(exercises, "minutes")
-    diet_labels, diet_calories = daily_totals(diets, "calories")
+    exercise_labels, exercise_minutes = daily_buckets(exercises, "minutes")
+    diet_labels, diet_calories = daily_buckets(diets, "calories")
 
     width, height = _CHART_W, _CHART_H
     weight_slot = _chart_slot(width, height)
@@ -244,6 +268,7 @@ def _chart_grid(page: ft.Page, data: dict) -> ft.Control:
                 [{"name": "体重 kg", "values": [w.kg for w in weights[-14:]], "color": PRIMARY, "fill": True}],
                 "体重趋势",
                 cache_key=_key(weights),
+                y_range=(50, 70),
             ),
             width=width, height=height, fit=ft.BoxFit.CONTAIN,
         )
@@ -253,6 +278,7 @@ def _chart_grid(page: ft.Page, data: dict) -> ft.Control:
                 [{"name": "睡眠小时", "values": [s.hours for s in sleeps[-14:]], "color": ACCENT, "fill": True}],
                 "睡眠时长",
                 cache_key=_key(sleeps),
+                y_range=(5, 12),
             ),
             width=width, height=height, fit=ft.BoxFit.CONTAIN,
         )
@@ -306,12 +332,17 @@ def _render_summary(page: ft.Page, refresh, data: dict) -> ft.Control:
                 ft.Row(
                     [
                         primary_button(
+                            "新增记录",
+                            lambda e: _TABS[_state["tab"]][1](page, None, refresh),
+                            ACTIONS["add"],
+                        ),
+                        primary_button(
                             "查看记录",
                             lambda e: _goto("records", refresh),
                             ACTIONS["list"],
-                        )
+                        ),
                     ],
-                    spacing=6,
+                    spacing=8,
                 ),
             ),
             ft.Row(
@@ -336,6 +367,7 @@ def _render_summary(page: ft.Page, refresh, data: dict) -> ft.Control:
                 ],
                 spacing=12,
             ),
+            _quick_record_row(page, refresh),
             _chart_grid(page, data),
         ],
         spacing=12,
