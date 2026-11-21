@@ -121,7 +121,7 @@ def save_record(model, record_id: str | None, fields: dict, resolve=None) -> Non
 
 def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable | None = None):
     title = form_field("标题 *", todo.title if todo else "")
-    note = form_field("备注", todo.note if todo else "", multiline=True, width=400)
+    note = form_field("备注", todo.note if todo else "", multiline=True)
     is_lunar = bool(todo and todo.lunar_reminder)
     due_type = dropdown("日期类型", ["公历", "农历"], "农历" if is_lunar else "公历", width=120)
     due = form_field(
@@ -131,7 +131,7 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
     )
     due_time = form_field("到期时间 HH:MM（可选）", todo.due_time if todo else "", width=160)
     priority = dropdown("优先级", ["", "低", "中", "高"], todo.priority if todo and todo.priority else "", width=150)
-    tags = form_field("标签（逗号分隔）", tags_text(todo.tags) if todo else "")
+    tags = form_field("标签（逗号分隔）", tags_text(todo.tags) if todo else "", width=260)
 
     config = parse_config(todo.repeat_config) if todo else {}
     repeat = dropdown("循环规则", RULE_OPTIONS, REPEAT_LABELS.get(todo.repeat_rule, "不循环") if todo else "不循环", width=160)
@@ -253,14 +253,9 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
         ft.Column(
             [
                 title,
-                ft.Row(
-                    [priority, note],
-                    spacing=12,
-                    vertical_alignment=ft.CrossAxisAlignment.START,
-                ),
+                note,
                 ft.Row([due_type, due, due_time], spacing=12),
-                tags,
-                ft.Row([repeat], spacing=12),
+                ft.Row([priority, tags, repeat], spacing=12),
                 custom_row,
                 ft.Row([remind_days, remind_time], spacing=12),
             ],
