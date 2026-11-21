@@ -6,6 +6,7 @@ import base64
 import json
 import logging
 import os
+import sys
 import threading
 from pathlib import Path
 from typing import Any
@@ -68,22 +69,107 @@ _DEFAULT_SETTINGS: dict[str, Any] = {
     "ai_model": "",
     # 首次向第三方大模型发送引用数据前的知情确认是否已完成
     "ai_data_notice_ack": False,
+    # 最近一次成功备份的日期（YYYY-MM-DD），用于「每天最多备份一次」
+    "last_backup_date": "",
 }
 
 # settings.json 会被同步线程（游标落盘）与设置界面并发读写，统一串行化避免互相覆盖。
 _SETTINGS_LOCK = threading.Lock()
 
 
+_B64_PREFIX = "b64:"
+_DPAPI_PREFIX = "dpapi:"
+
+# DPAPI 可用性只探测一次：不可用时（非 Windows / 受策略限制）退回 base64 混淆。
+_DPAPI_AVAILABLE: bool | None = None
+
+
+def _dpapi_crypt(data: bytes, protect: bool) -> bytes | None:
+    """以「当前 Windows 用户」身份加/解密，不可用时返回 None。
+
+    DPAPI 的密钥由系统按用户绑定管理，settings.json 被复制到别的机器或别的
+    Windows 账户也无法解开，比 base64 混淆多一层实际保护。
+    """
+    global _DPAPI_AVAILABLE
+    if not data or _DPAPI_AVAILABLE is False:
+        return None
+    if sys.platform != "win32":
+        _DPAPI_AVAILABLE = False
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _Blob(ctypes.Structure):
+            _fields_ = [
+                ("cbData", wintypes.DWORD),
+                ("pbData", ctypes.POINTER(ctypes.c_char)),
+            ]
+
+        crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        function = crypt32.CryptProtectData if protect else crypt32.CryptUnprotectData
+        function.argtypes = [
+            ctypes.POINTER(_Blob),
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            ctypes.POINTER(_Blob),
+        ]
+        function.restype = wintypes.BOOL
+
+        buffer = ctypes.create_string_buffer(data, len(data))
+        blob_in = _Blob(len(data), ctypes.cast(buffer, ctypes.POINTER(ctypes.c_char)))
+        blob_out = _Blob()
+        if not function(
+            ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out)
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            result = ctypes.string_at(blob_out.pbData, blob_out.cbData)
+        finally:
+            kernel32.LocalFree(blob_out.pbData)
+    except Exception:
+        logger.warning("DPAPI 不可用，敏感字段退回 base64 混淆", exc_info=True)
+        _DPAPI_AVAILABLE = False
+        return None
+    _DPAPI_AVAILABLE = True
+    return result
+
+
+def _b64_decode(payload: str) -> bytes | None:
+    try:
+        return base64.urlsafe_b64decode(payload.encode("ascii"))
+    except (ValueError, UnicodeEncodeError):
+        return None
+
+
 def _obfuscate_token(value: str) -> str:
-    """本地落盘前对 token 做 base64 混淆（非加密，仅避免明文裸奔）。"""
-    return "b64:" + base64.urlsafe_b64encode(value.encode("utf-8")).decode("ascii")
+    """落盘前保护 token/api key：优先 DPAPI 加密，失败退回 base64 混淆。"""
+    raw = value.encode("utf-8")
+    protected = _dpapi_crypt(raw, protect=True)
+    if protected is not None:
+        return _DPAPI_PREFIX + base64.urlsafe_b64encode(protected).decode("ascii")
+    return _B64_PREFIX + base64.urlsafe_b64encode(raw).decode("ascii")
 
 
 def _deobfuscate_token(value: str) -> str:
-    if value.startswith("b64:"):
+    if value.startswith(_DPAPI_PREFIX):
+        payload = _b64_decode(value[len(_DPAPI_PREFIX):])
+        raw = _dpapi_crypt(payload, protect=False) if payload else None
+        if raw is None:
+            logger.warning("密钥解密失败（可能换了 Windows 用户或机器），请重新填写")
+            return ""
+        return raw.decode("utf-8", "replace")
+    if value.startswith(_B64_PREFIX):
+        payload = _b64_decode(value[len(_B64_PREFIX):])
+        if payload is None:
+            return value
         try:
-            return base64.urlsafe_b64decode(value[4:].encode("ascii")).decode("utf-8")
-        except (ValueError, UnicodeDecodeError):
+            return payload.decode("utf-8")
+        except UnicodeDecodeError:
             return value
     return value
 

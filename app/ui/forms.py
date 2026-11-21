@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from collections.abc import Callable
 from datetime import date, datetime
 
@@ -31,6 +32,7 @@ from ..db.models import (
     Weight,
     table_label,
 )
+from ..db.backup import BACKUP_DIR, backup_database
 from ..db.repo import (
     create,
     list_sync_issues,
@@ -575,8 +577,7 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
                 ai_base_url.value = meta["base_url"]
                 ai_model.value = meta["model"]
                 break
-        ai_base_url.update()
-        ai_model.update()
+        page.update()
 
     ai_provider_dd.on_select = on_provider_change
 
@@ -694,6 +695,31 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
             ),
         ]
 
+    # 本地备份：自动每日一次，也可手动触发与打开目录
+    last_backup = settings.get("last_backup_date") or "从未备份"
+    backup_text = ft.Text(f"最近备份：{last_backup}", size=11, color=TEXT_MUTED)
+
+    def backup_now(_):
+        try:
+            path = backup_database(label="manual")
+        except Exception:
+            logger.exception("手动备份失败")
+            snack(page, "备份失败，详见日志", ACCENT)
+            return
+        today_text = date.today().isoformat()
+        save_settings({"last_backup_date": today_text})
+        backup_text.value = f"最近备份：{today_text}（{path.name}）"
+        # 下面 snack 会触发整页 update，无需单独刷新这个 Text。
+        snack(page, f"已备份：{path.name}", PRIMARY)
+
+    def open_backups(_):
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        opener = getattr(os, "startfile", None)
+        if opener is None:
+            snack(page, f"备份目录：{BACKUP_DIR}", TEXT_MUTED)
+            return
+        opener(BACKUP_DIR)
+
     def save(_):
         try:
             h = float(height.value or DEFAULT_HEIGHT_CM)
@@ -731,6 +757,20 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
                     "会通过网络发送至你所配置的大模型服务商；请勿在引用范围内填写密码等敏感信息。"
                     "首次发送前还会再次确认。",
                     size=11, color=TEXT_MUTED,
+                ),
+                ft.Container(height=1, bgcolor=DIVIDER),
+                ft.Row(
+                    [
+                        ft.TextButton("立即备份", on_click=backup_now),
+                        ft.TextButton("打开备份目录", on_click=open_backups),
+                        backup_text,
+                    ],
+                    spacing=10,
+                    wrap=True,
+                ),
+                ft.Text(
+                    "每天首次启动会自动备份一次，默认保留最近 7 份（backups 目录）。",
+                    size=10, color=TEXT_MUTED,
                 ),
                 ft.Text(f"数据目录：{DATA_DIR}", size=11, color=TEXT_MUTED),
             ],

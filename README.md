@@ -35,8 +35,10 @@ python -m pytest -q          # 或：python -m unittest discover -s tests -t .
 
 ## 数据目录
 
-- 应用数据：统一在 `D:\Data\Dingfengbo\`（`dingfengbo.db`、`settings.json`、`logs\`），与 exe 所在目录分离，替换升级不丢数据。
+- 应用数据：统一在 `D:\Data\Dingfengbo\`（`dingfengbo.db`、`settings.json`、`logs\`、`backups\`），与 exe 所在目录分离，替换升级不丢数据。
 - 可通过环境变量 `DINGFENGBO_DATA_DIR` 覆盖本地数据目录。
+- 自动备份：`backups\dingfengbo-时间戳-auto.db` 是 SQLite 在线快照（官方 `backup` API，WAL 模式下同样一致），每天首次启动备份一次、默认保留最近 7 份；设置页提供「立即备份」与「打开备份目录」。恢复方式：关闭应用，把备份文件复制回 `D:\Data\Dingfengbo\dingfengbo.db`。
+- 敏感字段：`settings.json` 中的同步令牌与 AI Key 以 Windows DPAPI 按当前用户加密（`dpapi:` 前缀），拷到别的机器或别的 Windows 账户无法解开；旧版 `b64:` 值仍可读，下次保存自动升级。
 
 ## 打包（绿色单文件）
 

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import date, datetime
 
 import flet as ft
 
 from .config import DATA_DIR, LOGS_DIR, load_settings
+from .db.backup import maybe_daily_backup
 from .db.session import init_db, session_scope
 from .logging_setup import setup_logging
 from .icons import ACTIONS, NAV, ico
@@ -54,6 +56,8 @@ def main(page: ft.Page) -> None:
     with session_scope() as session:
         ensure_diary(session, date.today())
         mark_pending_write()
+    # 每日自动备份放后台线程：SQLite 在线快照不影响启动速度，失败只记日志。
+    threading.Thread(target=maybe_daily_backup, daemon=True).start()
 
     page.title = "定风波 · 个人工作台"
     page.bgcolor = BG
