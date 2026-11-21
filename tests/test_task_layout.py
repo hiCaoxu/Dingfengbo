@@ -1,7 +1,10 @@
 """任务页布局回归：三栏结构、四象限填充剩余高度、列表用 ListView 滚动。
 
-曾经的问题：``card(expand=...)`` 不把 expand 传给内层 Column，导致中间列表
-拿不到高度、渲染成一块灰色空白；四象限不 expand 则下方留出大片空白。
+曾经的问题：
+- ``card(expand=...)`` 不把 expand 传给内层 Column，列表拿不到高度；
+- 筛选行用 ``ft.Row(wrap=True)`` 却塞了 ``ft.Container(expand=True)`` 间隔器，
+  Wrap 不接受 flex 子项，整列被 Flet 渲染成一整块灰色空白；
+- 四象限不 expand，下方留出大片空白。
 """
 
 from __future__ import annotations
@@ -111,6 +114,16 @@ class TaskPageLayoutTests(unittest.TestCase):
         self.assertIn("今天全部打卡完成", texts)  # 样本里今天的习惯已打卡
         # 右侧只有一个卡片，且撑满整列高度
         self.assertEqual(right.controls[0].expand, 1)
+
+    def test_no_expand_child_inside_wrap_row(self) -> None:
+        """Row(wrap=True) 里不能出现 expand 子项，否则整列会变成灰色空白。"""
+        for control in walk(self.build()):
+            if isinstance(control, ft.Row) and getattr(control, "wrap", False):
+                for child in control.controls:
+                    self.assertFalse(
+                        bool(getattr(child, "expand", False)),
+                        f"Wrap 行里出现了 expand 子项：{type(child).__name__}",
+                    )
 
     def test_quadrant_counts_render(self) -> None:
         left = self.build().controls[0]

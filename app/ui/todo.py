@@ -378,33 +378,31 @@ def _row_for(page, refresh, item: Todo, today: date, overdue: bool) -> ft.Contro
                     bgcolor=_quadrant_color(quadrant),
                     tooltip=QUADRANT_LABELS[quadrant],
                 ),
-                ft.Column(
-                    [
-                        ft.Row(
-                            [
-                                ft.Text(
-                                    item.title, size=13,
-                                    color=th.DANGER if overdue
-                                    else (th.TEXT_MUTED if item.completed else th.TEXT),
-                                    weight="bold",
-                                    max_lines=1,
-                                    overflow=ft.TextOverflow.ELLIPSIS,
-                                    expand=True,
-                                ),
-                                ft.Text(
-                                    "循环模板", size=9, color=th.TEXT_MUTED,
-                                    visible=item.is_template,
-                                ),
-                            ],
-                            spacing=8,
-                        ),
-                        ft.Text(
-                            f"{label}{due}" + (" · " + " · ".join(extras) if extras else ""),
-                            size=11, color=th.DANGER if overdue else th.TEXT_MUTED,
-                            max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
-                        ),
-                    ],
-                    spacing=4, expand=True,
+                # ListView 的条目高度由内容决定（无界）：内层 Column 不能用 expand，
+                # 否则 Flet/Flutter 会因「无界高度里出现 flex」整块渲染成灰色。
+                # 需要横向撑满时用 Container(expand=True) 包住 Column。
+                ft.Container(
+                    content=ft.Column(
+                        [
+                            ft.Text(
+                                item.title + (" · 循环模板" if item.is_template else ""),
+                                size=13,
+                                color=th.DANGER if overdue
+                                else (th.TEXT_MUTED if item.completed else th.TEXT),
+                                weight="bold",
+                                max_lines=1,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                            ),
+                            ft.Text(
+                                f"{label}{due}" + (" · " + " · ".join(extras) if extras else ""),
+                                size=11, color=th.DANGER if overdue else th.TEXT_MUTED,
+                                max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+                            ),
+                        ],
+                        spacing=4,
+                        tight=True,
+                    ),
+                    expand=True,
                 ),
                 icon_button(ACTIONS["edit"], lambda e, i=item: open_todo_dialog(page, i, refresh), "编辑"),
                 icon_button(ACTIONS["delete"], lambda e, i=item.id: delete(page, i, refresh), "删除"),
@@ -487,7 +485,8 @@ def _render(page: ft.Page, refresh, data) -> ft.Control:
                         ft.Text(f"{len(shown)} 项", size=10, color=th.TEXT_MUTED),
                     ],
                     spacing=8,
-                    wrap=True,
+                    # 这里绝不能加 wrap=True：Wrap 内出现 expand 的间隔器时，
+                    # 整列布局会失败，Flet 会把下方列表渲染成一整块灰色空白。
                 ),
                 ft.Row(
                     [
@@ -509,6 +508,8 @@ def _render(page: ft.Page, refresh, data) -> ft.Control:
                     ],
                     spacing=6,
                     wrap=True,
+                    # 没有任何筛选条件时不渲染这一行，避免空 Wrap 参与布局
+                    visible=bool(_state.date or _state.quadrant or tags),
                 ),
                 divider(),
                 (
@@ -544,9 +545,11 @@ def _render(page: ft.Page, refresh, data) -> ft.Control:
         spacing=12,
         expand=True,
     )
+    # STRETCH 很关键：Row 的 START 对齐会给子项「无界高度」，三栏内部的
+    # expand/滚动区因拿不到高度会被 Flet 渲染成灰块。
     return ft.Row(
         [left_column, ft.Column([middle_card], expand=True), right_column],
         spacing=12,
         expand=True,
-        vertical_alignment=ft.CrossAxisAlignment.START,
+        vertical_alignment=ft.CrossAxisAlignment.STRETCH,
     )
