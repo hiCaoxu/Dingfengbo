@@ -57,6 +57,8 @@ class DiaryState(_StateBase):
 
 @dataclass
 class HealthState(_StateBase):
+    # summary=汇总首页，records=记录二级页
+    view: str = "summary"
     tab: str = "锻炼"
     range: str = "本周"
 
