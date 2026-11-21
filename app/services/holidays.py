@@ -1,8 +1,13 @@
-"""法定节假日：读取本地 holidays.txt，供「跳过法定节假日」使用。
+"""法定节假日与调休上班日。
 
-不内置节假日数据：法定调休每年调整、各地差异大，写死反而会误跳过工作日。
-用户可在数据目录维护 ``holidays.txt``，每行一个 ``YYYY-MM-DD``（``#`` 之后为注释）：
-    D:\\Data\\Dingfengbo\\holidays.txt
+数据 = 内置年度数据（:mod:`holiday_data`，随版本更新） ∪ 用户补充文件
+``D:\\Data\\Dingfengbo\\holidays.txt``：
+
+    2028-01-01          # 放假
+    !2028-01-02         # 调休上班日（按工作日处理）
+
+不做「启动时写库」：节假日是逐年更新的静态数据，放代码里能随版本升级、
+避免双数据源漂移；文件只用于补充以后年份或本地差异。
 """
 
 from __future__ import annotations
@@ -12,45 +17,108 @@ from datetime import date
 from pathlib import Path
 
 from ..config import DATA_DIR
+from .holiday_data import HOLIDAY_DATES, HOLIDAY_NAMES, MAKEUP_WORKDAYS
 
 logger = logging.getLogger(__name__)
 
 HOLIDAYS_PATH: Path = DATA_DIR / "holidays.txt"
 
-_cache: tuple[tuple[float, int], set[date]] | None = None
+_SAMPLE = """\
+# 节假日补充文件（可选）
+# 每行一个日期：
+#   2028-01-01    表示放假
+#   !2028-01-02   表示调休上班日（按工作日处理）
+# 内置数据已覆盖 2026-2027 年，本文件用于补充以后年份或本地差异。
+"""
+
+_cache: dict[str, tuple[tuple[float, int], tuple[set[date], set[date]]]] = {}
 
 
-def holiday_dates(path: Path | None = None) -> set[date]:
-    """读取并缓存节假日集合；文件变化（mtime/size）后自动重读。"""
-    global _cache
-    target = Path(path or HOLIDAYS_PATH)
+def _read_file(path: Path) -> tuple[set[date], set[date]]:
+    """解析补充文件，返回（放假日, 调休上班日）。"""
     try:
-        stat = target.stat()
+        stat = path.stat()
     except OSError:
-        _cache = None
-        return set()
+        return set(), set()
+    key = str(path)
     signature = (stat.st_mtime, stat.st_size)
-    if _cache is not None and _cache[0] == signature:
-        return _cache[1]
+    cached = _cache.get(key)
+    if cached is not None and cached[0] == signature:
+        return cached[1]
 
-    dates: set[date] = set()
+    holidays: set[date] = set()
+    workdays: set[date] = set()
     try:
-        lines = target.read_text(encoding="utf-8").splitlines()
+        lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
-        logger.debug("读取节假日文件失败：%s", target, exc_info=True)
-        return set()
+        logger.debug("读取节假日文件失败：%s", path, exc_info=True)
+        return set(), set()
     for line in lines:
         raw = line.split("#", 1)[0].strip()
         if not raw:
             continue
+        target = workdays if raw.startswith("!") else holidays
         try:
-            dates.add(date.fromisoformat(raw[:10]))
+            target.add(date.fromisoformat(raw.lstrip("!").strip()[:10]))
         except ValueError:
             continue
-    _cache = (signature, dates)
-    logger.info("已加载 %d 个节假日：%s", len(dates), target)
-    return dates
+    _cache[key] = (signature, (holidays, workdays))
+    logger.info(
+        "节假日补充文件已加载：%s（放假 %d 天，补班 %d 天）",
+        path, len(holidays), len(workdays),
+    )
+    return holidays, workdays
+
+
+def _extra(path: Path | None = None) -> tuple[set[date], set[date]]:
+    return _read_file(Path(path or HOLIDAYS_PATH))
+
+
+def holiday_dates(path: Path | None = None) -> set[date]:
+    """全部放假日（内置 ∪ 补充文件）。"""
+    extra, _ = _extra(path)
+    return set(HOLIDAY_DATES) | extra
+
+
+def makeup_workdays(path: Path | None = None) -> set[date]:
+    """调休上班日（内置 ∪ 补充文件）。"""
+    _, extra = _extra(path)
+    return set(MAKEUP_WORKDAYS) | extra
+
+
+def holiday_name(value: date, path: Path | None = None) -> str:
+    """节日名称；未知返回空串。"""
+    return HOLIDAY_NAMES.get(value, "")
 
 
 def is_holiday(value: date, path: Path | None = None) -> bool:
-    return value in holiday_dates(path)
+    if value in HOLIDAY_DATES:
+        return True
+    extra, _ = _extra(path)
+    return value in extra
+
+
+def is_makeup_workday(value: date, path: Path | None = None) -> bool:
+    if value in MAKEUP_WORKDAYS:
+        return True
+    _, extra = _extra(path)
+    return value in extra
+
+
+def is_weekend_off(value: date, path: Path | None = None) -> bool:
+    """周末休息（调休上班的周末不算休息）。"""
+    if value.weekday() < 5:
+        return False
+    return not is_makeup_workday(value, path)
+
+
+def ensure_sample_file(path: Path | None = None) -> None:
+    """首次启动时生成带注释的补充文件模板，方便用户按年追加。"""
+    target = Path(path or HOLIDAYS_PATH)
+    if target.exists():
+        return
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(_SAMPLE, encoding="utf-8")
+    except OSError:
+        logger.debug("生成节假日模板失败：%s", target, exc_info=True)

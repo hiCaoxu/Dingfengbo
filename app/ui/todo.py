@@ -12,6 +12,7 @@ from ..db.repo import create, update
 from ..db.session import session_scope
 from ..icons import ACTIONS, ico
 from ..services.dates import lunar_md
+from ..services.reminders import describe as describe_reminders
 from ..services.sync import mark_pending_write
 from ..services.todo_rules import describe as describe_rule
 from ..services.todo_rules import next_occurrence
@@ -50,6 +51,7 @@ def toggle(page: ft.Page, todo_id: str, refresh) -> None:
                     lunar_reminder=lunar_md(following) if item.lunar_reminder else "",
                     repeat_rule=item.repeat_rule,
                     repeat_config=item.repeat_config,
+                    remind_days=item.remind_days,
                     remind_days_before=item.remind_days_before,
                     remind_time=item.remind_time,
                     priority=item.priority, completed=False, is_template=False,
@@ -115,11 +117,9 @@ def _render(page: ft.Page, refresh, items) -> ft.Control:
         rule_text = describe_rule(item.repeat_rule, item.repeat_config)
         if rule_text:
             extras.append(rule_text)
-        if int(item.remind_days_before or -1) >= 0:
-            extras.append(
-                "到期提醒" if int(item.remind_days_before) == 0
-                else f"提前 {item.remind_days_before} 天提醒"
-            )
+        remind_text = describe_reminders(item)
+        if remind_text:
+            extras.append(remind_text)
         if item.pomodoro_count:
             extras.append(f"番茄 {item.pomodoro_count}")
         if item.priority:

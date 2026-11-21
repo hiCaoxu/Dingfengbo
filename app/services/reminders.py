@@ -1,18 +1,25 @@
 """待办提醒：提醒时刻计算、到点收集与去重。
 
-语义：``remind_days_before`` 为 -1 表示不提醒，0 表示到期当天提醒，N 表示提前 N 天；
-提醒时刻取 ``remind_time``，为空退回 ``due_time``，再为空按 09:00。
+语义：``remind_days`` 是提前天数数组（``[]`` 为不提醒，``0`` 为到期当天，``N`` 为提前 N 天），
+支持多选（如 ``[1, 3, 7]`` 表示提前 3 天、1 天与当天各提醒一次）。旧版单值字段
+``remind_days_before`` 仍兼容：新字段为空时按它推断。
+
+提醒时刻的时分取 ``remind_time``，为空退回 ``due_time``，再为空按 09:00。
 """
 
 from __future__ import annotations
 
+import json
+import logging
 from datetime import datetime, time, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from ..db.models import Todo, TodoReminder
 from .dates import parse_hm
+
+logger = logging.getLogger(__name__)
 
 REMIND_NONE = -1
 DEFAULT_REMIND_TIME = "09:00"
@@ -26,6 +33,30 @@ def _hm(value: str, fallback: str = DEFAULT_REMIND_TIME) -> time:
     return parse_hm(value) or parse_hm(fallback) or time(9, 0)
 
 
+def parse_offsets(todo: Todo) -> list[int]:
+    """解析提前天数集合；新字段为空时回退到旧版单值字段。"""
+    try:
+        raw = json.loads(todo.remind_days or "[]")
+    except (ValueError, TypeError):
+        raw = []
+    offsets: list[int] = []
+    if isinstance(raw, list):
+        offsets = sorted(
+            {
+                int(day)
+                for day in raw
+                if str(day).lstrip("-").isdigit() and int(day) >= 0
+            }
+        )
+    if offsets:
+        return offsets
+    try:
+        legacy = int(todo.remind_days_before if todo.remind_days_before is not None else -1)
+    except (TypeError, ValueError):
+        legacy = REMIND_NONE
+    return [legacy] if legacy >= 0 else []
+
+
 def due_at(todo: Todo) -> datetime | None:
     """到期时刻（无到期日返回 None；无时间按 09:00）。"""
     if todo.due_date is None:
@@ -33,17 +64,33 @@ def due_at(todo: Todo) -> datetime | None:
     return datetime.combine(todo.due_date, _hm(todo.due_time))
 
 
-def reminder_at(todo: Todo) -> datetime | None:
-    """应提醒时刻；未开启提醒返回 None。"""
-    if todo.remind_days_before is None or int(todo.remind_days_before) < 0:
-        return None
+def reminder_times(todo: Todo) -> list[datetime]:
+    """全部应提醒时刻（升序）；未开启提醒返回空列表。"""
     if todo.due_date is None:
-        return None
-    base = todo.due_date - timedelta(days=int(todo.remind_days_before))
-    return datetime.combine(base, _hm(todo.remind_time or todo.due_time))
+        return []
+    moment = _hm(todo.remind_time or todo.due_time)
+    return sorted(
+        datetime.combine(todo.due_date - timedelta(days=offset), moment)
+        for offset in parse_offsets(todo)
+    )
 
 
-def _body(todo: Todo) -> str:
+def reminder_at(todo: Todo) -> datetime | None:
+    """最早的提醒时刻（保留给旧调用方）。"""
+    times = reminder_times(todo)
+    return times[0] if times else None
+
+
+def describe(todo: Todo) -> str:
+    """列表里的提醒摘要，如「提醒 3/1/0 天前」。"""
+    offsets = parse_offsets(todo)
+    if not offsets:
+        return ""
+    labels = ["当天" if offset == 0 else f"{offset}天" for offset in offsets]
+    return "提醒 " + "/".join(labels)
+
+
+def _body(todo: Todo, offset: int) -> str:
     parts: list[str] = []
     if todo.due_date is not None:
         label = f"到期 {todo.due_date.isoformat()}"
@@ -52,8 +99,8 @@ def _body(todo: Todo) -> str:
         parts.append(label)
     if todo.priority:
         parts.append(f"优先级 {todo.priority}")
-    if int(todo.remind_days_before or 0) > 0:
-        parts.append(f"提前 {todo.remind_days_before} 天")
+    if offset > 0:
+        parts.append(f"提前 {offset} 天")
     return " · ".join(parts) or "到点提醒"
 
 
@@ -66,7 +113,7 @@ def collect_due(session: Session, now: datetime | None = None) -> list[dict]:
             Todo.is_deleted.is_(False),
             Todo.completed.is_(False),
             Todo.is_template.is_(False),
-            Todo.remind_days_before >= 0,
+            or_(Todo.remind_days != "[]", Todo.remind_days_before >= 0),
             Todo.due_date.is_not(None),
             Todo.due_date >= (window_start.date() - timedelta(days=1)),
             Todo.due_date <= (now.date() + timedelta(days=SCAN_DAYS_AHEAD)),
@@ -74,22 +121,28 @@ def collect_due(session: Session, now: datetime | None = None) -> list[dict]:
     )
     fired: list[dict] = []
     for todo in todos:
-        fire = reminder_at(todo)
-        if fire is None or fire > now or fire < window_start:
-            continue
-        if session.get(TodoReminder, (todo.id, fire)) is not None:
-            continue
-        session.add(TodoReminder(todo_id=todo.id, fire_at=fire))
-        # SessionLocal 关了 autoflush：不主动 flush，同一会话内再查会看不到刚加的行。
-        session.flush()
-        fired.append(
-            {
-                "todo_id": todo.id,
-                "fire_at": fire,
-                "title": todo.title,
-                "body": _body(todo),
-            }
-        )
+        offsets = parse_offsets(todo)
+        for offset in offsets:
+            fire = datetime.combine(
+                todo.due_date - timedelta(days=offset),
+                _hm(todo.remind_time or todo.due_time),
+            )
+            if fire > now or fire < window_start:
+                continue
+            if session.get(TodoReminder, (todo.id, fire)) is not None:
+                continue
+            session.add(TodoReminder(todo_id=todo.id, fire_at=fire))
+            # SessionLocal 关了 autoflush：不主动 flush，同一会话内再查会看不到刚加的行。
+            session.flush()
+            fired.append(
+                {
+                    "todo_id": todo.id,
+                    "fire_at": fire,
+                    "offset": offset,
+                    "title": todo.title,
+                    "body": _body(todo, offset),
+                }
+            )
     _prune(session, now)
     return fired
 

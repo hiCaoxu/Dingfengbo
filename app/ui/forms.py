@@ -51,6 +51,7 @@ from ..services.dates import (
     parse_lunar,
     valid_hm,
 )
+from ..services.reminders import parse_offsets as reminder_offsets
 from ..services.recurrence import (
     MONTH_MODE_LABELS,
     NTH_BY_LABEL,
@@ -334,11 +335,31 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
     repeat.on_select = lambda e: (update_panels(), page.update())
     unit_dd.on_select = lambda e: (update_panels(), page.update())
 
-    remind_days = form_field(
-        "提前提醒天数（空=不提醒）",
-        "" if not todo or int(todo.remind_days_before or -1) < 0 else str(todo.remind_days_before),
-        width=210,
-    )
+    # 提前提醒：多选（到期当天 / 提前 1 / 3 / 7 天），不选即不提醒
+    remind_offsets: set[int] = set(reminder_offsets(todo)) if todo is not None else set()
+    remind_options = [(0, "到期当天"), (1, "提前 1 天"), (3, "提前 3 天"), (7, "提前 7 天")]
+    remind_chip_row = ft.Row(spacing=6, wrap=True)
+
+    def render_remind_chips() -> None:
+        remind_chip_row.controls = [
+            tag_chip(
+                label,
+                offset in remind_offsets,
+                lambda e, value=offset: toggle_remind(value),
+            )
+            for offset, label in remind_options
+        ]
+
+    def toggle_remind(offset: int) -> None:
+        if offset in remind_offsets:
+            remind_offsets.discard(offset)
+        else:
+            remind_offsets.add(offset)
+        render_remind_chips()
+        remind_chip_row.update()
+        page.update()
+
+    render_remind_chips()
     remind_time = form_field("提醒时间 HH:MM（可选）", todo.remind_time if todo else "", width=190)
 
     def on_type_change(e):
@@ -361,18 +382,9 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
         if remind_time_value and not valid_hm(remind_time_value):
             snack(page, "提醒时间格式应为 HH:MM（如 09:00）", "#C97B63")
             return
-        raw_days = (remind_days.value or "").strip()
-        if raw_days:
-            try:
-                days_before = int(raw_days)
-            except ValueError:
-                snack(page, "提前提醒天数需为整数", "#C97B63")
-                return
-            if days_before < 0:
-                snack(page, "提前提醒天数不能为负", "#C97B63")
-                return
-        else:
-            days_before = -1
+        offsets = sorted(remind_offsets)
+        days_before = max(offsets) if offsets else -1
+        remind_days_json = json.dumps(offsets) if offsets else "[]"
         if due_type.value == "农历":
             raw = (due.value or "").strip()
             if not raw:
@@ -458,6 +470,7 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
             lunar_reminder=lunar_reminder,
             repeat_rule=rule,
             repeat_config=config_raw,
+            remind_days=remind_days_json,
             remind_days_before=days_before,
             remind_time=remind_time_value,
             priority=priority.value or "",
@@ -474,7 +487,14 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
                 ft.Row([due_type, due, due_time], spacing=12),
                 ft.Row([priority, tags, repeat], spacing=12),
                 custom_panel,
-                ft.Row([remind_days, remind_time], spacing=12),
+                ft.Column(
+                    [
+                        ft.Text("提前提醒（可多选）", size=11, color=TEXT_MUTED),
+                        remind_chip_row,
+                        remind_time,
+                    ],
+                    spacing=6,
+                ),
             ],
             spacing=10,
             tight=True,

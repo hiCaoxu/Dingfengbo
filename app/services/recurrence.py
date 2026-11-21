@@ -23,7 +23,7 @@ import calendar
 from datetime import date, timedelta
 
 from .dates import nth_workday, shift_month
-from .holidays import is_holiday
+from .holidays import is_holiday, is_weekend_off
 
 UNIT_LABELS = {"day": "天", "week": "周", "month": "月", "year": "年"}
 UNIT_BY_LABEL = {label: unit for unit, label in UNIT_LABELS.items()}
@@ -131,7 +131,8 @@ def _skip_blocked(value: date, config: dict) -> date:
         return value
     candidate = value
     for _ in range(MAX_STEPS):
-        blocked = (skip_weekends and candidate.weekday() >= 5) or (
+        # 调休上班的周末按工作日处理，不算「双休日」。
+        blocked = (skip_weekends and is_weekend_off(candidate)) or (
             skip_holidays and is_holiday(candidate)
         )
         if not blocked:

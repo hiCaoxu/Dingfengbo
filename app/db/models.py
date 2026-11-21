@@ -58,7 +58,9 @@ class Todo(SyncMixin, Base):
     repeat_rule: Mapped[str] = mapped_column(String(16), default="none")  # none/day/week/month/year/irregular/custom
     repeat_config: Mapped[str] = mapped_column(Text, default="")  # custom 规则的 JSON 参数
     priority: Mapped[str] = mapped_column(String(16), default="")  # '', low, medium, high
-    # 提前提醒：-1=不提醒，0=到期当天，N=提前 N 天；remind_time 为空则用 due_time/09:00
+    # 提前提醒：可多选，remind_days 为 JSON 数组如 [1,3,7]（0=到期当天，空=不提醒）
+    # remind_days_before 保留为旧版单值字段（新版写最大值，便于旧端理解）
+    remind_days: Mapped[str] = mapped_column(Text, default="[]")
     remind_days_before: Mapped[int] = mapped_column(Integer, default=-1)
     remind_time: Mapped[str] = mapped_column(String(5), default="")
     pomodoro_count: Mapped[int] = mapped_column(Integer, default=0)

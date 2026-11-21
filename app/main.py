@@ -10,6 +10,7 @@ import flet as ft
 
 from .config import DATA_DIR, LOGS_DIR, load_settings
 from .db.backup import maybe_daily_backup
+from .services.holidays import ensure_sample_file
 from .db.session import init_db, session_scope
 from .logging_setup import setup_logging
 from .icons import ACTIONS, NAV, ico
@@ -56,6 +57,8 @@ def main(page: ft.Page) -> None:
     with session_scope() as session:
         ensure_diary(session, date.today())
         mark_pending_write()
+    # 首次启动生成节假日补充文件模板（内置 2026-2027 数据已生效，这里只放说明）
+    ensure_sample_file()
     # 每日自动备份放后台线程：SQLite 在线快照不影响启动速度，失败只记日志。
     threading.Thread(target=maybe_daily_backup, daemon=True).start()
 
