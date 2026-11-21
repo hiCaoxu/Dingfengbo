@@ -183,7 +183,10 @@ def render(
                                 "最近记录"),
                     ],
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                    vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+                    # 注意：Row 的 vertical_alignment=STRETCH 会让整行在父 Column 里撑满
+                    # 剩余高度，把下方「贴底」的 spacer 挤成 0，导致按钮行漂移。这里
+                    # 指标列本身等高，用 CENTER 即可，不能再用 STRETCH。
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     spacing=8,
                 ),
                 ft.Container(expand=True),
