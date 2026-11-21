@@ -198,7 +198,8 @@ def open_backup_center(page: ft.Page, refresh=None) -> ft.AlertDialog:
             snack(
                 page,
                 f"已恢复 {path.name}"
-                + (f"，恢复前已备份为 {safety.name}" if safety else ""),
+                + (f"，恢复前已备份为 {safety.name}" if safety else "")
+                + "；同步游标已重置，下次同步会重新拉取云端全量（冲突以较新记录为准）。",
                 th.PRIMARY,
             )
 

@@ -167,6 +167,21 @@ def verify_backup(path: Path | str) -> tuple[bool, str]:
         return False, f"无法打开：{exc}"
 
 
+def reset_sync_cursors() -> None:
+    """清空同步游标，让下一次 pull 按表从头全量拉取。
+
+    游标是「已同步到服务端某个序列号」的记录，和数据库内容强绑定。库被换成另一份
+    （恢复备份、手工拷库、清库重来）后，旧游标往往比库里的数据新，pull 会只请求
+    "序列号更大的变更"，云端更旧的记录被永久过滤掉——界面表现为「同步一直成功，
+    但列表全空」。清空后 pull 不带游标，服务端从第一页返回，合并是幂等的。
+    """
+    try:
+        save_settings({"sync_cursors": {}})
+        logger.info("已重置同步游标，下次同步将重新全量拉取")
+    except Exception:
+        logger.exception("重置同步游标失败")
+
+
 def restore_database(backup_path: Path | str, db_path: Path | None = None) -> dict:
     """从备份恢复：先校验、再备份当前库、最后替换文件。
 
@@ -205,6 +220,9 @@ def restore_database(backup_path: Path | str, db_path: Path | None = None) -> di
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, target)
     logger.info("已从备份恢复数据库：%s", source.name)
+    # 恢复进来的是另一份库，库内 sync_seq 与 settings 里的同步游标不再对应，
+    # 必须一起重置；否则「同步成功但数据全空」会一直持续下去。
+    reset_sync_cursors()
     return {"restored": target, "safety": safety}
 
 

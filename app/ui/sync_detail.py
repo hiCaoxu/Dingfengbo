@@ -22,6 +22,7 @@ from ..db.repo import (
     retry_issue,
     sync_queue_stats,
 )
+from ..db.backup import reset_sync_cursors
 from ..services.sync import mark_pending_write, sync_devices, sync_history
 from .widgets import close_modal, modal, snack
 
@@ -321,12 +322,23 @@ def open_sync_detail(page: ft.Page, refresh_status=None) -> ft.AlertDialog:
         if refresh_status is not None:
             refresh_status()
 
+    def do_reset_cursors(_=None) -> None:
+        """游标与库内容不匹配时自救：恢复备份/手工换库后，旧游标会让云端旧数据
+        永远拉不回来（表现为「同步成功但列表空」）。清空后重新拉全量。"""
+        reset_sync_cursors()
+        mark_pending_write()  # 走「写入后 10 秒同步」通道，不必手动再点一次
+        snack(page, "同步游标已重置，10 秒内会重新拉取云端全量数据", th.PRIMARY)
+        reload()
+        if refresh_status is not None:
+            refresh_status()
+
     dialog = modal(
         page,
         "同步明细",
         ft.Column([tabs_row, ft.Container(height=1, bgcolor=th.DIVIDER), content], spacing=8,
                   tight=True),
         [
+            ft.TextButton("重新拉取云端全量", on_click=do_reset_cursors),
             ft.TextButton("刷新", on_click=lambda e: reload()),
             ft.TextButton("关闭", on_click=lambda e: close_modal(page, dialog)),
         ],
