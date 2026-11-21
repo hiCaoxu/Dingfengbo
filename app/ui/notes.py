@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
+import threading
 
 import flet as ft
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from ..db.models import Note
 from ..db.repo import create, update
@@ -14,11 +16,20 @@ from ..icons import ACTIONS, ico
 from ..services.markdown import highlight_lines, inline_spans, parse
 from ..services.sync import mark_pending_write
 from ..theme import DIVIDER, PRIMARY, PRIMARY_LIGHT, TEXT, TEXT_MUTED
+from .async_utils import background_section
 from .forms import tags_text
+from .state import state
 from .widgets import card, divider, empty, primary_button, section_header, tag_chip
 
-_state = {"tag_path": "全部", "expanded": set()}
+logger = logging.getLogger(__name__)
+
+_state = state.notes
 _preview: ft.Container | None = None
+
+# 预览防抖：每次击键不再触发全文解析，停顿 400ms 后后台渲染。
+_PREVIEW_DEBOUNCE_MS = 400
+_PREVIEW_PLAINTEXT_THRESHOLD = 50_000
+_preview_timer: threading.Timer | None = None
 
 
 def _code_block(code: str, lang: str) -> ft.Control:
@@ -61,8 +72,8 @@ def _table(header: list[str], rows: list[list[str]]) -> ft.Control:
     return ft.Row([table], scroll=ft.ScrollMode.AUTO)
 
 
-def render_markdown(markdown: str) -> ft.Control:
-    blocks = parse(markdown or "")
+def render_blocks(blocks: list[dict]) -> ft.Control:
+    """把 parse 得到的块列表构建为 Flet 控件树（需在 UI 线程调用）。"""
     controls: list[ft.Control] = []
     for block in blocks:
         kind = block["type"]
@@ -93,6 +104,10 @@ def render_markdown(markdown: str) -> ft.Control:
         else:
             controls.append(ft.Text(spans=inline_spans(block["text"]), size=13))
     return ft.Column(controls, spacing=10, scroll=ft.ScrollMode.AUTO, expand=True)
+
+
+def render_markdown(markdown: str) -> ft.Control:
+    return render_blocks(parse(markdown or ""))
 
 
 def save_content(note_id: str, value: str) -> None:
@@ -129,11 +144,11 @@ def _parse_tags(raw: str) -> list[str]:
         return []
 
 
-def _collect_tag_paths(notes) -> list[str]:
-    """收集所有笔记的路径标签（去重、排序）。"""
+def _collect_tag_paths(tag_values) -> list[str]:
+    """收集路径标签（去重、排序）；入参为 tags 原始 JSON 字符串序列。"""
     seen: set[str] = set()
-    for note in notes:
-        seen.update(_parse_tags(note.tags))
+    for raw in tag_values:
+        seen.update(_parse_tags(raw))
     return sorted(seen)
 
 
@@ -168,7 +183,10 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
         on_blur=lambda e: save_title(note.id, e.control.value or ""),
     )
     with session_scope() as session:
-        all_tag_paths = _collect_tag_paths(list(session.scalars(select(Note).where(Note.is_deleted.is_(False)))))
+        # 只为标签补全取 tags 列，避免把全部正文搬进内存。
+        all_tag_paths = _collect_tag_paths(
+            session.scalars(select(Note.tags).where(Note.is_deleted.is_(False))).all()
+        )
     tags_field = ft.TextField(
         value=tags_text(note.tags),
         border=ft.InputBorder.NONE,
@@ -227,10 +245,43 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
         on_blur=lambda e: save_content(note.id, e.control.value or ""),
     )
 
+    def _render_preview(value: str) -> None:
+        text = value or ""
+        try:
+            if len(text) > _PREVIEW_PLAINTEXT_THRESHOLD:
+                blocks = [
+                    {"type": "text", "text": "（文档过大，预览已降级为纯文本）"},
+                    {"type": "code", "lang": "", "code": text},
+                ]
+            else:
+                blocks = parse(text)  # CPU 密集的解析/高亮放后台线程
+        except Exception:
+            logger.exception("Markdown 解析失败，保留上一次预览")
+            return
+
+        async def apply() -> None:
+            try:
+                if _preview is not None:
+                    _preview.content = render_blocks(blocks)
+                    page.update()
+            except Exception:
+                # 页面已销毁（切换模块/关窗）时静默放弃，与 scheduler 的处理保持一致。
+                logger.debug("预览刷新失败，页面可能已销毁", exc_info=True)
+
+        try:
+            page.run_task(apply)
+        except Exception:
+            logger.debug("预览任务调度失败，页面可能已销毁", exc_info=True)
+
     def _update_preview(value: str) -> None:
-        if _preview is not None:
-            _preview.content = render_markdown(value)
-            page.update()
+        global _preview_timer
+        if _preview_timer is not None:
+            _preview_timer.cancel()
+        _preview_timer = threading.Timer(
+            _PREVIEW_DEBOUNCE_MS / 1000, lambda: _render_preview(value)
+        )
+        _preview_timer.daemon = True
+        _preview_timer.start()
 
     return ft.Column(
         [
@@ -261,10 +312,27 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
 
 
 def build(page: ft.Page, refresh, on_open) -> ft.Control:
-    with session_scope() as session:
-        notes = list(session.scalars(select(Note).where(Note.is_deleted.is_(False)).order_by(Note.id.desc())))
-    tag_paths = _collect_tag_paths(notes)
+    def load():
+        # 列表只需 id/标题/标签与正文前 80 字，不加载整篇 content。
+        with session_scope() as session:
+            return session.execute(
+                select(Note.id, Note.title, Note.tags, func.substr(Note.content, 1, 80))
+                .where(Note.is_deleted.is_(False))
+                .order_by(Note.id.desc())
+            ).all()
+
+    return background_section(page, load, lambda records: _render(page, refresh, on_open, records))
+
+
+def _render(page: ft.Page, refresh, on_open, records) -> ft.Control:
+    tag_paths = _collect_tag_paths([tags for _id, _title, tags, _snippet in records])
     tree = _build_tag_tree(tag_paths)
+
+    def open_note(note_id: str) -> None:
+        with session_scope() as session:
+            note = session.get(Note, note_id)
+        if note is not None:
+            on_open(note)
 
     def add_note(_):
         with session_scope() as session:
@@ -338,20 +406,20 @@ def build(page: ft.Page, refresh, on_open) -> ft.Control:
     ]
 
     filtered = [
-        n for n in notes
-        if _state["tag_path"] == "全部" or _matches_path(_parse_tags(n.tags), _state["tag_path"])
+        record for record in records
+        if _state["tag_path"] == "全部" or _matches_path(_parse_tags(record[2]), _state["tag_path"])
     ]
 
     rows = [
         ft.ListTile(
-            title=ft.Text(n.title, size=13, color=TEXT, weight="bold"),
+            title=ft.Text(title, size=13, color=TEXT, weight="bold"),
             subtitle=ft.Text(
-                (n.content or "").replace("\n", " ")[:60] or "（暂无正文）",
+                (snippet or "").replace("\n", " ")[:60] or "（暂无正文）",
                 size=11, color=TEXT_MUTED, overflow=ft.TextOverflow.ELLIPSIS,
             ),
-            on_click=lambda e, nn=n: on_open(nn),
+            on_click=lambda e, note_id=note_id: open_note(note_id),
         )
-        for n in filtered
+        for note_id, title, _tags, snippet in filtered
     ]
 
     return ft.Column(

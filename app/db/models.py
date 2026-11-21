@@ -6,7 +6,7 @@ owner_id 用于服务端按用户隔离；单机模式下统一为 "local"。
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -15,7 +15,8 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 def utcnow() -> datetime:
-    return datetime.utcnow()
+    # 保持 naive UTC（与历史数据一致），改用非弃用写法。
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def new_sync_id() -> str:
@@ -34,6 +35,15 @@ class SyncMixin:
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     sync_status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
     sync_seq: Mapped[int] = mapped_column(Integer, default=0, nullable=False, index=True)
+
+
+class SyncSequence(Base):
+    """服务端全局同步序列：单行 (id=1)，value 单调递增，用于原子分配 sync_seq。"""
+
+    __tablename__ = "sync_sequences"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    value: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
 
 class Todo(SyncMixin, Base):

@@ -5,12 +5,15 @@ Flet 0.86 已移除 ft.Timer，改用 threading.Timer + page.run_task 回到 UI 
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Callable
 
 import flet as ft
 
 from ..services.sync import sync_client
+
+logger = logging.getLogger(__name__)
 
 _page: ft.Page | None = None
 _refresh_status: Callable[[], None] | None = None
@@ -51,7 +54,7 @@ def _run_sync_async() -> None:
             try:
                 _page.run_task(_after_sync)
             except Exception:
-                pass
+                logger.exception("调度同步结果回 UI 线程失败")
 
     threading.Thread(target=worker, daemon=True).start()
 
@@ -65,7 +68,7 @@ async def _after_sync() -> None:
         try:
             _page.update()
         except Exception:
-            pass
+            logger.exception("同步后刷新页面失败")
 
 
 def schedule_sync(delay_ms: int = 10_000) -> None:

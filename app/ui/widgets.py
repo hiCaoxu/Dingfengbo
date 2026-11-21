@@ -123,6 +123,29 @@ def snack(page: ft.Page, message: str, color: str = TEXT) -> None:
     page.update()
 
 
+def delete_with_confirm(
+    page: ft.Page,
+    model,
+    record_id: str,
+    refresh,
+    message: str = "确定删除该记录？",
+) -> None:
+    """统一的软删除确认流程，供各模块复用，避免删除逻辑逐处复制。"""
+    from ..db.repo import soft_delete
+    from ..db.session import session_scope
+    from ..services.sync import mark_pending_write
+
+    def action():
+        with session_scope() as session:
+            obj = session.get(model, record_id)
+            if obj:
+                soft_delete(session, obj)
+        mark_pending_write()
+        refresh()
+
+    confirm(page, message, action)
+
+
 def confirm(page: ft.Page, message: str, on_confirm: Callable) -> None:
     def close(_):
         dialog.open = False

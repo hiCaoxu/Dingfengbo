@@ -5,8 +5,8 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..config import get_setting
-from ..db.models import Food
+from ..config import DEFAULT_HEIGHT_CM, DEFAULT_WEIGHT_KG, get_setting
+from ..db.models import Food, Weight
 
 # 常见运动 MET 值，用于估算消耗：kcal ≈ MET × 体重(kg) × 小时
 MET = {
@@ -33,12 +33,25 @@ def calorie_of(session: Session, food: str, grams: float) -> float:
     return round(row.kcal_per_100g * grams / 100, 1)
 
 
-def estimate_exercise_calories(kind: str, minutes: int, weight_kg: float = 65.0) -> float:
-    return round(MET.get(kind, 5.0) * weight_kg * (minutes / 60), 1)
+def latest_weight_kg(session: Session) -> float:
+    """最近一次体重记录，用于运动消耗估算；无记录时退回默认体重。"""
+    row = session.scalar(
+        select(Weight)
+        .where(Weight.is_deleted.is_(False))
+        .order_by(Weight.date.desc(), Weight.updated_at.desc())
+    )
+    return float(row.kg) if row is not None else DEFAULT_WEIGHT_KG
+
+
+def estimate_exercise_calories(
+    kind: str, minutes: int, weight_kg: float | None = None
+) -> float:
+    weight = weight_kg if weight_kg and weight_kg > 0 else DEFAULT_WEIGHT_KG
+    return round(MET.get(kind, 5.0) * weight * (minutes / 60), 1)
 
 
 def bmi(kg: float, height_cm: float | None = None) -> float | None:
-    h = (height_cm or float(get_setting("height_cm", 165))) / 100
+    h = (height_cm or float(get_setting("height_cm", DEFAULT_HEIGHT_CM))) / 100
     if h <= 0 or kg <= 0:
         return None
     return round(kg / (h * h), 1)

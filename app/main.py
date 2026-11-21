@@ -6,14 +6,15 @@ from datetime import date
 
 import flet as ft
 
-from .config import load_settings
+from .config import DATA_DIR, LOGS_DIR, load_settings
 from .db.session import init_db, session_scope
+from .logging_setup import setup_logging
 from .icons import ACTIONS, NAV, ico
 from .services.dates import weekday_cn
 from .services.diary import ensure_diary
 from .services.sync import mark_pending_write, sync_client
 from .theme import BG, CARD, DIVIDER, NAV_WIDTH, PRIMARY, PRIMARY_LIGHT, TEXT, TEXT_MUTED
-from .ui import diary as diary_ui
+from .ui import ai_assistant, diary as diary_ui
 from .ui import entertainment, finance_ui, health_ui, home, notes, todo
 from .ui.forms import open_settings_dialog
 from .ui.scheduler import bind as bind_sync
@@ -27,6 +28,7 @@ MODULES = [
     ("health", "健康"),
     ("fun", "娱乐"),
     ("finance", "记账"),
+    ("ai", "AI 助手"),
 ]
 
 
@@ -46,6 +48,7 @@ def _greeting() -> str:
 
 
 def main(page: ft.Page) -> None:
+    setup_logging(LOGS_DIR)
     init_db()
     with session_scope() as session:
         ensure_diary(session, date.today())
@@ -60,7 +63,11 @@ def main(page: ft.Page) -> None:
     page.window.min_width = 900
     page.window.min_height = 600
     page.window.resizable = True
+    page.window.maximizable = True
+    page.window.minimizable = True
     page.window.bgcolor = BG
+    # 隐藏系统标题栏，改用自定义标题栏（可拖动 + 最小化/最大化/关闭按钮）
+    page.window.title_bar_hidden = True
     page.theme = ft.Theme(
         color_scheme_seed="#4A7C59",
         font_family="Microsoft YaHei",
@@ -74,28 +81,57 @@ def main(page: ft.Page) -> None:
         f"{date.today().year}年{date.today().month}月{date.today().day}日 {weekday_cn(date.today())}",
         size=12, color=TEXT_MUTED,
     )
-    header = ft.Container(
-        content=ft.Row(
+    def window_buttons() -> ft.Row:
+        def minimize(_):
+            page.window.minimized = True
+            page.update()
+
+        def toggle_maximize(_):
+            page.window.maximized = not page.window.maximized
+            page.update()
+
+        def close(_):
+            page.run_task(page.window.close)
+
+        return ft.Row(
             [
-                ft.Column(
-                    [ft.Text(f"{_greeting()}，欢迎回来", size=18, color=TEXT, weight="bold"), date_text],
-                    spacing=4,
-                ),
-                ft.Container(expand=True),
-                ft.Row(
-                    [
-                        ft.Container(width=7, height=7, bgcolor=PRIMARY, border_radius=4),
-                        sync_text,
-                        ft.TextButton("立即同步", on_click=lambda e: _manual_sync()),
-                        icon_button(ACTIONS["settings"], lambda e: open_settings_dialog(page, refresh, refresh_status), "设置"),
-                    ],
-                    spacing=4,
-                ),
+                ft.IconButton(icon=ico("MINIMIZE"), icon_size=16, icon_color=TEXT_MUTED,
+                              tooltip="最小化", on_click=minimize),
+                ft.IconButton(icon=ico("CROP_SQUARE"), icon_size=15, icon_color=TEXT_MUTED,
+                              tooltip="最大化/还原", on_click=toggle_maximize),
+                ft.IconButton(icon=ico("CLOSE"), icon_size=16, icon_color=TEXT_MUTED,
+                              tooltip="关闭", on_click=close),
             ],
-            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            spacing=0,
+        )
+
+    header = ft.WindowDragArea(
+        content=ft.Container(
+            content=ft.Row(
+                [
+                    ft.Column(
+                        [ft.Text(f"{_greeting()}，欢迎回来", size=18, color=TEXT, weight="bold"), date_text],
+                        spacing=4,
+                    ),
+                    ft.Container(expand=True),
+                    ft.Row(
+                        [
+                            ft.Container(width=7, height=7, bgcolor=PRIMARY, border_radius=4),
+                            sync_text,
+                            ft.TextButton("立即同步", on_click=lambda e: _manual_sync()),
+                            icon_button(ACTIONS["settings"], lambda e: open_settings_dialog(page, refresh, refresh_status), "设置"),
+                        ],
+                        spacing=4,
+                    ),
+                    ft.Container(width=1, height=20, bgcolor=DIVIDER, margin=ft.Margin.symmetric(horizontal=6)),
+                    window_buttons(),
+                ],
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            ),
+            bgcolor=BG,
+            padding=ft.Padding.symmetric(vertical=12, horizontal=24),
         ),
-        bgcolor=BG,
-        padding=ft.Padding.symmetric(vertical=16, horizontal=24),
+        maximizable=True,
     )
 
     nav_column = ft.Column(spacing=2, expand=True)
@@ -151,7 +187,7 @@ def main(page: ft.Page) -> None:
                     [
                         ft.Row([ft.Container(width=7, height=7, bgcolor=PRIMARY, border_radius=4),
                                 ft.Text("本地优先 · 离线可用", size=10, color=TEXT_MUTED)], spacing=6),
-                        ft.Text(f"数据目录 D:\\Data\\Dingfengbo", size=9, color=TEXT_MUTED),
+                        ft.Text(f"数据目录 {DATA_DIR}", size=9, color=TEXT_MUTED),
                     ],
                     spacing=4,
                 ),
@@ -191,6 +227,8 @@ def main(page: ft.Page) -> None:
             body.content = entertainment.build(page, refresh)
         elif current == "finance":
             body.content = finance_ui.build(page, refresh)
+        elif current == "ai":
+            body.content = ai_assistant.build(page, refresh)
         page.update()
 
     _render_nav()

@@ -15,7 +15,12 @@ COPY app ./app
 COPY server ./server
 COPY run_server.py ./run_server.py
 
-RUN mkdir -p /data
+# 以非 root 用户运行（固定 uid 便于宿主数据目录授权），缩小容器被攻破后的影响面。
+RUN useradd --create-home --uid 10001 appuser \
+    && mkdir -p /data \
+    && chown -R appuser:appuser /app /data
+
+USER appuser
 
 EXPOSE 8000
 

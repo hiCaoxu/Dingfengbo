@@ -8,8 +8,21 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db.migrations import initialize_schema
 from app.db.models import Account, Note, Transaction
-from app.db.repo import apply_remote, create, mark_clean, serialize, update
-from app.services.finance import total_assets
+from app.db.repo import (
+    apply_remote,
+    create,
+    mark_clean,
+    mark_rejected,
+    serialize,
+    sync_queue_stats,
+    update,
+)
+from app.services.finance import (
+    account_balances,
+    month_summary,
+    six_month_trend,
+    total_assets,
+)
 
 
 class DataLogicTests(unittest.TestCase):
@@ -75,6 +88,55 @@ class DataLogicTests(unittest.TestCase):
 
         self.assertEqual(total_assets(self.session), 1000)
         self.assertNotEqual(source.id, target.id)
+
+    def test_finance_summaries_stay_correct_after_sql_aggregation(self) -> None:
+        account = create(self.session, Account, name="钱包", initial_balance=100)
+        rows = [
+            ("income", 300, "工资", date(2026, 6, 1)),
+            ("expense", 80, "餐饮", date(2026, 6, 2)),
+            ("expense", 20, "交通", date(2026, 6, 3)),
+            ("expense", 50, "餐饮", date(2026, 3, 3)),
+        ]
+        for kind, amount, category, day in rows:
+            create(
+                self.session,
+                Transaction,
+                kind=kind,
+                amount=amount,
+                category=category,
+                account_id=account.id,
+                date=day,
+                note="",
+            )
+
+        summary = month_summary(self.session, 2026, 6)
+        self.assertEqual(summary["income"], 300)
+        self.assertEqual(summary["expense"], 100)
+        self.assertEqual(summary["balance"], 200)
+        self.assertEqual(summary["categories"], {"餐饮": 80, "交通": 20})
+
+        trend = six_month_trend(self.session, date(2026, 6, 15))
+        self.assertEqual([item["label"] for item in trend], ["1月", "2月", "3月", "4月", "5月", "6月"])
+        self.assertEqual(trend[-1]["income"], 300)
+        self.assertEqual(trend[-1]["expense"], 100)
+        self.assertEqual(trend[2]["expense"], 50)
+
+        self.assertEqual(account_balances(self.session)[account.id], 250)
+
+    def test_rejected_record_leaves_pending_queue_until_edited(self) -> None:
+        note = create(self.session, Note, title="坏记录", content="", tags="[]")
+        rejected = [{"table": "notes", "id": note.id, "reason": "updated_at 格式错误"}]
+
+        self.assertEqual(mark_rejected(self.session, rejected), 1)
+        self.session.refresh(note)
+        self.assertEqual(note.sync_status, "error")
+        self.assertEqual(sync_queue_stats(self.session)["error"], 1)
+        self.assertEqual(mark_rejected(self.session, rejected), 0)
+
+        # 用户重新编辑后 mark_dirty 把记录复活为 pending，自愈路径天然存在。
+        update(self.session, note, title="修好了")
+        self.session.refresh(note)
+        self.assertEqual(note.sync_status, "pending")
 
 
 if __name__ == "__main__":

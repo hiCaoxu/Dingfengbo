@@ -6,8 +6,61 @@ from uuid import UUID
 from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import sessionmaker
 
-from app.db.migrations import initialize_schema
+from app.db.migrations import initialize_schema, sequence_value
 from app.db.models import Account, Note, Transaction
+
+
+class SyncSequenceInitializationTests(unittest.TestCase):
+    """升级存量库时全局序列必须顶到存量最大值，否则存量客户端永久漏拉。"""
+
+    INSERT_NOTE = """
+        INSERT INTO notes (id, owner_id, created_at, updated_at, is_deleted,
+                           sync_status, sync_seq, title, content, tags)
+        VALUES (:id, 'local', '2026-01-01 00:00:00', '2026-01-01 00:00:00',
+                0, :status, :seq, :title, '', '[]')
+    """
+
+    def test_counter_is_anchored_to_existing_rows(self) -> None:
+        engine = create_engine("sqlite:///:memory:")
+        initialize_schema(engine)
+        with engine.begin() as connection:
+            connection.execute(
+                text(self.INSERT_NOTE),
+                {"id": "legacy", "status": "clean", "seq": 150, "title": "存量笔记"},
+            )
+            # 模拟升级场景：计数器被重置为 0，而存量行带着旧的表内序列号。
+            connection.execute(text("UPDATE sync_sequences SET value = 0 WHERE id = 1"))
+
+        initialize_schema(engine)
+        with engine.connect() as connection:
+            self.assertEqual(sequence_value(connection), 150)
+
+        engine.dispose()
+
+    def test_missing_sequence_rows_are_allocated_above_existing_max(self) -> None:
+        engine = create_engine("sqlite:///:memory:")
+        initialize_schema(engine)
+        with engine.begin() as connection:
+            connection.execute(
+                text(self.INSERT_NOTE),
+                {"id": "legacy", "status": "clean", "seq": 150, "title": "存量笔记"},
+            )
+            connection.execute(
+                text(self.INSERT_NOTE),
+                {"id": "missing", "status": "pending", "seq": 0, "title": "缺号笔记"},
+            )
+            connection.execute(text("UPDATE sync_sequences SET value = 0 WHERE id = 1"))
+
+        initialize_schema(engine)
+        with engine.connect() as connection:
+            allocated = connection.scalar(
+                text("SELECT sync_seq FROM notes WHERE id = 'missing'")
+            )
+            self.assertGreater(allocated, 150)
+            self.assertEqual(sequence_value(connection), allocated)
+
+        engine.dispose()
+
 
 
 class UuidMigrationTests(unittest.TestCase):

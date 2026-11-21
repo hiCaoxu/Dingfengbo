@@ -24,6 +24,7 @@ NAV = {
     "health": "FAVORITE_OUTLINED",
     "fun": "MOVIE_OUTLINED",
     "finance": "ACCOUNT_BALANCE_WALLET_OUTLINED",
+    "ai": "AUTO_AWESOME_OUTLINED",
 }
 
 QUICK = {

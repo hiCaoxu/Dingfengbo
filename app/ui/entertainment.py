@@ -8,16 +8,17 @@ import flet as ft
 from sqlalchemy import select
 
 from ..db.models import Entertainment
-from ..db.repo import soft_delete, update
+from ..db.repo import update
 from ..db.session import session_scope
 from ..icons import ACTIONS, ico
 from ..services.sync import mark_pending_write
 from ..theme import DIVIDER, PRIMARY_LIGHT, TEXT, TEXT_MUTED
-from .forms import open_entertainment_dialog
-from .widgets import card, confirm, divider, empty, icon_button, primary_button, section_header
+from .forms import ENTERTAINMENT_KINDS, open_entertainment_dialog
+from .state import state
+from .widgets import card, delete_with_confirm, divider, empty, icon_button, primary_button, section_header
 
 COLUMNS = ["想看", "在看", "看完"]
-_state = {"kind": "全部"}
+_state = state.entertainment
 
 
 def move(item_id: str, direction: int, page, refresh) -> None:
@@ -32,15 +33,7 @@ def move(item_id: str, direction: int, page, refresh) -> None:
 
 
 def delete(item_id: str, page, refresh) -> None:
-    def action():
-        with session_scope() as session:
-            item = session.get(Entertainment, item_id)
-            if item:
-                soft_delete(session, item)
-        mark_pending_write()
-        refresh()
-
-    confirm(page, "确定删除该条目？", action)
+    delete_with_confirm(page, Entertainment, item_id, refresh, "确定删除该条目？")
 
 
 def _placeholder_cover() -> ft.Control:
@@ -113,7 +106,7 @@ def build(page: ft.Page, refresh) -> ft.Control:
     kind_row = ft.Row(
         [ft.TextButton(("● " if _state["kind"] == k else "") + k,
                        on_click=lambda e, value=k: (_state.__setitem__("kind", value), refresh()))
-         for k in ["全部", "电影", "电视剧", "纪录片", "播客", "书籍"]],
+         for k in ["全部", *ENTERTAINMENT_KINDS]],
         spacing=2,
         wrap=True,
     )

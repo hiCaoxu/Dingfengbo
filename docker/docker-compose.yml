@@ -9,8 +9,43 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      # 容器内以 uid 10001 运行，宿主目录需可写：chown -R 10001:10001 <数据目录>
       - ../data:/data
     environment:
       DINGFENGBO_HOST: 0.0.0.0
       DINGFENGBO_PORT: 8000
       DINGFENGBO_SERVER_DB: /data/cloud.db
+    # 日志轮转：避免容器 json-file 日志无限增长
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # 可选 TLS 反代：docker compose --profile tls up -d
+  # 域名解析到本机后由 Caddy 自动申请/续期证书，随后可用 443 收掉直连的 8000 端口。
+  caddy:
+    image: caddy:2-alpine
+    container_name: dingfengbo-caddy
+    profiles: ["tls"]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    depends_on:
+      - dingfengbo-sync
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  caddy_data:
+  caddy_config:

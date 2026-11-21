@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable
 from datetime import date, datetime
 
@@ -10,7 +11,14 @@ import flet as ft
 
 from sqlalchemy import select
 
-from ..config import DATA_DIR, load_settings, save_settings
+from ..config import (
+    AI_PROVIDERS,
+    DATA_DIR,
+    DEFAULT_HEIGHT_CM,
+    DEFAULT_SERVER_URL,
+    load_settings,
+    save_settings,
+)
 from ..db.models import (
     Account,
     Diet,
@@ -22,14 +30,26 @@ from ..db.models import (
     Transaction,
     Weight,
 )
-from ..db.repo import create, update
+from ..db.repo import create, sync_queue_stats, update
 from ..db.session import session_scope
 from ..icons import ico
+from ..services.ai.client import AIConfigError, chat
+from ..services.ai.provider import AIError
 from ..services.dates import diary_title, lunar_to_gregorian, parse_hours, parse_lunar
-from ..services.health import calorie_of, estimate_exercise_calories, food_options
-from ..services.sync import mark_pending_write
-from ..theme import DIVIDER, TEXT, TEXT_MUTED
+from ..services.health import (
+    calorie_of,
+    estimate_exercise_calories,
+    food_options,
+    latest_weight_kg,
+)
+from ..services.sync import mark_pending_write, probe
+from ..theme import ACCENT, DIVIDER, PRIMARY, TEXT, TEXT_MUTED
 from .widgets import close_modal, dropdown, form_field, modal, primary_button, snack
+
+logger = logging.getLogger(__name__)
+
+# 娱乐类型单一来源：录入弹窗与看板筛选共用，避免两处漏改。
+ENTERTAINMENT_KINDS = ["电影", "电视剧", "纪录片", "播客", "书籍"]
 
 
 def _tags(value: str) -> str:
@@ -56,6 +76,21 @@ def _close_and_refresh(page, dialog, on_done):
     page.update()
     if on_done:
         on_done()
+
+
+def save_record(model, record_id: str | None, fields: dict, resolve=None) -> None:
+    """统一的「取-改 / 建 + 标脏」骨架，供各弹窗复用。
+
+    ``resolve`` 在会话内按业务键查找既有记录（如睡眠按日期去重），返回 None 则新建。
+    """
+    with session_scope() as session:
+        target = session.get(model, record_id) if record_id else None
+        if target is None and resolve is not None:
+            target = resolve(session)
+        if target is not None:
+            update(session, target, **fields)
+        else:
+            create(session, model, **fields)
 
 
 # ---------------------------------------------------------------- 待办
@@ -118,13 +153,7 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
             repeat_rule=rule_map.get(repeat.value or "不循环", "none"),
             priority=priority.value or "",
         )
-        with session_scope() as session:
-            if todo:
-                target = session.get(Todo, todo.id)
-                if target:
-                    update(session, target, **fields)
-            else:
-                create(session, Todo, **fields)
+        save_record(Todo, todo.id if todo else None, fields)
         mark_pending_write()
         _close_and_refresh(page, dialog, on_done)
 
@@ -148,14 +177,8 @@ def open_note_dialog(page: ft.Page, note: Note | None = None, on_done: Callable 
         if not (title.value or "").strip():
             snack(page, "请填写标题", "#C97B63")
             return
-        with session_scope() as session:
-            fields = dict(title=title.value.strip(), tags=_tags(tags.value or ""), content=content.value or "")
-            if note:
-                target = session.get(Note, note.id)
-                if target:
-                    update(session, target, **fields)
-            else:
-                create(session, Note, **fields)
+        fields = dict(title=title.value.strip(), tags=_tags(tags.value or ""), content=content.value or "")
+        save_record(Note, note.id if note else None, fields)
         mark_pending_write()
         _close_and_refresh(page, dialog, on_done)
 
@@ -189,14 +212,8 @@ def open_account_dialog(page: ft.Page, account: Account | None = None, on_done: 
         except ValueError:
             snack(page, "余额格式不正确", "#C97B63")
             return
-        with session_scope() as session:
-            fields = dict(name=name.value.strip(), kind=kind.value, initial_balance=amount)
-            if account:
-                target = session.get(Account, account.id)
-                if target:
-                    update(session, target, **fields)
-            else:
-                create(session, Account, **fields)
+        fields = dict(name=name.value.strip(), kind=kind.value, initial_balance=amount)
+        save_record(Account, account.id if account else None, fields)
         mark_pending_write()
         _close_and_refresh(page, dialog, on_done)
 
@@ -211,10 +228,19 @@ def open_account_dialog(page: ft.Page, account: Account | None = None, on_done: 
 def open_transaction_dialog(page: ft.Page, kind: str = "expense", tx: Transaction | None = None, on_done: Callable | None = None):
     with session_scope() as session:
         accounts = [(a.id, a.name) for a in session.scalars(select(Account).where(Account.is_deleted.is_(False)))]
-    if not accounts:
+        # 编辑历史交易时保留已被软删的原账户选项，避免静默把记录改挂到别的账户。
+        missing: list[tuple[str, str]] = []
+        for account_id in {str(tx.account_id), str(tx.to_account_id or "")} if tx else set():
+            if not account_id or any(account_id == known for known, _ in accounts):
+                continue
+            deleted = session.get(Account, account_id)
+            if deleted is not None:
+                missing.append((account_id, f"{deleted.name}（已删除）"))
+    account_options = accounts + missing
+    if not account_options:
         snack(page, "请先新增账户", "#C97B63")
         return None
-    account_ids = [str(account_id) for account_id, _ in accounts]
+    account_ids = [str(account_id) for account_id, _ in account_options]
     kind_value = tx.kind if tx else kind
     kind_dd = dropdown("类型", ["支出", "收入", "转账"], {"expense": "支出", "income": "收入", "transfer": "转账"}[kind_value])
     amount = form_field("金额 *", str(tx.amount) if tx else "")
@@ -226,15 +252,15 @@ def open_transaction_dialog(page: ft.Page, kind: str = "expense", tx: Transactio
     cats = category_options(initial_kind)
     category = dropdown("分类", cats, (tx.category if tx and tx.category in cats else None))
 
-    initial_account = str(tx.account_id) if tx and tx.account_id in account_ids else account_ids[0]
-    initial_to = str(tx.to_account_id) if tx and tx.to_account_id in account_ids else next(
+    initial_account = str(tx.account_id) if tx and str(tx.account_id) in account_ids else account_ids[0]
+    initial_to = str(tx.to_account_id) if tx and tx.to_account_id and str(tx.to_account_id) in account_ids else next(
         (account_id for account_id in account_ids if account_id != initial_account), initial_account
     )
 
     def account_dropdown(label: str, value: str) -> ft.Dropdown:
         control = dropdown(label, account_ids, value, width=220)
         control.options = [
-            ft.dropdown.Option(key=str(account_id), text=name) for account_id, name in accounts
+            ft.dropdown.Option(key=str(account_id), text=name) for account_id, name in account_options
         ]
         return control
 
@@ -273,7 +299,7 @@ def open_transaction_dialog(page: ft.Page, kind: str = "expense", tx: Transactio
         mapped = {"支出": "expense", "收入": "income", "转账": "transfer"}[kind_dd.value]
         account_id = str(account_dd.value)
         if mapped == "transfer" and (
-            len(accounts) < 2 or not to_dd.value or str(to_dd.value) == account_id
+            len(account_ids) < 2 or not to_dd.value or str(to_dd.value) == account_id
         ):
             snack(page, "转账需要选择两个不同账户", "#C97B63")
             return
@@ -286,13 +312,7 @@ def open_transaction_dialog(page: ft.Page, kind: str = "expense", tx: Transactio
             date=record_date,
             note=note.value or "",
         )
-        with session_scope() as session:
-            if tx:
-                target = session.get(Transaction, tx.id)
-                if target:
-                    update(session, target, **fields)
-            else:
-                create(session, Transaction, **fields)
+        save_record(Transaction, tx.id if tx else None, fields)
         mark_pending_write()
         _close_and_refresh(page, dialog, on_done)
 
@@ -327,24 +347,22 @@ def open_exercise_dialog(page: ft.Page, item: Exercise | None = None, on_done: C
             snack(page, "时长格式不正确", "#C97B63")
             return
         try:
-            kcal = float(calories.value) if calories.value else estimate_exercise_calories(kind.value, mins)
+            kcal = float(calories.value) if calories.value else None
             record_date = _date(day.value, date.today()) or date.today()
             distance_km = float(distance.value) if distance.value else None
         except ValueError:
             snack(page, "日期、距离或热量格式不正确", "#C97B63")
             return
-        with session_scope() as session:
-            fields = dict(
-                date=record_date, kind=kind.value, minutes=mins,
-                distance_km=distance_km,
-                calories=kcal, note=note.value or "",
-            )
-            if item:
-                target = session.get(Exercise, item.id)
-                if target:
-                    update(session, target, **fields)
-            else:
-                create(session, Exercise, **fields)
+        if kcal is None:
+            # 估算需要体重：优先取最近一次体重记录，没有才退回默认值。
+            with session_scope() as session:
+                kcal = estimate_exercise_calories(kind.value, mins, latest_weight_kg(session))
+        fields = dict(
+            date=record_date, kind=kind.value, minutes=mins,
+            distance_km=distance_km,
+            calories=kcal, note=note.value or "",
+        )
+        save_record(Exercise, item.id if item else None, fields)
         mark_pending_write()
         _close_and_refresh(page, dialog, on_done)
 
@@ -387,15 +405,9 @@ def open_diet_dialog(page: ft.Page, item: Diet | None = None, on_done: Callable 
         except ValueError:
             snack(page, "请输入正确的日期、重量和热量", "#C97B63")
             return
-        with session_scope() as session:
-            fields = dict(date=record_date, meal=meal.value,
-                          food=food.value, grams=weight, calories=kcal, note=note.value or "")
-            if item:
-                target = session.get(Diet, item.id)
-                if target:
-                    update(session, target, **fields)
-            else:
-                create(session, Diet, **fields)
+        fields = dict(date=record_date, meal=meal.value,
+                      food=food.value, grams=weight, calories=kcal, note=note.value or "")
+        save_record(Diet, item.id if item else None, fields)
         mark_pending_write()
         _close_and_refresh(page, dialog, on_done)
 
@@ -430,14 +442,8 @@ def open_weight_dialog(page: ft.Page, item: Weight | None = None, on_done: Calla
         except ValueError:
             snack(page, "日期或体脂率格式不正确", "#C97B63")
             return
-        with session_scope() as session:
-            fields = dict(date=record_date, kg=weight, body_fat=body_fat)
-            if item:
-                target = session.get(Weight, item.id)
-                if target:
-                    update(session, target, **fields)
-            else:
-                create(session, Weight, **fields)
+        fields = dict(date=record_date, kg=weight, body_fat=body_fat)
+        save_record(Weight, item.id if item else None, fields)
         mark_pending_write()
         _close_and_refresh(page, dialog, on_done)
 
@@ -458,36 +464,29 @@ def open_sleep_dialog(page: ft.Page, item: Sleep | None = None, on_done: Callabl
     def save(_):
         hours = parse_hours(bedtime.value or "", wake.value or "")
         if hours == 0:
-            dialog.open = False
-            page.update()
+            # 校验失败保留弹窗，避免用户已填内容丢失。
             snack(page, "时间格式应为 HH:MM", "#C97B63")
             return
         try:
             record_date = _date(day.value, date.today()) or date.today()
         except ValueError:
-            dialog.open = False
-            page.update()
             snack(page, "日期格式不正确", "#C97B63")
             return
         try:
             quality_val = int(quality.value)
         except (TypeError, ValueError):
             quality_val = 3
-        with session_scope() as session:
-            fields = dict(date=record_date, bedtime=bedtime.value or "",
-                          wake_time=wake.value or "", hours=hours, quality=quality_val)
-            if item:
-                target = session.get(Sleep, item.id)
-                if target:
-                    update(session, target, **fields)
-            else:
-                existing = session.scalar(
-                    select(Sleep).where(Sleep.is_deleted.is_(False), Sleep.date == record_date)
-                )
-                if existing:
-                    update(session, existing, **fields)
-                else:
-                    create(session, Sleep, **fields)
+        fields = dict(date=record_date, bedtime=bedtime.value or "",
+                      wake_time=wake.value or "", hours=hours, quality=quality_val)
+        save_record(
+            Sleep,
+            item.id if item else None,
+            fields,
+            # 同一天只保留一条睡眠记录：新建时按日期复用既有行。
+            resolve=lambda session: session.scalar(
+                select(Sleep).where(Sleep.is_deleted.is_(False), Sleep.date == record_date)
+            ),
+        )
         mark_pending_write()
         _close_and_refresh(page, dialog, on_done)
 
@@ -503,7 +502,7 @@ def open_sleep_dialog(page: ft.Page, item: Sleep | None = None, on_done: Callabl
 
 def open_entertainment_dialog(page: ft.Page, item: Entertainment | None = None, on_done: Callable | None = None):
     title = form_field("标题 *", item.title if item else "")
-    kind = dropdown("类型", ["电影", "电视剧", "纪录片", "播客", "书籍"], item.kind if item else "电影")
+    kind = dropdown("类型", ENTERTAINMENT_KINDS, item.kind if item else "电影")
     status = dropdown("状态", ["想看", "在看", "看完"], item.status if item else "想看")
     cover = form_field("封面 URL 或本地路径", item.cover if item else "")
     rating = form_field("评分（0-10，可选）", str(item.rating) if item and item.rating else "")
@@ -514,18 +513,16 @@ def open_entertainment_dialog(page: ft.Page, item: Entertainment | None = None, 
             snack(page, "请填写标题", "#C97B63")
             return
         try:
-            score = float(rating.value) if rating.value else None
+            score = float(rating.value) if (rating.value or "").strip() else None
         except ValueError:
-            score = None
-        with session_scope() as session:
-            fields = dict(title=title.value.strip(), kind=kind.value, status=status.value,
-                          cover=cover.value or "", rating=score, note=note.value or "")
-            if item:
-                target = session.get(Entertainment, item.id)
-                if target:
-                    update(session, target, **fields)
-            else:
-                create(session, Entertainment, **fields)
+            snack(page, "评分需为 0-10 的数字", "#C97B63")
+            return
+        if score is not None and not 0 <= score <= 10:
+            snack(page, "评分需在 0-10 之间", "#C97B63")
+            return
+        fields = dict(title=title.value.strip(), kind=kind.value, status=status.value,
+                      cover=cover.value or "", rating=score, note=note.value or "")
+        save_record(Entertainment, item.id if item else None, fields)
         mark_pending_write()
         _close_and_refresh(page, dialog, on_done)
 
@@ -542,29 +539,149 @@ def open_entertainment_dialog(page: ft.Page, item: Entertainment | None = None, 
 
 def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh_status=None):
     settings = load_settings()
-    server = form_field("同步服务地址", settings.get("server_url", ""))
+    server = form_field("同步服务地址", settings.get("server_url", DEFAULT_SERVER_URL))
     token = form_field("同步令牌", settings.get("sync_token", ""))
-    height = form_field("身高 cm", str(settings.get("height_cm", 165)))
+    token.password = True
+    token.can_reveal_password = True
+    height = form_field("身高 cm", str(settings.get("height_cm", DEFAULT_HEIGHT_CM)))
     gender = dropdown("性别", ["男", "女"], settings.get("gender", "男"))
     enabled = ft.Checkbox(label="启用自动同步", value=bool(settings.get("sync_enabled", True)))
 
+    # AI 助手配置
+    provider_names = [meta["name"] for meta in AI_PROVIDERS.values()]
+    current_provider = settings.get("ai_provider", "custom")
+    if current_provider not in AI_PROVIDERS:
+        current_provider = "custom"
+    provider_key = {"value": current_provider}
+    ai_provider_dd = dropdown("厂商", provider_names, AI_PROVIDERS[current_provider]["name"], width=220)
+    ai_base_url = form_field("服务地址 base_url", settings.get("ai_base_url", ""))
+    ai_model = form_field("模型名", settings.get("ai_model", ""))
+    ai_key = form_field("API Key", settings.get("ai_api_key", ""))
+    ai_key.password = True
+    ai_key.can_reveal_password = True
+
+    def on_provider_change(e):
+        name = e.control.value
+        for key, meta in AI_PROVIDERS.items():
+            if meta["name"] == name:
+                provider_key["value"] = key
+                ai_base_url.value = meta["base_url"]
+                ai_model.value = meta["model"]
+                break
+        ai_base_url.update()
+        ai_model.update()
+
+    ai_provider_dd.on_select = on_provider_change
+
+    # 未保存配置的连通性自检：后台线程发请求，回到 UI 线程更新提示。
+    sync_probe_text = ft.Text("", size=11, color=TEXT_MUTED)
+    ai_probe_text = ft.Text("", size=11, color=TEXT_MUTED)
+
+    def _run_probe(target: ft.Text, work: Callable[[], str]) -> None:
+        target.value = "正在测试连接…"
+        target.color = TEXT_MUTED
+        target.update()
+
+        def worker() -> None:
+            message = work()
+
+            async def apply() -> None:
+                target.value = message
+                target.color = PRIMARY if "成功" in message else ACCENT
+                page.update()
+
+            try:
+                page.run_task(apply)
+            except Exception:
+                logger.exception("连接测试结果回 UI 线程失败")
+
+        page.run_thread(worker)
+
+    def test_sync(_):
+        _run_probe(
+            sync_probe_text,
+            lambda: probe(server.value or DEFAULT_SERVER_URL, token.value or ""),
+        )
+
+    def test_ai(_):
+        def work() -> str:
+            try:
+                chat(
+                    [{"role": "user", "content": "ping"}],
+                    settings={
+                        "ai_base_url": ai_base_url.value or "",
+                        "ai_api_key": ai_key.value or "",
+                        "ai_model": ai_model.value or "",
+                    },
+                )
+            except AIConfigError as exc:
+                return str(exc)
+            except AIError as exc:
+                return str(exc)
+            except Exception:
+                logger.exception("AI 连接测试异常")
+                return "连接失败，详见日志"
+            return "连接成功"
+
+        _run_probe(ai_probe_text, work)
+
+    # 同步队列可见性：被拒记录不会无限重推，但用户需要知道它们的存在。
+    with session_scope() as session:
+        stats = sync_queue_stats(session)
+    queue_note = ft.Text(
+        f"待同步 {stats.get('pending', 0)} 条"
+        + (
+            f" · {stats['error']} 条被服务端拒收，重新编辑后会自动重试"
+            if stats.get("error")
+            else ""
+        ),
+        size=11,
+        color=ACCENT if stats.get("error") else TEXT_MUTED,
+    )
+
     def save(_):
         try:
-            h = float(height.value or 165)
+            h = float(height.value or DEFAULT_HEIGHT_CM)
         except ValueError:
-            h = 165.0
-        save_settings(dict(server_url=server.value or "", sync_token=token.value or "",
-                           height_cm=h, gender=gender.value, sync_enabled=enabled.value))
+            h = DEFAULT_HEIGHT_CM
+        save_settings(dict(
+            server_url=server.value or DEFAULT_SERVER_URL, sync_token=token.value or "",
+            height_cm=h, gender=gender.value, sync_enabled=enabled.value,
+            ai_provider=provider_key["value"],
+            ai_base_url=ai_base_url.value or "",
+            ai_api_key=ai_key.value or "",
+            ai_model=ai_model.value or "",
+        ))
         if refresh_status:
             refresh_status()
         _close_and_refresh(page, dialog, on_done)
 
     dialog = modal(
         page, "设置",
-        ft.Column([server, token, ft.Row([height, gender], spacing=12), enabled,
-                   ft.Text(f"数据目录：{DATA_DIR}", size=11, color=TEXT_MUTED)],
-                  spacing=10, tight=True),
+        ft.Column(
+            [
+                server, token,
+                ft.Row([ft.TextButton("测试同步连接", on_click=test_sync), sync_probe_text], spacing=10),
+                queue_note,
+                ft.Row([height, gender], spacing=12), enabled,
+                ft.Container(height=1, bgcolor=DIVIDER),
+                ft.Text("AI 助手（国产大模型）", size=12, color=TEXT, weight="bold"),
+                ai_provider_dd,
+                ft.Row([ai_base_url, ai_model], spacing=12),
+                ai_key,
+                ft.Row([ft.TextButton("测试 AI 连接", on_click=test_ai), ai_probe_text], spacing=10),
+                ft.Text(
+                    "隐私提示：使用 AI 助手时，被「@引用」的数据（待办、日记、笔记、收支等）"
+                    "会通过网络发送至你所配置的大模型服务商；请勿在引用范围内填写密码等敏感信息。"
+                    "首次发送前还会再次确认。",
+                    size=11, color=TEXT_MUTED,
+                ),
+                ft.Text(f"数据目录：{DATA_DIR}", size=11, color=TEXT_MUTED),
+            ],
+            spacing=10, tight=True,
+        ),
         [ft.TextButton("取消", on_click=lambda e: _close_and_refresh(page, dialog, None)), primary_button("保存", save)],
+        width=600,
     )
     return dialog
 

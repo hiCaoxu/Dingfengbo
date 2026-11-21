@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 
 import flet as ft
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 
 from ..db.models import Diary
 from ..db.repo import update
@@ -15,15 +15,11 @@ from ..services.dates import diary_title, iso_week, month_grid, shift_month
 from ..services.diary import ensure_diary
 from ..services.sync import mark_pending_write
 from ..theme import ACCENT, DIVIDER, PRIMARY, PRIMARY_LIGHT, TEXT, TEXT_MUTED, card_border
+from .async_utils import background_section
+from .state import state
 from .widgets import card, divider, empty, icon_button, primary_button, section_header
 
-_state = {
-    "view": "月历",
-    "year": date.today().year,
-    "month": date.today().month,
-    "selected": date.today(),
-    "query": "",
-}
+_state = state.diary
 
 
 def set_selected(day: date) -> None:
@@ -77,15 +73,37 @@ def _editor(day: date, refresh) -> ft.Control:
     )
 
 
-def _month_view(refresh) -> ft.Control:
+def _month_query() -> tuple[int, int, set[date], list[date]]:
+    """月历视图的数据查询（后台线程执行）：只取日期与正文长度，不加载 content。"""
     year, month = _state["year"], _state["month"]
+    selected = _state["selected"]
+    start = date(year, month, 1)
+    end = date(*shift_month(year, month, 1), 1)
+    history_start = date(selected.year - 5, 1, 1)
+    history_end = date(selected.year, 1, 1)
     with session_scope() as session:
-        diaries = {
-            d.date: d
-            for d in session.scalars(
-                select(Diary).where(Diary.is_deleted.is_(False))
+        month_rows = session.execute(
+            select(Diary.date, func.length(Diary.content)).where(
+                Diary.is_deleted.is_(False),
+                Diary.date >= start,
+                Diary.date < end,
             )
-        }
+        ).all()
+        history_rows = session.scalars(
+            select(Diary.date).where(
+                Diary.is_deleted.is_(False),
+                Diary.date >= history_start,
+                Diary.date < history_end,
+                func.strftime("%m-%d", Diary.date) == selected.strftime("%m-%d"),
+                func.length(Diary.content) > 0,
+            ).order_by(Diary.date.desc())
+        ).all()
+    has_content = {day for day, length in month_rows if (length or 0) > 0}
+    return year, month, has_content, list(history_rows)
+
+
+def _month_view(refresh, data) -> ft.Control:
+    year, month, has_content, history = data
     grid = month_grid(year, month)
     cells: list[ft.Control] = []
     for week in grid:
@@ -98,8 +116,7 @@ def _month_view(refresh) -> ft.Control:
         )
         for day in week:
             in_month = day.month == month and day.year == year
-            diary = diaries.get(day)
-            has_diary = bool(diary and (diary.content or "").strip())
+            has_diary = day in has_content
             selected = day == _state["selected"]
             body = ft.Column(
                 [
@@ -128,25 +145,16 @@ def _month_view(refresh) -> ft.Control:
                     ) if in_month else None,
                 )
             )
-    selected = _state["selected"]
-    history = [
-        d for d in diaries.values()
-        if d.date.year in range(selected.year - 5, selected.year)
-        and d.date.month == selected.month
-        and d.date.day == selected.day
-        and (d.content or "").strip()
-    ]
-    history.sort(key=lambda d: d.date, reverse=True)
     history_section = ft.Column(
         [
             ft.Text("历史上的今天", size=11, color=TEXT_MUTED, weight="bold"),
             *(
                 [
                     ft.TextButton(
-                        f"{d.date.year}年{d.date.month}月{d.date.day}日",
-                        on_click=lambda e, dd=d.date: (_state.__setitem__("selected", dd), refresh()),
+                        f"{day.year}年{day.month}月{day.day}日",
+                        on_click=lambda e, dd=day: (_state.__setitem__("selected", dd), refresh()),
                     )
-                    for d in history
+                    for day in history
                 ]
                 if history
                 else [ft.Text("暂无", size=10, color=TEXT_MUTED)]
@@ -193,19 +201,28 @@ def _goto_today(refresh) -> None:
     refresh()
 
 
-def _list_view(refresh) -> ft.Control:
-    with session_scope() as session:
-        diaries = list(
-            session.scalars(
-                select(Diary).where(Diary.is_deleted.is_(False)).order_by(Diary.date.desc())
+def _list_query() -> tuple[str, list]:
+    """列表视图的数据查询（后台线程执行）：检索下推 SQL，正文只取前 80 字。"""
+    query = (_state["query"] or "").strip()
+    conditions = [Diary.is_deleted.is_(False), func.length(Diary.content) > 0]
+    if query:
+        conditions.append(
+            or_(
+                func.strftime("%Y-%m-%d", Diary.date).like(f"%{query}%"),
+                Diary.title.like(f"%{query}%"),
             )
         )
-    query = _state["query"]
-    shown = [
-        d for d in diaries
-        if (d.content or "").strip()
-        and (not query or query in d.date.isoformat() or query in d.title)
-    ]
+    with session_scope() as session:
+        shown = session.execute(
+            select(Diary.date, Diary.title, func.substr(Diary.content, 1, 80))
+            .where(*conditions)
+            .order_by(Diary.date.desc())
+        ).all()
+    return query, list(shown)
+
+
+def _list_view(refresh, data) -> ft.Control:
+    query, shown = data
     field = ft.TextField(
         label="按日期检索 YYYY-MM-DD",
         value=query,
@@ -222,11 +239,16 @@ def _list_view(refresh) -> ft.Control:
                 ft.Column(
                     [
                         ft.ListTile(
-                            title=ft.Text(d.title, size=12, color=TEXT),
-                            subtitle=ft.Text((d.content or "").replace("\n", " ")[:60], size=10, color=TEXT_MUTED),
-                            on_click=lambda e, day=d.date: (_state.__setitem__("selected", day), refresh()),
+                            title=ft.Text(title, size=12, color=TEXT),
+                            subtitle=ft.Text(
+                                (snippet or "").replace("\n", " ")[:60],
+                                size=10, color=TEXT_MUTED,
+                            ),
+                            on_click=lambda e, day=day: (
+                                _state.__setitem__("selected", day), refresh()
+                            ),
                         )
-                        for d in shown
+                        for day, title, snippet in shown
                     ],
                     spacing=2,
                     scroll=ft.ScrollMode.AUTO,
@@ -251,7 +273,14 @@ def build(page: ft.Page, refresh) -> ft.Control:
         ],
         spacing=6,
     )
-    main = _month_view(refresh) if _state["view"] == "月历" else _list_view(refresh)
+    if _state["view"] == "月历":
+        main = background_section(
+            page, _month_query, lambda data: _month_view(refresh, data)
+        )
+    else:
+        main = background_section(
+            page, _list_query, lambda data: _list_view(refresh, data)
+        )
     return ft.Column(
         [
             section_header("日记", tabs),

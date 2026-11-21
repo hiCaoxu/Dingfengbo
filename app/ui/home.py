@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date, datetime, timedelta
-from random import choice
+from datetime import date, timedelta
 
 import flet as ft
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from ..db.models import Account, Diary, Diet, Exercise, Note, Sleep, Todo, Transaction, Weight
 from ..db.session import session_scope
 from ..icons import QUICK, ico
 from ..services.dates import day_of_year, iso_week, local_date_from_utc, lunar_text, shift_month, weekday_cn
 from ..services.diary import ensure_diary
-from ..services.finance import account_balance, money, month_summary, total_assets
+from ..services.finance import money, month_summary, total_assets
 from ..services.sync import mark_pending_write
 from ..theme import (
     ACCENT,
@@ -43,7 +42,9 @@ QUICK_ITEMS = [
 ]
 
 # 首页视图状态需跨 refresh 保留，否则每次重建都会回到今天。
-_HOME_STATE = {"selected_date": date.today(), "year": date.today().year}
+from .state import state
+
+_HOME_STATE = state.home
 
 
 def _calendar_card(selected: date, set_date, width: int | None = None, height: int | None = None) -> ft.Container:
@@ -113,17 +114,24 @@ def _stat_card(title: str, value: str, accent: bool = False, width: int | None =
     )
 
 
-def _activity_counts() -> dict[date, int]:
+def _activity_counts(since: date | None = None) -> dict[date, int]:
+    """热力图按日计数，聚合下推 SQL；只统计窗口内的记录。"""
     counts: dict[date, int] = defaultdict(int)
     with session_scope() as session:
-        for obj in session.scalars(select(Diary).where(Diary.is_deleted.is_(False))):
-            counts[obj.date] += 1
-        for obj in session.scalars(select(Todo).where(Todo.completed.is_(True), Todo.is_deleted.is_(False))):
+        for model in (Diary, Exercise, Diet, Weight, Sleep, Transaction):
+            stmt = select(model.date, func.count()).where(model.is_deleted.is_(False))
+            if since is not None:
+                stmt = stmt.where(model.date >= since)
+            stmt = stmt.group_by(model.date)
+            for day, n in session.execute(stmt):
+                counts[day] += n
+        # Todo 以完成时间计入，需本地时区换算，保留 Python 侧计数。
+        todo_stmt = select(Todo).where(Todo.completed.is_(True), Todo.is_deleted.is_(False))
+        for obj in session.scalars(todo_stmt):
             if obj.completed_at:
-                counts[local_date_from_utc(obj.completed_at)] += 1
-        for model in (Exercise, Diet, Weight, Sleep, Transaction):
-            for obj in session.scalars(select(model).where(model.is_deleted.is_(False))):
-                counts[obj.date] += 1
+                day = local_date_from_utc(obj.completed_at)
+                if since is None or day >= since:
+                    counts[day] += 1
     return counts
 
 
@@ -146,13 +154,15 @@ def _heatmap_cell(day: date, count: int, on_open) -> ft.Container:
 
 
 def _heatmap_card(year: int, on_open, set_year, height: int | None = None) -> ft.Container:
-    counts = _activity_counts()
+    current_year = date.today().year
     end = date(year, 12, 31)
-    start = date(year - 1, 1, 1) if year > datetime.now().year else date(year, 1, 1)
-    if year == datetime.now().year:
-        start = shift_month(date.today().year, date.today().month, -11)[0:2]
-        start = date(start[0], start[1], 1)
+    start = date(year, 1, 1)
+    if year == current_year:
+        # 当年热力图铺满过去 12 个月；其他年份即自然年，避免未来年份渲染约两年空格。
+        start_year, start_month = shift_month(current_year, date.today().month, -11)
+        start = date(start_year, start_month, 1)
     anchor = start - timedelta(days=start.weekday())
+    counts = _activity_counts(since=anchor)
     weeks: list[list[date]] = []
     cursor = anchor
     while cursor <= end:
@@ -219,7 +229,11 @@ def _heatmap_card(year: int, on_open, set_year, height: int | None = None) -> ft
             [
                 ft.TextButton(f"{year - 1}", on_click=lambda e: set_year(year - 1)),
                 ft.Text(str(year), size=12, color=PRIMARY, weight="bold"),
-                ft.TextButton(f"{year + 1}", on_click=lambda e: set_year(year + 1)),
+                ft.TextButton(
+                    f"{year + 1}",
+                    on_click=lambda e: set_year(year + 1),
+                    disabled=year >= current_year,
+                ),
             ],
             spacing=2,
         ),
@@ -227,6 +241,59 @@ def _heatmap_card(year: int, on_open, set_year, height: int | None = None) -> ft
 
 
 def build(page: ft.Page, refresh, on_open_diary, on_open_note) -> ft.Control:
+    """首页：查询后台化，避免数据量大时阻塞 UI 线程。"""
+    today = date.today()
+    holder = ft.Container(
+        content=ft.Container(
+            content=ft.Text("加载中…", size=12, color=TEXT_MUTED),
+            alignment=ft.Alignment.CENTER,
+            expand=True,
+        ),
+        expand=True,
+    )
+
+    def load() -> None:
+        with session_scope() as session:
+            summary = month_summary(session, today.year, today.month)
+            assets = total_assets(session)
+            week_start = today - timedelta(days=today.weekday())
+            week_end = week_start + timedelta(days=6)
+            todo_today = list(
+                session.scalars(
+                    select(Todo).where(
+                        Todo.is_deleted.is_(False), Todo.completed.is_(False),
+                        Todo.due_date <= today,
+                    ).order_by(Todo.due_date, Todo.priority)
+                )
+            )[:5]
+            todo_week = list(
+                session.scalars(
+                    select(Todo).where(
+                        Todo.is_deleted.is_(False), Todo.completed.is_(False),
+                        Todo.due_date >= week_start, Todo.due_date <= week_end,
+                    ).order_by(Todo.due_date)
+                )
+            )[:5]
+            note = session.scalar(
+                select(Note).where(Note.is_deleted.is_(False))
+                .order_by(func.random()).limit(1)
+            )
+
+        async def apply() -> None:
+            holder.content = _render_home(
+                page, refresh, on_open_diary, on_open_note,
+                summary, assets, todo_today, todo_week, note,
+            )
+            page.update()
+
+        page.run_task(apply)
+
+    page.run_thread(load)
+    return holder
+
+
+def _render_home(page, refresh, on_open_diary, on_open_note,
+                 summary, assets, todo_today, todo_week, note) -> ft.Control:
     today = date.today()
 
     def set_date(value: date):
@@ -236,30 +303,6 @@ def build(page: ft.Page, refresh, on_open_diary, on_open_note) -> ft.Control:
     def set_year(value: int):
         _HOME_STATE["year"] = value
         refresh()
-
-    with session_scope() as session:
-        summary = month_summary(session, today.year, today.month)
-        assets = total_assets(session)
-        week_start = today - timedelta(days=today.weekday())
-        week_end = week_start + timedelta(days=6)
-        todo_today = list(
-            session.scalars(
-                select(Todo).where(
-                    Todo.is_deleted.is_(False), Todo.completed.is_(False),
-                    Todo.due_date <= today,
-                ).order_by(Todo.due_date, Todo.priority)
-            )
-        )[:5]
-        todo_week = list(
-            session.scalars(
-                select(Todo).where(
-                    Todo.is_deleted.is_(False), Todo.completed.is_(False),
-                    Todo.due_date >= week_start, Todo.due_date <= week_end,
-                ).order_by(Todo.due_date)
-            )
-        )[:5]
-        notes = list(session.scalars(select(Note).where(Note.is_deleted.is_(False))))
-    note = choice(notes) if notes else None
 
     def todo_rows(items, empty_text):
         if not items:

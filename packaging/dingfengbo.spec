@@ -10,8 +10,9 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 SPEC_DIR = os.path.dirname(os.path.abspath(SPEC))
 ROOT = os.path.dirname(SPEC_DIR)
 
-# 构建时确保图标与 Flet 桌面客户端压缩包存在
+# 构建时确保图标、版本资源与 Flet 桌面客户端压缩包存在
 subprocess.run([sys.executable, os.path.join(SPEC_DIR, "make_icon.py")], check=True)
+subprocess.run([sys.executable, os.path.join(SPEC_DIR, "make_version_info.py")], check=True)
 subprocess.run([sys.executable, os.path.join(SPEC_DIR, "fetch_flet_client.py")], check=True)
 
 datas = []
@@ -51,7 +52,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
@@ -61,4 +62,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=os.path.join(SPEC_DIR, "icon.ico"),
+    version=os.path.join(SPEC_DIR, "version_info.txt"),
 )

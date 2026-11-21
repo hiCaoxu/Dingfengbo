@@ -1,6 +1,6 @@
 # 定风波 · 个人工作台
 
-单机优先、可多端同步的桌面个人工作台，覆盖首页、待办、日记、笔记、健康、娱乐、记账七个模块。
+单机优先、可多端同步的桌面个人工作台，覆盖首页、待办、日记、笔记、健康、娱乐、记账、AI 助手八个模块。
 
 ## 运行
 
@@ -16,21 +16,30 @@ python run_server.py
 # 默认监听 0.0.0.0:8000，可用 DINGFENGBO_HOST / DINGFENGBO_PORT 覆盖
 ```
 
-桌面端「设置」中填写服务地址与令牌即可启用自动同步。断网时七模块均可正常使用，联网后按时间戳增量补传。
+桌面端「设置」中填写服务地址与令牌即可启用自动同步，并可点「测试同步连接」/「测试 AI 连接」验证配置。断网时七个数据模块均可正常使用，联网后按时间戳增量补传。
 
 ## 数据目录
 
-- 安装目录：默认 `D:\Dingfengbo`
-- 应用数据：统一在 `D:\Data\Dingfengbo\`（`dingfengbo.db`、`settings.json`），与安装目录分离，重装不丢数据。
+- 应用数据：统一在 `D:\Data\Dingfengbo\`（`dingfengbo.db`、`settings.json`、`logs\`），与 exe 所在目录分离，替换升级不丢数据。
 - 可通过环境变量 `DINGFENGBO_DATA_DIR` 覆盖本地数据目录。
 
-## 打包
+## 打包（绿色单文件）
 
 ```powershell
 .\packaging\build.ps1
 ```
 
-依赖 PyInstaller 与 WiX Toolset v3（也可将 `candle.exe`/`light.exe` 放到 `packaging\wix314\`）。产物为 `packaging\Dingfengbo.msi`，安装后生成 `定风波.exe`、桌面快捷方式、开始菜单项与卸载入口。
+产物（`dist\`）：
+
+- `定风波.exe` / `Dingfengbo.exe`：PyInstaller 单文件，双击即用，无需安装。
+- `定风波-v{版本号}.zip`：exe + 使用说明，版本号读自 `app/__init__.py` 的 `__version__`。
+
+分发方式：
+
+- 把 exe 复制到任意目录运行（可放桌面或自建程序文件夹），**没有安装目录、开始菜单项与卸载入口的概念**，删除 exe 即完成卸载。
+- 升级 = 用新版本 exe 覆盖旧 exe；数据始终在 `D:\Data\Dingfengbo\`，不受影响。
+- 需要开机自启时，把 exe 快捷方式放入 `shell:startup` 目录（Win+R 输入 `shell:startup`）。
+- 单文件模式首次启动需解压到临时目录，冷启动较慢；exe 带版本资源，右键属性可查看版本号。
 
 ## 同步机制
 
@@ -38,16 +47,30 @@ python run_server.py
 - 触发：启动一次、每 5 分钟一次、本地写入后 10 秒一次，以及「立即同步」按钮。
 - 接口：`POST /api/sync/pull`、`POST /api/sync/push`、`GET /api/sync/check`，Bearer token 鉴权并按用户隔离。
 - 冲突：按 `updated_at` 最后写入获胜；删除使用软删除，同步完成后物理清理。
+- 序列：服务端用全局单调递增的 `sync_seq` 分配号，客户端以 `sync_seq > cursor` 增量拉取；已有数据的服务端库升级时会把计数器锚定到存量最大值（启动日志会打印「同步序列当前值」）。需要自检时在服务端跑 `python scripts/check_sync_sequence.py <cloud.db 路径>`，输出计数器与各表 `MAX(sync_seq)` 的比对结论。
+- 被拒记录：push 校验失败的记录由服务端回传 `table`/`id`，客户端标记为 `error` 退出待同步队列，不再无限重推；重新编辑该记录后自动回到 `pending`。设置页可看到「N 条被服务端拒收」。
 
 ## Docker 部署同步服务
 
 ```powershell
-.\docker\deploy.ps1 -HostIp 43.142.92.115 -User root
+.\docker\deploy.ps1 -HostIp <服务器IP> -User root
 ```
 
-脚本仅创建远程目录 `/opt/dingfengbo-sync` 并启动容器 `dingfengbo-sync`，不改动主机已有环境。数据卷为 `/opt/dingfengbo-sync/data`，容器监听 `8000:8000`。桌面端「设置」里的服务地址填 `http://43.142.92.115:8000`。
+脚本仅创建远程目录 `/opt/dingfengbo-sync` 并启动容器 `dingfengbo-sync`，不改动主机已有环境。数据卷为 `/opt/dingfengbo-sync/data`，容器监听 `8000:8000`，并以非 root 用户运行。桌面端「设置」里的服务地址填 `http://<服务器IP>:8000`。
 
 若公网无法访问，需在云厂商安全组放行 TCP 8000（服务器内部 `ufw` 无需改动）；腾讯云轻量应用服务器可在「防火墙」中添加规则。
+
+### 可选：Caddy 自动 HTTPS 反代
+
+token 即全部数据访问权，公网直连明文 HTTP 有被嗅探风险。需要 TLS 时用 compose 的 `tls` profile 启动 Caddy（自动申请证书）：
+
+```powershell
+# 在服务器上，docker/docker-compose.yml 同目录
+$env:DOMAIN = "sync.example.com"
+docker compose --profile tls up -d
+```
+
+随后把桌面端服务地址改成 `https://sync.example.com`，停止直连时把 8000 端口从安全组移除。容器数据卷由宿主目录挂载，若出现写入权限问题，先 `chown -R 10001:10001 /opt/dingfengbo-sync/data`。
 
 ## 关键实现
 
@@ -55,3 +78,4 @@ python run_server.py
 - ISO 周数使用 `date.isocalendar()[1]`，年内天数使用 `timetuple().tm_yday`，农历使用 `zhdate`。
 - 笔记使用 Pygments 高亮，左侧行号与代码逐行对齐滚动；不支持公式与图表。
 - 图表由 matplotlib 生成，文字使用系统中文字体，配色遵循米白主题。
+- AI 助手通过 OpenAI 兼容协议对接国产大模型；被 `@引用` 的数据会发送至所配置的服务商，设置页有隐私说明，首次发送前另有一次确认。

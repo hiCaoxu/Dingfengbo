@@ -6,12 +6,12 @@
 
 ## 0. 你要做什么
 
-用 Python 开发一个**单机优先、可多端同步的桌面个人工作台**，代号「定风波」，覆盖首页 / 待办 / 日记 / 笔记 / 健康 / 娱乐 / 记账 七个模块。要求：断网可完整使用、联网自动增量同步、可打包成 Windows 安装包。请按下面约束直接搭工程、写实现，不要反复询问。
+用 Python 开发一个**单机优先、可多端同步的桌面个人工作台**，代号「定风波」，覆盖首页 / 待办 / 日记 / 笔记 / 健康 / 娱乐 / 记账 七个模块。要求：断网可完整使用、联网自动增量同步、可打包成 Windows 绿色单文件 exe。请按下面约束直接搭工程、写实现，不要反复询问。
 
 ## 1. 硬约束（不可违背）
 
-- **技术栈**：桌面端 Python 3.11 + **Flet**（跨平台窗口，编译为 Windows exe）；ORM **SQLAlchemy 2.x**（本地与云端共用模型）；本地库 **SQLite 单文件**；同步后端 **腾讯云轻量服务器 + Python FastAPI + Uvicorn**（库用 SQLite 或 PostgreSQL）；打包 **PyInstaller + WiX Toolset（msi）**。
-- **路径约定**：安装目录默认 `D:\Dingfengbo`；应用数据（SQLite 数据库、设置、同步 token）统一放 `D:\Data\Dingfengbo\`，与安装目录分离、重装不丢数据。
+- **技术栈**：桌面端 Python 3.11 + **Flet**（跨平台窗口，编译为 Windows exe）；ORM **SQLAlchemy 2.x**（本地与云端共用模型）；本地库 **SQLite 单文件**；同步后端 **腾讯云轻量服务器 + Python FastAPI + Uvicorn**（库用 SQLite 或 PostgreSQL）；打包 **PyInstaller 单文件 exe（隐藏控制台）**。
+- **路径约定**：绿色单文件 exe，无安装目录；应用数据（SQLite 数据库、设置、同步 token、日志）统一放 `D:\Data\Dingfengbo\`，与 exe 所在目录分离，替换升级不丢数据。
 - **配色（米白清爽基调，禁止大面积高饱和块）**：
   | 用途 | 色值 |
   |---|---|
@@ -88,14 +88,15 @@
 
 ## 4. 打包发布
 
-- PyInstaller 打包 Flet 为单一 exe，隐藏控制台，替换简约线性图标，产物 `定风波.exe`。
-- WiX Toolset 制作 msi：安装目录默认 `D:\Dingfengbo`，创建桌面快捷方式与开始菜单项，提供卸载入口。
-- 应用数据（SQLite/设置/同步 token）统一在 `D:\Data\Dingfengbo\`，与安装目录分离。
+- PyInstaller 打包 Flet 为单一 exe，隐藏控制台，替换简约线性图标，产物 `dist\定风波.exe`（同时保留 `Dingfengbo.exe`），并生成带版本号的 zip 便于分发。
+- 绿色分发：exe 复制到任意目录双击运行，无安装向导、无开始菜单项与卸载入口；升级即用新 exe 覆盖。
+- exe 带版本资源（版本号取自 `app/__init__.py` 的 `__version__`），右键属性可见。
+- 应用数据（SQLite/设置/同步 token/日志）统一在 `D:\Data\Dingfengbo\`，与 exe 所在目录分离。
 
 ## 5. 验收要点
 
 - 断网下七模块全部可用；联网按增量规则自动同步且冲突「最后写入获胜」。
-- 重装应用（覆盖 `D:\Dingfengbo`）后 `D:\Data\Dingfengbo\` 数据不丢。
+- 替换升级 exe 后 `D:\Data\Dingfengbo\` 数据不丢。
 - `¥0.00` 金额格式、ISO 周数、农历、月历视图标记规则均与上文一致。
 
 ## 6. 建议实施顺序

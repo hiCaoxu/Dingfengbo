@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Iterable
 
-from sqlalchemy import select, update as sql_update
+from sqlalchemy import func, select, update as sql_update
 from sqlalchemy.orm import Session
 
+from ..services.clock import get_clock_offset
 from .models import MODEL_BY_TABLE, Base, Diary, SyncMixin, utcnow
 
 
@@ -25,7 +26,8 @@ def serialize(obj: SyncMixin) -> dict[str, Any]:
 
 
 def mark_dirty(obj: SyncMixin) -> None:
-    obj.updated_at = utcnow()
+    # 把写入时间对齐到服务端时间轴，规避本机时钟回拨/快走导致的 LWW 误判。
+    obj.updated_at = utcnow() + timedelta(seconds=get_clock_offset())
     obj.sync_status = "pending"
 
 
@@ -96,6 +98,48 @@ def mark_clean(
         session.execute(stmt)
 
 
+def mark_rejected(
+    session: Session, rejected: Iterable[dict], owner_id: str = "local"
+) -> int:
+    """被服务端永久拒收的记录标记为 error 并退出待同步队列，避免无限重推。
+
+    ``mark_dirty`` 会把重新编辑的记录重置回 pending，因此用户改动该记录后自愈。
+    """
+    marked = 0
+    for item in rejected:
+        model = MODEL_BY_TABLE.get(str(item.get("table") or ""))
+        record_id = item.get("id")
+        if model is None or not record_id:
+            continue
+        result = session.execute(
+            sql_update(model)
+            .where(
+                model.id == str(record_id),
+                model.owner_id == owner_id,
+                model.sync_status == "pending",
+            )
+            .values(sync_status="error")
+            .execution_options(synchronize_session=False)
+        )
+        marked += int(result.rowcount or 0)
+    return marked
+
+
+def sync_queue_stats(session: Session, owner_id: str = "local") -> dict[str, int]:
+    """统计待同步与被拒记录数，供设置页展示同步队列可见性。"""
+    stats = {"pending": 0, "error": 0, "clean": 0}
+    for model in MODEL_BY_TABLE.values():
+        rows = session.execute(
+            select(model.sync_status, func.count())
+            .where(model.owner_id == owner_id)
+            .group_by(model.sync_status)
+        )
+        for status, count in rows:
+            key = str(status or "pending")
+            stats[key] = stats.get(key, 0) + int(count or 0)
+    return stats
+
+
 def _parse(column, value: Any) -> Any:
     if value is None:
         return None
@@ -147,10 +191,12 @@ def apply_remote(
         owner = str(data.get("owner_id", "local"))
         record_id = str(data["id"])
         obj = session.get(model, record_id)
+        merged_by_date = False
         if obj is None and model is Diary and data.get("date"):
             obj = session.scalar(
                 select(Diary).where(Diary.owner_id == owner, Diary.date == date.fromisoformat(data["date"][:10]))
             )
+            merged_by_date = obj is not None
         if obj is None:
             obj = model()
             session.add(obj)
@@ -161,6 +207,9 @@ def apply_remote(
                 applied.append({"table": table, "data": data, "changed": False})
             continue
         for column in model.__table__.columns:
+            # 按 (owner,date) 合并出的本地行保留本地主键，避免被远端 id 改写行身份。
+            if column.name == "id" and merged_by_date:
+                continue
             if column.name in data:
                 setattr(obj, column.name, _parse(column, data[column.name]))
         obj.sync_status = "clean"
@@ -179,11 +228,22 @@ def max_updated_at(session: Session, owner_id: str = "local") -> str | None:
     return max(values).isoformat() if values else None
 
 
-def purge_deleted(session: Session) -> int:
-    """同步完成后物理清理已删除且已同步的记录。"""
+TOMBSTONE_RETENTION_DAYS = 30
+
+
+def purge_deleted(session: Session, retention_days: int = TOMBSTONE_RETENTION_DAYS) -> int:
+    """同步完成后物理清理已删除且已同步的墓碑。
+
+    保留 ``retention_days`` 天的恢复窗口（误删后仍可恢复），过期后才真正删除。
+    """
+    cutoff = utcnow() - timedelta(days=retention_days)
     count = 0
     for model in MODEL_BY_TABLE.values():
-        stmt = select(model).where(model.is_deleted.is_(True), model.sync_status == "clean")
+        stmt = select(model).where(
+            model.is_deleted.is_(True),
+            model.sync_status == "clean",
+            model.updated_at < cutoff,
+        )
         for obj in session.scalars(stmt):
             session.delete(obj)
             count += 1

@@ -2,31 +2,50 @@
 
 from __future__ import annotations
 
+import hashlib
+import logging
 import os
+import threading
+import time
+from collections import defaultdict, deque
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-from sqlalchemy import create_engine, func, select
+from pydantic import BaseModel, Field, ValidationError, field_validator
+from sqlalchemy import select, text
 from sqlalchemy.orm import sessionmaker
 
-from app.db.migrations import initialize_schema
+from app.db.engine import create_sqlite_engine
+from app.db.migrations import initialize_schema, sequence_value
 from app.db.models import MODEL_BY_TABLE, utcnow
 from app.db.repo import apply_remote, max_updated_at, serialize
+from app.logging_setup import setup_logging
 
 DB_PATH = Path(os.environ.get("DINGFENGBO_SERVER_DB", r"D:\Data\Dingfengbo\cloud.db"))
-DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False}, future=True)
+setup_logging(DB_PATH.parent / "logs")
+logger = logging.getLogger(__name__)
+
+engine = create_sqlite_engine(DB_PATH)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, future=True)
 initialize_schema(engine)
+with engine.connect() as _connection:
+    # 部署后肉眼可核对：该值应不小于各表 MAX(sync_seq)，否则存量客户端会漏拉。
+    logger.info("同步序列当前值：%s", sequence_value(_connection))
 
 app = FastAPI(title="定风波同步服务", version="1.0.0")
+# 桌面客户端为原生 HTTP（不受 CORS 限制），默认不放行任何浏览器来源；
+# 如需浏览器访问，通过环境变量 DINGFENGBO_CORS_ORIGINS 显式配置（逗号分隔）。
+_cors_origins = [
+    origin.strip()
+    for origin in os.environ.get("DINGFENGBO_CORS_ORIGINS", "").split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -42,6 +61,33 @@ class PullRequest(BaseModel):
     since: str | None = None  # 兼容旧客户端
 
 
+class Change(BaseModel):
+    """push 单条变更：只做最小校验，单条失败不影响整批。"""
+
+    table: str
+    data: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("table")
+    @classmethod
+    def _known_table(cls, value: str) -> str:
+        if value not in MODEL_BY_TABLE:
+            raise ValueError(f"未知数据表: {value}")
+        return value
+
+    @field_validator("data")
+    @classmethod
+    def _valid_record(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if not value.get("id"):
+            raise ValueError("记录缺少 id")
+        if "updated_at" not in value:
+            raise ValueError("记录缺少 updated_at")
+        try:
+            datetime.fromisoformat(str(value["updated_at"]))
+        except (TypeError, ValueError):
+            raise ValueError("updated_at 格式错误")
+        return value
+
+
 class PushRequest(BaseModel):
     changes: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -54,8 +100,44 @@ def owner_of(authorization: str | None) -> str:
         token = token[7:].strip()
     if not token:
         raise HTTPException(status_code=401, detail="同步令牌无效")
-    # 以令牌作为用户隔离键；部署时可在前面接入用户表换成真实 user_id。
-    return token[:64]
+    # 身份键与存储分离：DB 里只存不可逆摘要，库文件泄露不再等于凭证泄露。
+    return hashlib.sha256(f"dingfengbo-v1\0{token}".encode()).hexdigest()
+
+
+def next_sequences(session, n: int) -> list[int]:
+    """一个事务内原子领取 n 个全局序列号（单个 UPDATE 自增，规避读-改-写竞态）。"""
+    if n <= 0:
+        return []
+    session.execute(
+        text("INSERT INTO sync_sequences(id, value) VALUES(1, 0) ON CONFLICT(id) DO NOTHING")
+    )
+    hi = int(
+        session.execute(
+            text("UPDATE sync_sequences SET value = value + :n RETURNING value"), {"n": n}
+        ).scalar_one()
+    )
+    return list(range(hi - n + 1, hi + 1))
+
+
+# 内存滑动窗口限流：按 owner（token 摘要）限制 push 频率，防单 token 刷爆服务端。
+_PUSH_RATE_LIMIT = 60  # 每窗口最多 push 次数
+_PUSH_WINDOW_SECONDS = 60.0
+_push_rate_lock = threading.Lock()
+_push_rate_log: dict[str, deque[float]] = defaultdict(deque)
+
+
+def _enforce_rate_limit(owner: str) -> None:
+    now = time.monotonic()
+    with _push_rate_lock:
+        window = _push_rate_log[owner]
+        while window and now - window[0] > _PUSH_WINDOW_SECONDS:
+            window.popleft()
+        if len(window) >= _PUSH_RATE_LIMIT:
+            logger.warning("push 限流触发：owner=%s", owner)
+            raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试")
+        window.append(now)
+        if len(_push_rate_log) > 1000:
+            _push_rate_log.clear()
 
 
 @app.get("/api/health")
@@ -104,29 +186,56 @@ def pull(payload: PullRequest, authorization: str | None = Header(default=None))
 @app.post("/api/sync/push")
 def push(payload: PushRequest, authorization: str | None = Header(default=None)) -> dict[str, Any]:
     owner = owner_of(authorization)
-    for change in payload.changes:
-        data = change.setdefault("data", {})
+    _enforce_rate_limit(owner)
+    valid: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    for raw in payload.changes:
+        try:
+            change = Change.model_validate(raw)
+        except ValidationError as exc:
+            errors = exc.errors()
+            reason = errors[0].get("msg", "无效变更") if errors else "无效变更"
+            # 回传 table/id：客户端据此把该记录标为 error 退出待同步队列，避免无限重推。
+            record = raw.get("data") if isinstance(raw, dict) else None
+            record = record if isinstance(record, dict) else {}
+            rejected.append(
+                {
+                    "table": raw.get("table") if isinstance(raw, dict) else None,
+                    "id": record.get("id"),
+                    "reason": str(reason),
+                }
+            )
+            logger.warning(
+                "拒收变更：table=%s id=%s reason=%s",
+                rejected[-1]["table"], rejected[-1]["id"], reason,
+            )
+            continue
+        data = dict(change.data)
         data["owner_id"] = owner
+        valid.append({"table": change.table, "data": data})
+
     with SessionLocal() as session:
-        accepted = apply_remote(session, payload.changes)
-        next_sequences: dict[str, int] = {}
+        accepted = apply_remote(session, valid)
+        changed = [
+            c for c in accepted
+            if c.get("changed") and c.get("table") and c.get("data", {}).get("id")
+        ]
+        sequences = next_sequences(session, len(changed))
+        for change, seq in zip(changed, sequences):
+            model = MODEL_BY_TABLE.get(change.get("table"))
+            obj = session.get(model, str(change.get("data", {}).get("id"))) if model else None
+            if obj is not None:
+                obj.sync_seq = seq
+        # 回填 sync_seq 供客户端 mark_clean 精确确认（幂等推送返回现存序列号）。
         for change in accepted:
-            table = change.get("table")
-            model = MODEL_BY_TABLE.get(table)
+            model = MODEL_BY_TABLE.get(change.get("table"))
             record_id = change.get("data", {}).get("id")
-            if model is None or not record_id:
-                continue
-            obj = session.get(model, str(record_id))
-            if obj is None:
-                continue
-            if change.get("changed"):
-                if table not in next_sequences:
-                    next_sequences[table] = session.scalar(select(func.max(model.sync_seq))) or 0
-                next_sequences[table] += 1
-                obj.sync_seq = next_sequences[table]
-            change["data"]["sync_seq"] = obj.sync_seq
+            obj = session.get(model, str(record_id)) if model and record_id else None
+            if obj is not None:
+                change["data"]["sync_seq"] = obj.sync_seq
         session.commit()
-    return {"accepted": accepted, "server_time": utcnow().isoformat()}
+    logger.info("push 完成：accepted=%d rejected=%d", len(accepted), len(rejected))
+    return {"accepted": accepted, "rejected": rejected, "server_time": utcnow().isoformat()}
 
 
 @app.get("/api/sync/check")

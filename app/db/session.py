@@ -5,17 +5,16 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import DB_PATH
+from .engine import create_sqlite_engine
 from .migrations import initialize_schema
 from .models import Food
 
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-engine = create_engine(
-    f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False}, future=True
-)
+engine = create_sqlite_engine(DB_PATH)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, future=True)
 
 # 精简食物库：数值为每 100g 可食部热量(kcal)，参考《中国食物成分表（第 6 版）》近似值。

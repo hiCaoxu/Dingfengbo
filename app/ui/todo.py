@@ -8,16 +8,17 @@ import flet as ft
 from sqlalchemy import select
 
 from ..db.models import Todo
-from ..db.repo import create, soft_delete, update
+from ..db.repo import create, update
 from ..db.session import session_scope
 from ..icons import ACTIONS, ico
 from ..services.dates import lunar_md, next_due, next_lunar_due
 from ..services.sync import mark_pending_write
 from ..theme import DANGER, DIVIDER, PRIMARY_LIGHT, TEXT, TEXT_MUTED
 from .forms import open_todo_dialog, tags_text
-from .widgets import card, confirm, divider, empty, icon_button, primary_button, section_header, tag_chip
+from .state import state
+from .widgets import card, delete_with_confirm, divider, empty, icon_button, primary_button, section_header, tag_chip
 
-_state = {"tag": "全部", "status": "未完成"}
+_state = state.todo
 
 
 def _all_tags(items) -> list[str]:
@@ -55,15 +56,7 @@ def toggle(page: ft.Page, todo_id: str, refresh) -> None:
 
 
 def delete(page: ft.Page, todo_id: str, refresh) -> None:
-    def action():
-        with session_scope() as session:
-            item = session.get(Todo, todo_id)
-            if item:
-                soft_delete(session, item)
-        mark_pending_write()
-        refresh()
-
-    confirm(page, "确定删除该待办？", action)
+    delete_with_confirm(page, Todo, todo_id, refresh, "确定删除该待办？")
 
 
 def build(page: ft.Page, refresh) -> ft.Control:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from datetime import date, timedelta
 
@@ -9,17 +10,18 @@ import flet as ft
 from sqlalchemy import select
 
 from ..db.models import Diet, Exercise, Sleep, Weight
-from ..db.repo import soft_delete
 from ..db.session import session_scope
 from ..icons import ACTIONS, ico
 from ..services.charts import bar_chart, line_chart
 from ..services.health import bmi
-from ..services.sync import mark_pending_write
 from ..theme import ACCENT, DIVIDER, PRIMARY, TEXT, TEXT_MUTED
 from .forms import open_diet_dialog, open_exercise_dialog, open_sleep_dialog, open_weight_dialog
-from .widgets import card, confirm, divider, empty, icon_button, primary_button, section_header
+from .state import state
+from .widgets import card, delete_with_confirm, divider, empty, icon_button, primary_button, section_header
 
-_state = {"tab": "锻炼", "range": "本周"}
+logger = logging.getLogger(__name__)
+
+_state = state.health
 _TABS = {
     "锻炼": (Exercise, open_exercise_dialog),
     "饮食": (Diet, open_diet_dialog),
@@ -58,15 +60,7 @@ def _date_range(today: date | None = None) -> tuple[date, date]:
 
 
 def _delete(model, item_id: str, page, refresh) -> None:
-    def action():
-        with session_scope() as session:
-            obj = session.get(model, item_id)
-            if obj:
-                soft_delete(session, obj)
-        mark_pending_write()
-        refresh()
-
-    confirm(page, "确定删除该记录？", action)
+    delete_with_confirm(page, model, item_id, refresh, "确定删除该记录？")
 
 
 def _row(item, tab: str, page, refresh) -> ft.Control:
@@ -156,12 +150,16 @@ def build(page: ft.Page, refresh) -> ft.Control:
         scroll=ft.ScrollMode.AUTO,
     )
 
+    def _key(rows) -> tuple:
+        return (len(rows), max((r.updated_at for r in rows), default=None))
+
     def render_charts() -> None:
         weight_slot.content = ft.Image(
             src=line_chart(
                 labels_of(weights),
                 [{"name": "体重 kg", "values": [w.kg for w in weights[-14:]], "color": PRIMARY, "fill": True}],
                 "体重趋势",
+                cache_key=_key(weights),
             ),
             width=420, height=170, fit=ft.BoxFit.CONTAIN,
         )
@@ -170,21 +168,22 @@ def build(page: ft.Page, refresh) -> ft.Control:
                 labels_of(sleeps),
                 [{"name": "睡眠小时", "values": [s.hours for s in sleeps[-14:]], "color": ACCENT, "fill": True}],
                 "睡眠时长",
+                cache_key=_key(sleeps),
             ),
             width=420, height=170, fit=ft.BoxFit.CONTAIN,
         )
         exercise_slot.content = ft.Image(
-            src=bar_chart(exercise_labels, exercise_minutes, "锻炼分钟", PRIMARY),
+            src=bar_chart(exercise_labels, exercise_minutes, "锻炼分钟", PRIMARY, cache_key=_key(exercises)),
             width=420, height=170, fit=ft.BoxFit.CONTAIN,
         )
         diet_slot.content = ft.Image(
-            src=bar_chart(diet_labels, diet_calories, "饮食热量", ACCENT),
+            src=bar_chart(diet_labels, diet_calories, "饮食热量", ACCENT, cache_key=_key(diets)),
             width=420, height=170, fit=ft.BoxFit.CONTAIN,
         )
         try:
             page.update()
         except Exception:
-            pass
+            logger.exception("健康图表渲染后刷新页面失败")
 
     if page is not None:
         page.run_thread(render_charts)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
@@ -9,6 +10,15 @@ from uuid import NAMESPACE_URL, uuid5
 from sqlalchemy import Connection, Engine, Integer, func, inspect, select, text, update
 
 from .models import SYNC_MODELS, Base
+
+logger = logging.getLogger(__name__)
+
+
+def sequence_value(connection: Connection) -> int:
+    """读取全局同步序列当前值，供部署后核对。"""
+    if "sync_sequences" not in set(inspect(connection).get_table_names()):
+        return 0
+    return _sync_sequence_value(connection)
 
 
 def _quote(identifier: str) -> str:
@@ -34,17 +44,49 @@ def _uses_integer_ids(connection: Connection, table: str) -> bool:
     return isinstance(id_column["type"], Integer)
 
 
+def _sync_sequence_value(connection: Connection) -> int:
+    return int(connection.scalar(text("SELECT value FROM sync_sequences WHERE id = 1")) or 0)
+
+
 def _assign_missing_sequences(connection: Connection) -> None:
+    """锚定全局序列计数器，并让缺号补偿也从同一计数器领取。
+
+    升级存量库时各行带着旧方案分配的表内序列号（可能已达数百），若计数器仍从 0
+    起步，新推送的记录会拿到比存量游标更小的号，存量客户端 ``sync_seq > cursor``
+    将永久漏拉。因此先把计数器顶到全表最大 ``sync_seq``，再让缺号行从计数器领取，
+    保证「全局单调且永不重用」这一游标语义根基。
+    """
+    connection.execute(
+        text("INSERT INTO sync_sequences(id, value) VALUES(1, 0) ON CONFLICT(id) DO NOTHING")
+    )
+    max_seq = 0
     for model in SYNC_MODELS:
-        sequence = connection.scalar(select(func.max(model.sync_seq))) or 0
+        found = connection.scalar(select(func.max(model.sync_seq))) or 0
+        max_seq = max(max_seq, int(found))
+    if max_seq:
+        connection.execute(
+            text("UPDATE sync_sequences SET value = :value WHERE id = 1 AND value < :value"),
+            {"value": max_seq},
+        )
+
+    for model in SYNC_MODELS:
         ids = connection.scalars(
             select(model.id).where(model.sync_seq == 0).order_by(model.updated_at, model.id)
         ).all()
-        for record_id in ids:
-            sequence += 1
+        if not ids:
+            continue
+        hi = int(
             connection.execute(
-                update(model).where(model.id == record_id).values(sync_seq=sequence)
+                text("UPDATE sync_sequences SET value = value + :n RETURNING value"),
+                {"n": len(ids)},
+            ).scalar_one()
+        )
+        start = hi - len(ids) + 1
+        for offset, record_id in enumerate(ids):
+            connection.execute(
+                update(model).where(model.id == record_id).values(sync_seq=start + offset)
             )
+    logger.info("同步序列已初始化：当前全局序列号 %s", _sync_sequence_value(connection))
 
 
 def initialize_schema(engine: Engine) -> None:
