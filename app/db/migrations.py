@@ -89,6 +89,48 @@ def _assign_missing_sequences(connection: Connection) -> None:
     logger.info("同步序列已初始化：当前全局序列号 %s", _sync_sequence_value(connection))
 
 
+def _column_default_sql(column) -> str | None:
+    """把模型里的 Python 侧默认值转成 ALTER TABLE 可用的 SQL 字面量。"""
+    default = getattr(column, "default", None)
+    value = getattr(default, "arg", None) if default is not None else None
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str):
+        return "'" + value.replace("'", "''") + "'"
+    return None
+
+
+def _add_missing_columns(connection: Connection) -> None:
+    """给存量库补上模型新增的列（create_all 只会建缺失的表，不会改已有表）。
+
+    SQLite 的 ADD COLUMN 带 DEFAULT 时会把已有行填成该默认值，因此升级后老数据
+    立刻满足「非空 + 合理默认」，不需要额外的数据回填脚本。
+    """
+    inspector = inspect(connection)
+    existing_tables = set(inspector.get_table_names())
+    for table in Base.metadata.tables.values():
+        if table.name not in existing_tables:
+            continue
+        existing_columns = {
+            column["name"] for column in inspector.get_columns(table.name)
+        }
+        for column in table.columns:
+            if column.name in existing_columns:
+                continue
+            ddl_type = column.type.compile(dialect=connection.dialect)
+            default_sql = _column_default_sql(column)
+            clause = (
+                f"ALTER TABLE {_quote(table.name)} "
+                f"ADD COLUMN {_quote(column.name)} {ddl_type}"
+            )
+            if default_sql is not None:
+                clause += f" DEFAULT {default_sql}"
+            connection.execute(text(clause))
+            logger.info("已为存量库补充列：%s.%s", table.name, column.name)
+
+
 def initialize_schema(engine: Engine) -> None:
     """创建新表；旧版整数主键库在一个事务内迁移为 UUID。"""
     with engine.begin() as connection:
@@ -102,6 +144,7 @@ def initialize_schema(engine: Engine) -> None:
         ]
         if not legacy_tables:
             Base.metadata.create_all(connection)
+            _add_missing_columns(connection)
             _assign_missing_sequences(connection)
             return
         if "transactions" in legacy_tables and "accounts" not in legacy_tables:
@@ -152,4 +195,5 @@ def initialize_schema(engine: Engine) -> None:
 
         for table in legacy_tables:
             connection.execute(text(f"DROP TABLE {_quote(f'_legacy_uuid_{table}')}"))
+        _add_missing_columns(connection)
         _assign_missing_sequences(connection)

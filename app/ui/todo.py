@@ -11,11 +11,14 @@ from ..db.models import Todo, utcnow
 from ..db.repo import create, update
 from ..db.session import session_scope
 from ..icons import ACTIONS, ico
-from ..services.dates import lunar_md, next_due, next_lunar_due
+from ..services.dates import lunar_md
 from ..services.sync import mark_pending_write
+from ..services.todo_rules import describe as describe_rule
+from ..services.todo_rules import next_occurrence
 from ..theme import DANGER, DIVIDER, PRIMARY_LIGHT, TEXT, TEXT_MUTED
 from .async_utils import background_section
 from .forms import open_todo_dialog, tags_text
+from .pomodoro import open_pomodoro_dialog
 from .state import state
 from .widgets import card, delete_with_confirm, divider, empty, icon_button, primary_button, section_header, tag_chip
 
@@ -34,18 +37,21 @@ def toggle(page: ft.Page, todo_id: str, refresh) -> None:
         item = session.get(Todo, todo_id)
         if item is None:
             return
-        if not item.completed and item.repeat_rule not in ("none", "irregular") and not item.is_template:
+        if not item.completed and item.repeat_rule not in ("none",) and not item.is_template:
             due = item.due_date or date.today()
-            if item.lunar_reminder:
-                following = next_lunar_due(due, item.repeat_rule)
-            else:
-                following = next_due(due, item.repeat_rule)
+            following = next_occurrence(
+                due, item.repeat_rule, item.repeat_config, bool(item.lunar_reminder)
+            )
             if following:
                 create(
                     session, Todo,
-                    title=item.title, note=item.note, due_date=following, tags=item.tags,
+                    title=item.title, note=item.note, due_date=following,
+                    due_time=item.due_time, tags=item.tags,
                     lunar_reminder=lunar_md(following) if item.lunar_reminder else "",
                     repeat_rule=item.repeat_rule,
+                    repeat_config=item.repeat_config,
+                    remind_days_before=item.remind_days_before,
+                    remind_time=item.remind_time,
                     priority=item.priority, completed=False, is_template=False,
                 )
             update(session, item, completed=True, completed_at=utcnow(), is_template=True)
@@ -64,7 +70,9 @@ def _query() -> list[Todo]:
     with session_scope() as session:
         return list(
             session.scalars(
-                select(Todo).where(Todo.is_deleted.is_(False)).order_by(Todo.due_date, Todo.id)
+                select(Todo)
+                .where(Todo.is_deleted.is_(False))
+                .order_by(Todo.due_date, Todo.due_time, Todo.id)
             )
         )
 
@@ -100,7 +108,24 @@ def _render(page: ft.Page, refresh, items) -> ft.Control:
     def row_for(item: Todo) -> ft.Control:
         overdue = item.id in overdue_ids
         due = item.due_date.isoformat() if item.due_date else "无到期日"
+        if item.due_time:
+            due += f" {item.due_time}"
         label = "已过期 · " if overdue else ""
+        extras: list[str] = []
+        rule_text = describe_rule(item.repeat_rule, item.repeat_config)
+        if rule_text:
+            extras.append(rule_text)
+        if int(item.remind_days_before or -1) >= 0:
+            extras.append(
+                "到期提醒" if int(item.remind_days_before) == 0
+                else f"提前 {item.remind_days_before} 天提醒"
+            )
+        if item.pomodoro_count:
+            extras.append(f"番茄 {item.pomodoro_count}")
+        if item.priority:
+            extras.append(item.priority)
+        if tags_text(item.tags):
+            extras.append(tags_text(item.tags))
         return ft.Container(
             content=ft.Row(
                 [
@@ -117,8 +142,7 @@ def _render(page: ft.Page, refresh, items) -> ft.Control:
                                 spacing=8,
                             ),
                             ft.Text(
-                                f"{label}{due}" + (f" · {item.priority}" if item.priority else "")
-                                + (f" · {tags_text(item.tags)}" if tags_text(item.tags) else ""),
+                                f"{label}{due}" + (" · " + " · ".join(extras) if extras else ""),
                                 size=11, color=DANGER if overdue else TEXT_MUTED,
                             ),
                         ],
@@ -162,7 +186,24 @@ def _render(page: ft.Page, refresh, items) -> ft.Control:
     return card(
         ft.Column(
             [
-                section_header("全部待办", primary_button("新增待办", lambda e: open_todo_dialog(page, None, refresh), ACTIONS["add"])),
+                section_header(
+                    "全部待办",
+                    ft.Row(
+                        [
+                            primary_button(
+                                "番茄钟",
+                                lambda e: open_pomodoro_dialog(page, refresh),
+                                ACTIONS["timer"],
+                            ),
+                            primary_button(
+                                "新增待办",
+                                lambda e: open_todo_dialog(page, None, refresh),
+                                ACTIONS["add"],
+                            ),
+                        ],
+                        spacing=8,
+                    ),
+                ),
                 filters,
                 divider(),
                 ft.Column([row_for(item) for item in shown], spacing=8) if shown else empty("暂无符合条件的待办"),

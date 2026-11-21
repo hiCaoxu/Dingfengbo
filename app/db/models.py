@@ -52,10 +52,16 @@ class Todo(SyncMixin, Base):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     note: Mapped[str] = mapped_column(Text, default="")
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    due_time: Mapped[str] = mapped_column(String(5), default="")  # HH:MM，空=不限时间
     tags: Mapped[str] = mapped_column(Text, default="[]")  # JSON array
     lunar_reminder: Mapped[str] = mapped_column(String(32), default="")
-    repeat_rule: Mapped[str] = mapped_column(String(16), default="none")  # none/day/week/month/year
+    repeat_rule: Mapped[str] = mapped_column(String(16), default="none")  # none/day/week/month/year/irregular/custom
+    repeat_config: Mapped[str] = mapped_column(Text, default="")  # custom 规则的 JSON 参数
     priority: Mapped[str] = mapped_column(String(16), default="")  # '', low, medium, high
+    # 提前提醒：-1=不提醒，0=到期当天，N=提前 N 天；remind_time 为空则用 due_time/09:00
+    remind_days_before: Mapped[int] = mapped_column(Integer, default=-1)
+    remind_time: Mapped[str] = mapped_column(String(5), default="")
+    pomodoro_count: Mapped[int] = mapped_column(Integer, default=0)
     completed: Mapped[bool] = mapped_column(Boolean, default=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_template: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -172,6 +178,20 @@ class SyncIssue(Base):
     table_name: Mapped[str] = mapped_column(String(32), primary_key=True)
     record_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     reason: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+
+class TodoReminder(Base):
+    """待办提醒的去重记录（本地辅助表，不参与同步）。
+
+    ``(todo_id, fire_at)`` 为主键：同一次提醒只推一次系统通知；待办被修改或
+    重复规则推进后 ``fire_at`` 变化，自然形成新的提醒。
+    """
+
+    __tablename__ = "todo_reminders"
+
+    todo_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    fire_at: Mapped[datetime] = mapped_column(DateTime, primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
 
 

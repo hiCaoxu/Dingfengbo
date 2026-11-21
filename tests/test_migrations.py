@@ -10,6 +10,60 @@ from app.db.migrations import initialize_schema, sequence_value
 from app.db.models import Account, Note, Transaction
 
 
+class ColumnMigrationTests(unittest.TestCase):
+    """存量库升级：新增列要自动补齐，并通过默认值让老数据立刻可用。"""
+
+    OLD_TODOS = """
+        CREATE TABLE todos (
+            id VARCHAR(36) PRIMARY KEY, owner_id VARCHAR(64), created_at DATETIME,
+            updated_at DATETIME, is_deleted BOOLEAN, sync_status VARCHAR(16),
+            sync_seq INTEGER, title VARCHAR(200), note TEXT, due_date DATE,
+            tags TEXT, lunar_reminder VARCHAR(32), repeat_rule VARCHAR(16),
+            priority VARCHAR(16), completed BOOLEAN, completed_at DATETIME,
+            is_template BOOLEAN
+        )
+    """
+
+    def test_missing_columns_are_added_with_defaults(self) -> None:
+        engine = create_engine("sqlite:///:memory:")
+        with engine.begin() as connection:
+            connection.execute(text(self.OLD_TODOS))
+            connection.execute(
+                text(
+                    "INSERT INTO todos (id, owner_id, created_at, updated_at, is_deleted,"
+                    " sync_status, sync_seq, title, tags, repeat_rule)"
+                    " VALUES ('t1','local','2026-01-01','2026-01-01',0,'clean',0,"
+                    " '旧待办','[]','none')"
+                )
+            )
+
+        initialize_schema(engine)
+
+        with engine.connect() as connection:
+            columns = {row[1] for row in connection.execute(text("PRAGMA table_info(todos)"))}
+            for name in ("due_time", "repeat_config", "remind_days_before", "remind_time", "pomodoro_count"):
+                self.assertIn(name, columns)
+            row = connection.execute(
+                text("SELECT due_time, repeat_config, remind_days_before, remind_time,"
+                     " pomodoro_count FROM todos WHERE id = 't1'")
+            ).one()
+            self.assertEqual(row[0], "")
+            self.assertEqual(row[1], "")
+            self.assertEqual(row[2], -1)
+            self.assertEqual(row[3], "")
+            self.assertEqual(row[4], 0)
+        engine.dispose()
+
+    def test_repeat_runs_are_idempotent(self) -> None:
+        engine = create_engine("sqlite:///:memory:")
+        initialize_schema(engine)
+        initialize_schema(engine)  # 第二次不应报错
+        with engine.connect() as connection:
+            columns = {row[1] for row in connection.execute(text("PRAGMA table_info(todos)"))}
+            self.assertIn("due_time", columns)
+        engine.dispose()
+
+
 class SyncSequenceInitializationTests(unittest.TestCase):
     """升级存量库时全局序列必须顶到存量最大值，否则存量客户端永久漏拉。"""
 

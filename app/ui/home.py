@@ -330,7 +330,8 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
                         ),
                         ft.Text(
                             ("已过期 · " if (item.due_date and item.due_date < today) else "")
-                            + (item.due_date.isoformat() if item.due_date else ""),
+                            + (item.due_date.isoformat() if item.due_date else "")
+                            + (f" {item.due_time}" if item.due_date and item.due_time else ""),
                             size=10,
                             color=DANGER if (item.due_date and item.due_date < today) else TEXT_MUTED,
                         ),

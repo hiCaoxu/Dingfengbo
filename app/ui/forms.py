@@ -44,7 +44,22 @@ from ..db.session import session_scope
 from ..icons import ico
 from ..services.ai.client import AIConfigError, chat
 from ..services.ai.provider import AIError
-from ..services.dates import diary_title, lunar_to_gregorian, parse_hours, parse_lunar
+from ..services.dates import (
+    diary_title,
+    lunar_to_gregorian,
+    parse_hours,
+    parse_lunar,
+    valid_hm,
+)
+from ..services.todo_rules import (
+    CUSTOM_KIND_LABELS,
+    CUSTOM_LABEL_BY_KIND,
+    REPEAT_LABELS,
+    RULE_BY_LABEL,
+    RULE_OPTIONS,
+    parse_config,
+    serialize_config,
+)
 from ..services.health import (
     calorie_of,
     estimate_exercise_calories,
@@ -114,10 +129,37 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
         (todo.lunar_reminder if is_lunar else (todo.due_date.isoformat() if todo and todo.due_date else "")),
         width=380,
     )
+    due_time = form_field("到期时间 HH:MM（可选）", todo.due_time if todo else "", width=170)
+    priority = dropdown("优先级", ["", "低", "中", "高"], todo.priority if todo and todo.priority else "", width=150)
     tags = form_field("标签（逗号分隔）", tags_text(todo.tags) if todo else "")
-    repeat = dropdown("循环规则", ["不循环", "不定期", "按天", "按周", "按月", "按年"],
-                      {"none": "不循环", "irregular": "不定期", "day": "按天", "week": "按周", "month": "按月", "year": "按年"}.get(todo.repeat_rule, "不循环") if todo else "不循环")
-    priority = dropdown("优先级", ["", "低", "中", "高"], todo.priority if todo and todo.priority else "")
+
+    config = parse_config(todo.repeat_config) if todo else {}
+    repeat = dropdown("循环规则", RULE_OPTIONS, REPEAT_LABELS.get(todo.repeat_rule, "不循环") if todo else "不循环", width=160)
+    custom_kind = dropdown(
+        "自定义方式",
+        list(CUSTOM_KIND_LABELS.values()),
+        CUSTOM_KIND_LABELS.get(str(config.get("kind") or ""), CUSTOM_KIND_LABELS["weekly_times"]),
+        width=220,
+    )
+    custom_times = form_field("每周次数（1-7）", str(config.get("times") or 3), width=140)
+    custom_row = ft.Row([custom_kind, custom_times], spacing=12)
+
+    remind_days = form_field(
+        "提前提醒天数（空=不提醒）",
+        "" if not todo or int(todo.remind_days_before or -1) < 0 else str(todo.remind_days_before),
+        width=210,
+    )
+    remind_time = form_field("提醒时间 HH:MM（可选）", todo.remind_time if todo else "", width=190)
+
+    def sync_custom_visibility() -> None:
+        custom_row.visible = repeat.value == "自定义"
+        custom_times.visible = (
+            custom_row.visible and custom_kind.value == CUSTOM_KIND_LABELS["weekly_times"]
+        )
+
+    sync_custom_visibility()
+    repeat.on_select = lambda e: (sync_custom_visibility(), page.update())
+    custom_kind.on_select = lambda e: (sync_custom_visibility(), page.update())
 
     def on_type_change(e):
         lunar = e.control.value == "农历"
@@ -131,6 +173,26 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
         if not title.value or not title.value.strip():
             snack(page, "请填写标题", "#C97B63")
             return
+        due_time_value = (due_time.value or "").strip()
+        if due_time_value and not valid_hm(due_time_value):
+            snack(page, "到期时间格式应为 HH:MM（如 09:30）", "#C97B63")
+            return
+        remind_time_value = (remind_time.value or "").strip()
+        if remind_time_value and not valid_hm(remind_time_value):
+            snack(page, "提醒时间格式应为 HH:MM（如 09:00）", "#C97B63")
+            return
+        raw_days = (remind_days.value or "").strip()
+        if raw_days:
+            try:
+                days_before = int(raw_days)
+            except ValueError:
+                snack(page, "提前提醒天数需为整数", "#C97B63")
+                return
+            if days_before < 0:
+                snack(page, "提前提醒天数不能为负", "#C97B63")
+                return
+        else:
+            days_before = -1
         if due_type.value == "农历":
             raw = (due.value or "").strip()
             if not raw:
@@ -152,14 +214,33 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
                 snack(page, "到期日期格式不正确", "#C97B63")
                 return
             lunar_reminder = ""
-        rule_map = {"不循环": "none", "不定期": "irregular", "按天": "day", "按周": "week", "按月": "month", "按年": "year"}
+        rule = RULE_BY_LABEL.get(repeat.value or "不循环", "none")
+        config_raw = ""
+        if rule == "custom":
+            kind = CUSTOM_LABEL_BY_KIND.get(custom_kind.value or "") or "weekly_times"
+            if kind == "weekly_times":
+                try:
+                    times = int((custom_times.value or "3").strip())
+                except ValueError:
+                    snack(page, "每周次数需为 1-7 的数字", "#C97B63")
+                    return
+                if not 1 <= times <= 7:
+                    snack(page, "每周次数需在 1-7 之间", "#C97B63")
+                    return
+                config_raw = serialize_config({"kind": "weekly_times", "times": times})
+            else:
+                config_raw = serialize_config({"kind": kind})
         fields = dict(
             title=title.value.strip(),
             note=note.value or "",
             due_date=due_date,
+            due_time=due_time_value,
             tags=_tags(tags.value or ""),
             lunar_reminder=lunar_reminder,
-            repeat_rule=rule_map.get(repeat.value or "不循环", "none"),
+            repeat_rule=rule,
+            repeat_config=config_raw,
+            remind_days_before=days_before,
+            remind_time=remind_time_value,
             priority=priority.value or "",
         )
         save_record(Todo, todo.id if todo else None, fields)
@@ -169,8 +250,23 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
     dialog = modal(
         page,
         "编辑待办" if todo else "新增待办",
-        ft.Column([title, note, ft.Row([due_type, due], spacing=12), tags, ft.Row([repeat, priority], spacing=12)], spacing=10, tight=True),
+        ft.Column(
+            [
+                title,
+                note,
+                ft.Row([due_type, due], spacing=12),
+                ft.Row([due_time, priority], spacing=12),
+                tags,
+                ft.Row([repeat], spacing=12),
+                custom_row,
+                ft.Row([remind_days, remind_time], spacing=12),
+            ],
+            spacing=10,
+            tight=True,
+            scroll=ft.ScrollMode.AUTO,
+        ),
         [ft.TextButton("取消", on_click=lambda e: _close_and_refresh(page, dialog, None)), primary_button("保存", save)],
+        width=620,
     )
     return dialog
 

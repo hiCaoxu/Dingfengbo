@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import calendar
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 WEEKDAY_CN = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
 
@@ -146,7 +146,60 @@ def month_grid(year: int, month: int) -> list[list[date]]:
     return [[start + timedelta(days=i * 7 + j) for j in range(7)] for i in range(rows)]
 
 
-def next_due(value: date, rule: str) -> date | None:
+def is_workday(value: date) -> bool:
+    """工作日定义：周一至周五（不排除法定节假日，避免引入节假日数据源）。"""
+    return value.weekday() < 5
+
+
+def nth_workday(year: int, month: int, nth: str) -> date | None:
+    """某月第一个/最后一个工作日。"""
+    days = calendar.monthrange(year, month)[1]
+    order = range(days, 0, -1) if nth == "last" else range(1, days + 1)
+    for day in order:
+        candidate = date(year, month, day)
+        if is_workday(candidate):
+            return candidate
+    return None
+
+
+def next_custom_due(value: date, config: dict) -> date | None:
+    """自定义循环：按配置推算下一次到期日。
+
+    支持的 kind：
+    - ``weekly_times``（times=N）：每周 N 次，均匀分散（间隔 ``round(7/N)`` 天，至少 1 天）
+    - ``monthly_workday``（nth=first|last）：每月第一个/最后一个工作日
+    - ``monthly_days``（days=[1,15]）：每月指定日期，取严格晚于 value 的第一个
+    """
+    kind = str(config.get("kind") or "")
+    if kind == "weekly_times":
+        try:
+            times = int(config.get("times") or 1)
+        except (TypeError, ValueError):
+            times = 1
+        times = max(1, min(7, times))
+        return value + timedelta(days=max(1, round(7 / times)))
+    if kind == "monthly_workday":
+        year, month = shift_month(value.year, value.month, 1)
+        return nth_workday(year, month, str(config.get("nth") or "first"))
+    if kind == "monthly_days":
+        days = sorted(
+            {int(day) for day in config.get("days") or [] if str(day).isdigit()}
+        )
+        if not days:
+            return None
+        for offset in range(0, 13):
+            year, month = shift_month(value.year, value.month, offset)
+            month_days = calendar.monthrange(year, month)[1]
+            for day in days:
+                if 1 <= day <= month_days:
+                    candidate = date(year, month, day)
+                    if candidate > value:
+                        return candidate
+        return None
+    return None
+
+
+def next_due(value: date, rule: str, config: dict | None = None) -> date | None:
     if rule == "day":
         return value + timedelta(days=1)
     if rule == "week":
@@ -160,6 +213,8 @@ def next_due(value: date, rule: str) -> date | None:
         month = value.month
         day = min(value.day, calendar.monthrange(year, month)[1])
         return date(year, month, day)
+    if rule == "custom":
+        return next_custom_due(value, config or {})
     return None
 
 
@@ -201,6 +256,22 @@ def local_date_from_utc(value: datetime) -> date:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.astimezone().date()
+
+
+_HM_PATTERN = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d")
+
+
+def valid_hm(value: str) -> bool:
+    """是否为合法的 HH:MM（00:00 至 23:59）。"""
+    return bool(_HM_PATTERN.fullmatch((value or "").strip()))
+
+
+def parse_hm(value: str) -> time | None:
+    raw = (value or "").strip()
+    if not valid_hm(raw):
+        return None
+    hour, minute = (int(part) for part in raw.split(":"))
+    return time(hour, minute)
 
 
 def parse_hours(bedtime: str, wake_time: str) -> float:

@@ -52,4 +52,7 @@ ACTIONS = {
     "list": "LIST_OUTLINED",
     "grid": "GRID_VIEW_OUTLINED",
     "today": "TODAY_OUTLINED",
+    "timer": "TIMER_OUTLINED",
+    "play": "PLAY_ARROW_OUTLINED",
+    "stop": "STOP_CIRCLE_OUTLINED",
 }
