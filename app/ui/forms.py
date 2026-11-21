@@ -81,6 +81,7 @@ from ..services.health import (
 )
 from ..services.sync import mark_pending_write, probe
 from .. import theme as th
+from .uploads import upload_button
 from .widgets import (
     close_modal,
     dropdown,
@@ -867,6 +868,18 @@ def open_entertainment_dialog(page: ft.Page, item: Entertainment | None = None, 
     rating = form_field("评分（0-10，可选）", str(item.rating) if item and item.rating else "")
     note = form_field("简短备注", item.note if item else "", multiline=True)
 
+    def fill_cover(url: str) -> None:
+        cover.value = url
+        cover.update()
+
+    # 选本地图片 → 自动压缩上传 → 字段里填服务器链接
+    cover.expand = True
+    cover_row = ft.Row(
+        [cover, upload_button(page, fill_cover, "上传", "选择封面图片")],
+        spacing=8,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+
     def save(_):
         if not (title.value or "").strip():
             snack(page, "请填写标题", "#C97B63")
@@ -891,7 +904,7 @@ def open_entertainment_dialog(page: ft.Page, item: Entertainment | None = None, 
 
     dialog = modal(
         page, "编辑条目" if item else "新增条目",
-        ft.Column([title, ft.Row([kind, status, rating], spacing=12), cover, note], spacing=10, tight=True),
+        ft.Column([title, ft.Row([kind, status, rating], spacing=12), cover_row, note], spacing=10, tight=True),
         [ft.TextButton("取消", on_click=lambda e: _close_and_refresh(page, dialog, None)), primary_button("保存", save)],
         width=620,
     )

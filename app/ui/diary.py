@@ -19,6 +19,7 @@ from ..services.sync import mark_pending_write
 from .. import theme as th
 from .async_utils import background_section
 from .state import state
+from .uploads import upload_button
 from .widgets import (
     card,
     dismiss,
@@ -58,7 +59,7 @@ def _editor_data(day: date) -> dict:
             return {"id": diary.id, "title": diary.title, "content": diary.content}
 
 
-def _editor(data: dict, refresh) -> ft.Control:
+def _editor(page: ft.Page, data: dict, refresh) -> ft.Control:
     diary_id, title, content = data["id"], data["title"], data["content"]
     has_diary = bool((content or "").strip())
     # 正文占满卡片剩余高度（不再用 min_lines 撑），和卡片同高
@@ -73,6 +74,13 @@ def _editor(data: dict, refresh) -> ft.Control:
         on_blur=lambda e: save_content(diary_id, e.control.value),
         expand=True,
     )
+    def insert_image(url: str) -> None:
+        text = field.value or ""
+        separator = "\n" if text and not text.endswith("\n") else ""
+        field.value = f"{text}{separator}![]({url})\n"
+        field.update()
+        save_content(diary_id, field.value)
+
     return card(
         ft.Column(
             [
@@ -81,6 +89,8 @@ def _editor(data: dict, refresh) -> ft.Control:
                         ft.Text(title, size=14, color=th.TEXT, weight="bold"),
                         ft.Container(width=7, height=7, bgcolor=th.PRIMARY if has_diary else th.DIVIDER, border_radius=4),
                         ft.Text("有日记" if has_diary else "暂无日记", size=11, color=th.PRIMARY if has_diary else th.TEXT_MUTED),
+                        ft.Container(expand=True),
+                        upload_button(page, insert_image, "插入图片", "选择要插入的图片"),
                     ],
                     spacing=6,
                 ),
@@ -407,7 +417,7 @@ def _render(page: ft.Page, refresh, payload) -> ft.Control:
             ft.Row(
                 [
                     main,
-                    _editor(payload["editor"], refresh),
+                    _editor(page, payload["editor"], refresh),
                     _life_panel(page, refresh, payload.get("life") or []),
                 ],
                 spacing=14,

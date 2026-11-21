@@ -10,5 +10,9 @@ httpx>=0.27,<1.0
 fastapi>=0.110,<1.0
 uvicorn[standard]>=0.29,<1.0
 pydantic>=2.6,<3.0
+# 图片压缩（上传前统一压到长边 1600、JPEG q82）
+Pillow>=10.0,<13.0
+# FastAPI 接收 multipart 上传（/api/upload）
+python-multipart>=0.0.9
 # 可选：关闭窗口收入系统托盘（未安装时自动降级为最小化到任务栏）
 pystray>=0.19

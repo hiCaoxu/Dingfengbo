@@ -12,8 +12,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy import select, text
 from sqlalchemy.orm import sessionmaker
@@ -49,6 +50,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 图片落盘目录：与数据库同级的 files/
+
+FILES_DIR = Path(os.environ.get("DINGFENGBO_SERVER_FILES", DB_PATH.parent / "files"))
+FILES_DIR.mkdir(parents=True, exist_ok=True)
+# 文件名是内容摘要，本身不可猜，直接静态暴露，客户端拿到的就是可长期引用的链接。
+app.mount("/files", StaticFiles(directory=str(FILES_DIR)), name="files")
 
 
 class PullCursor(BaseModel):
@@ -244,3 +252,63 @@ def check(authorization: str | None = Header(default=None)) -> dict[str, Any]:
     with SessionLocal() as session:
         latest = max_updated_at(session, owner)
     return {"latest_updated_at": latest, "server_time": utcnow().isoformat()}
+
+
+# ---------------------------------------------------------------- 图片上传
+MAX_UPLOAD_BYTES = 12 * 1024 * 1024
+# 只放行真正的图片（后缀可伪造，按文件头判断），否则服务器会变成任意文件仓库。
+_IMAGE_MAGIC: tuple[tuple[bytes, str], ...] = (
+    (b"\xff\xd8\xff", ".jpg"),
+    (b"\x89PNG\r\n\x1a\n", ".png"),
+    (b"GIF87a", ".gif"),
+    (b"GIF89a", ".gif"),
+    (b"BM", ".bmp"),
+)
+
+
+def _image_suffix(data: bytes) -> str:
+    """按文件头识别图片格式，返回后缀；不是图片返回空串。"""
+    for magic, suffix in _IMAGE_MAGIC:
+        if data.startswith(magic):
+            return suffix
+    # WEBP: RIFF....WEBP
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp"
+    return ""
+
+
+def _public_base(request: Request) -> str:
+    """对外可访问的站点前缀；反向代理/自定义域名时用环境变量覆盖。"""
+    configured = os.environ.get("DINGFENGBO_SERVER_PUBLIC_URL", "").strip().rstrip("/")
+    return configured or str(request.base_url).rstrip("/")
+
+
+@app.post("/api/upload")
+async def upload(
+    request: Request,
+    file: UploadFile = File(...),
+    authorization: str | None = Header(default=None),
+) -> dict[str, str]:
+    """接收客户端压缩后的图片，按内容摘要落盘，返回可直接引用的 URL。
+
+    摘要去重：同一张图重复上传只占一份空间，地址保持稳定。
+    """
+    owner = owner_of(authorization)
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="文件为空")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="图片过大（超过 12MB）")
+    suffix = _image_suffix(data)
+    if not suffix:
+        raise HTTPException(status_code=400, detail="只支持 JPG/PNG/GIF/WEBP/BMP 图片")
+
+    digest = hashlib.sha256(data).hexdigest()
+    name = f"{owner[:12]}-{digest[:24]}{suffix}"
+    target = FILES_DIR / name
+    if not target.exists():
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        tmp.write_bytes(data)
+        os.replace(tmp, target)
+    logger.info("上传图片：%s（%d 字节）", name, len(data))
+    return {"url": f"{_public_base(request)}/files/{name}", "name": name}

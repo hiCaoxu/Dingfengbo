@@ -19,6 +19,7 @@ from .. import theme as th
 from .async_utils import background_section
 from .forms import tags_text
 from .state import state
+from .uploads import upload_button
 from .widgets import (
     card,
     delete_with_confirm,
@@ -144,6 +145,17 @@ def render_blocks(blocks: list[dict]) -> ft.Control:
             )
         elif kind == "table":
             controls.append(_table(block["header"], block["rows"]))
+        elif kind == "image":
+            controls.append(
+                ft.Image(
+                    src=block["src"],
+                    fit=ft.BoxFit.CONTAIN,
+                    border_radius=8,
+                    error_content=ft.Text(
+                        block.get("alt") or "图片加载失败", size=11, color=th.TEXT_MUTED
+                    ),
+                )
+            )
         else:
             controls.append(ft.Text(spans=inline_spans(block["text"]), size=13))
     return ft.Column(controls, spacing=10, scroll=ft.ScrollMode.AUTO, expand=True)
@@ -358,6 +370,15 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
         _preview_timer.daemon = True
         _preview_timer.start()
 
+    def insert_image(url: str) -> None:
+        """把上传得到的服务器链接以 Markdown 图片语法追加到正文末尾。"""
+        text = source.value or ""
+        separator = "\n" if text and not text.endswith("\n") else ""
+        source.value = f"{text}{separator}![]({url})\n"
+        source.update()
+        _schedule_save()
+        _update_preview(source.value)
+
     def go_back(e) -> None:
         # 返回前先落库：on_blur 在控件被替换时不一定触发，别指望它。
         _cancel_autosave_timer()
@@ -368,7 +389,16 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
 
     return ft.Column(
         [
-            section_header("编辑笔记", ft.TextButton("返回", on_click=go_back)),
+            section_header(
+                "编辑笔记",
+                ft.Row(
+                    [
+                        upload_button(page, insert_image, "插入图片", "选择要插入的图片"),
+                        ft.TextButton("返回", on_click=go_back),
+                    ],
+                    spacing=4,
+                ),
+            ),
             card(
                 ft.Column(
                     [

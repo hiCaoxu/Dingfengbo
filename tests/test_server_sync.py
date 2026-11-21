@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import tempfile
 import unittest
 from datetime import datetime
@@ -35,16 +36,25 @@ def note_change(title: str, updated_at: datetime) -> dict:
     }
 
 
+def _boot_server(temp_dir: str):
+    """在临时目录里重新加载 server.main（库 + 图片目录都指向 temp_dir）。"""
+    env = {
+        "DINGFENGBO_SERVER_DB": os.path.join(temp_dir, "initial.db"),
+        "DINGFENGBO_SERVER_FILES": os.path.join(temp_dir, "files"),
+    }
+    with patch.dict(os.environ, env):
+        # 别的测试文件可能已经导入过 server.main（会把库/图片目录钉在别处），
+        # 先清掉缓存，确保这里的环境变量生效。
+        sys.modules.pop("server.main", None)
+        import server.main as server_module
+    return server_module
+
+
 class ServerSyncTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.temp_dir = tempfile.TemporaryDirectory()
-        with patch.dict(
-            os.environ,
-            {"DINGFENGBO_SERVER_DB": os.path.join(cls.temp_dir.name, "initial.db")},
-        ):
-            import server.main as server_module
-        cls.server = server_module
+        cls.server = _boot_server(cls.temp_dir.name)
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -172,6 +182,63 @@ class ServerSyncTests(unittest.TestCase):
             self.assertEqual(ctx.exception.status_code, 429)
         finally:
             self.server._push_rate_log.clear()
+
+
+class ServerUploadTests(unittest.TestCase):
+    """POST /api/upload + /files 静态目录（图片端到端）。"""
+
+    PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.temp_dir = tempfile.TemporaryDirectory()
+        cls.server = _boot_server(cls.temp_dir.name)
+        from fastapi.testclient import TestClient
+
+        cls.client = TestClient(cls.server.app)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.server.engine.dispose()
+        for handler in logging.getLogger().handlers[:]:
+            handler.close()
+            logging.getLogger().removeHandler(handler)
+        cls.temp_dir.cleanup()
+
+    def test_upload_requires_token(self) -> None:
+        response = self.client.post("/api/upload", files={"file": ("a.png", self.PNG, "image/png")})
+        self.assertEqual(response.status_code, 401)
+
+    def test_upload_stores_file_and_serves_it_back(self) -> None:
+        response = self.client.post(
+            "/api/upload",
+            files={"file": ("a.png", self.PNG, "image/png")},
+            headers={"Authorization": "Bearer token-a"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertTrue(body["url"].endswith(f"/files/{body['name']}"))
+        stored = self.server.FILES_DIR / body["name"]
+        self.assertTrue(stored.exists())
+        self.assertEqual(stored.read_bytes(), self.PNG)
+
+        fetched = self.client.get(f"/files/{body['name']}")
+        self.assertEqual(fetched.status_code, 200)
+        self.assertEqual(fetched.content, self.PNG)
+
+    def test_same_content_is_deduplicated(self) -> None:
+        headers = {"Authorization": "Bearer token-a"}
+        first = self.client.post("/api/upload", files={"file": ("a.png", self.PNG, "image/png")}, headers=headers)
+        second = self.client.post("/api/upload", files={"file": ("b.png", self.PNG, "image/png")}, headers=headers)
+        self.assertEqual(first.json()["name"], second.json()["name"])
+
+    def test_non_image_is_rejected(self) -> None:
+        response = self.client.post(
+            "/api/upload",
+            files={"file": ("a.txt", b"hello", "text/plain")},
+            headers={"Authorization": "Bearer token-a"},
+        )
+        self.assertEqual(response.status_code, 400)
 
 
 if __name__ == "__main__":

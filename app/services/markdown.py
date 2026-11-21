@@ -110,6 +110,11 @@ def parse(markdown: str) -> list[dict[str, Any]]:
             blocks.append({"type": "heading", "level": len(heading.group(1)), "text": heading.group(2)})
             index += 1
             continue
+        image = re.match(r"^\s*!\[([^\]]*)\]\(([^)\s]+)\)\s*$", line)
+        if image:
+            blocks.append({"type": "image", "alt": image.group(1), "src": image.group(2)})
+            index += 1
+            continue
         if re.match(r"^\s*(-{3,}|\*{3,})\s*$", line):
             blocks.append({"type": "hr"})
             index += 1
