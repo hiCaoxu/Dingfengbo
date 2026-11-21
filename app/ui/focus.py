@@ -15,7 +15,7 @@ from .. import theme as th
 from ..icons import ACTIONS, ico
 from ..services.finance import money
 from ..services.habits import check_in
-from .widgets import card, empty, primary_button, snack
+from .widgets import card, empty, equal_height_row, primary_button, snack
 
 logger = logging.getLogger(__name__)
 
@@ -23,13 +23,15 @@ logger = logging.getLogger(__name__)
 def _metric(title: str, value: str, hint: str = "", accent: bool = False) -> ft.Control:
     return ft.Column(
         [
-            ft.Text(title, size=10, color=th.TEXT_MUTED),
-            ft.Text(value, size=18, color=th.ACCENT if accent else th.TEXT, weight="bold"),
-            ft.Text(hint, size=9, color=th.TEXT_MUTED, max_lines=1,
+            ft.Text(title, size=th.FONT_CAPTION, color=th.TEXT_MUTED),
+            ft.Text(value, size=18, color=th.ACCENT if accent else th.TEXT, weight="bold",
+                    max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
+            ft.Text(hint, size=th.FONT_CAPTION, color=th.TEXT_MUTED, max_lines=1,
                     overflow=ft.TextOverflow.ELLIPSIS),
         ],
         spacing=2,
         tight=True,
+        expand=True,
     )
 
 
@@ -51,8 +53,10 @@ def _todo_row(page: ft.Page, refresh, item, toggle) -> ft.Control:
                         (item.due_date.isoformat() if item.due_date else "无截止日")
                         + (f" {item.due_time}" if item.due_time else "")
                         + (f" · {item.priority}" if item.priority else ""),
-                        size=10,
+                        size=th.FONT_CAPTION,
                         color=th.DANGER if overdue else th.TEXT_MUTED,
+                        max_lines=1,
+                        overflow=ft.TextOverflow.ELLIPSIS,
                     ),
                 ],
                 spacing=2,
@@ -102,6 +106,7 @@ def render(
         todo_body = ft.Column(
             [_todo_row(page, refresh, item, toggle_todo) for item in data["todos"]],
             spacing=6,
+            scroll=ft.ScrollMode.AUTO,
         )
     else:
         todo_body = empty("今天没有任务，享受空白")
@@ -114,16 +119,17 @@ def render(
                         ft.Text(
                             f"完成 {data['completed_today']} 项 · 未完成 {data['pending_count']} 项"
                             + (f" · 逾期 {data['overdue_count']} 项" if data["overdue_count"] else ""),
-                            size=11, color=th.TEXT_MUTED,
+                            size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+                            max_lines=1, overflow=ft.TextOverflow.ELLIPSIS, expand=True,
                         ),
-                        ft.Container(expand=True),
-                        ft.Text(f"完成率 {data['completion_rate']}%", size=11,
+                        ft.Text(f"完成率 {data['completion_rate']}%", size=th.FONT_CAPTION,
                                 color=th.PRIMARY, weight="bold"),
                     ]
                 ),
                 todo_body,
             ],
             spacing=10,
+            expand=True,
         ),
         title="今日必做",
         trailing=ft.Row(
@@ -142,12 +148,14 @@ def render(
             [
                 ft.Text(
                     f"连续写作 {data['writing_streak']} 天",
-                    size=20, color=th.PRIMARY, weight="bold",
+                    size=th.FONT_METRIC, color=th.PRIMARY, weight="bold",
+                    max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
                 ),
                 ft.Text(
                     "今天的日记已经写了，继续保持" if data["diary_written"]
                     else "今天还没有写日记，趁记忆新鲜记两句",
-                    size=11, color=th.TEXT_MUTED,
+                    size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+                    max_lines=2, overflow=ft.TextOverflow.ELLIPSIS,
                 ),
                 primary_button(
                     "继续写日记" if data["diary_written"] else "写今天的日记",
@@ -156,6 +164,7 @@ def render(
                 ),
             ],
             spacing=10,
+            expand=True,
         ),
         title="日记",
         expand=1,
@@ -174,6 +183,8 @@ def render(
                                 "最近记录"),
                     ],
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+                    spacing=8,
                 ),
                 ft.Row(
                     [
@@ -197,11 +208,14 @@ def render(
     finance_card = card(
         ft.Column(
             [
-                ft.Text(f"今日支出 {money(data['spent_today'])}", size=20,
-                        color=th.ACCENT, weight="bold"),
-                ft.Text(budget_line, size=11, color=th.TEXT_MUTED),
+                ft.Text(f"今日支出 {money(data['spent_today'])}", size=th.FONT_METRIC,
+                        color=th.ACCENT, weight="bold", max_lines=1,
+                        overflow=ft.TextOverflow.ELLIPSIS),
+                ft.Text(budget_line, size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+                        max_lines=2, overflow=ft.TextOverflow.ELLIPSIS),
                 *[
-                    ft.Text(f"⚠ {message}", size=10, color=th.DANGER)
+                    ft.Text(f"⚠ {message}", size=th.FONT_CAPTION, color=th.DANGER,
+                            max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
                     for message in data["budget_alerts"][:2]
                 ],
                 ft.Row(
@@ -210,9 +224,11 @@ def render(
                         ft.TextButton("记账概览", on_click=lambda e: navigate("finance")),
                     ],
                     spacing=4,
+                    wrap=True,
                 ),
             ],
             spacing=8,
+            expand=True,
         ),
         title="消费",
         expand=1,
@@ -229,10 +245,12 @@ def render(
                         size=16,
                         color=th.PRIMARY if done else th.TEXT_MUTED,
                     ),
-                    ft.Text(item["name"], size=12, color=th.TEXT, expand=True),
+                    ft.Text(item["name"], size=th.FONT_BODY, color=th.TEXT, expand=True,
+                            max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
                     ft.Text(
                         f"连续 {item['streak']} 天 · 本周 {item['week_done']}/{item['target_per_week']}",
-                        size=10, color=th.TEXT_MUTED,
+                        size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+                        max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
                     ),
                     ft.TextButton(
                         "已打卡" if done else "打卡",
@@ -247,7 +265,7 @@ def render(
         habit_controls = [empty("还没有习惯，先去「习惯」模块添加")]
 
     habit_card = card(
-        ft.Column(habit_controls, spacing=6),
+        ft.Column(habit_controls, spacing=6, scroll=ft.ScrollMode.AUTO),
         title="习惯打卡",
         trailing=ft.TextButton("管理", on_click=lambda e: navigate("todo")),
         expand=2,
@@ -257,10 +275,13 @@ def render(
     review_card = card(
         ft.Column(
             [
-                ft.Text(note.title if note else "暂无笔记", size=13, color=th.TEXT, weight="bold"),
+                ft.Text(note.title if note else "暂无笔记", size=th.FONT_CARD_TITLE,
+                        color=th.TEXT, weight="bold", max_lines=1,
+                        overflow=ft.TextOverflow.ELLIPSIS),
                 ft.Text(
                     (note.content or "").replace("\n", " ")[:90] if note else "随手记一条，日后就是回顾素材",
-                    size=11, color=th.TEXT_MUTED,
+                    size=th.FONT_CAPTION, color=th.TEXT_MUTED, max_lines=3,
+                    overflow=ft.TextOverflow.ELLIPSIS,
                 ),
                 ft.TextButton(
                     "打开这条笔记", on_click=(lambda e: on_open_note(note)) if note else None,
@@ -268,6 +289,7 @@ def render(
                 ),
             ],
             spacing=6,
+            expand=True,
         ),
         title="随机回顾",
         expand=2,
@@ -278,11 +300,13 @@ def render(
             [
                 ft.Text(
                     "把今天的任务、健康、消费和习惯交给 AI，让它给出今天最值得做的三件事。",
-                    size=11, color=th.TEXT_MUTED,
+                    size=th.FONT_CAPTION, color=th.TEXT_MUTED, max_lines=4,
+                    overflow=ft.TextOverflow.ELLIPSIS,
                 ),
                 primary_button("生成今日建议", ai_brief, "AUTO_AWESOME_OUTLINED"),
             ],
             spacing=10,
+            expand=True,
         ),
         title="AI 今日建议",
         expand=1,
@@ -290,9 +314,9 @@ def render(
 
     return ft.Column(
         [
-            ft.Row([todo_card, diary_card], spacing=12, height=300),
-            ft.Row([health_card, finance_card, ai_card], spacing=12, height=200),
-            ft.Row([habit_card, review_card], spacing=12, height=210),
+            equal_height_row([todo_card, diary_card], spacing=12, height=300),
+            equal_height_row([health_card, finance_card, ai_card], spacing=12, height=200),
+            equal_height_row([habit_card, review_card], spacing=12, height=210),
         ],
         spacing=8,
         expand=True,

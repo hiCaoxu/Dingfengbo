@@ -79,7 +79,8 @@ def open_budget_dialog(page: ft.Page, refresh) -> ft.AlertDialog:
             [
                 total_field,
                 divider(),
-                ft.Text("分类预算（留空或 0 表示不限制）", size=11, color=th.TEXT_MUTED),
+                ft.Text("分类预算（留空或 0 表示不限制）", size=th.FONT_CAPTION,
+                        color=th.TEXT_MUTED),
                 ft.Row(category_rows, wrap=True, spacing=8),
             ],
             spacing=10,
@@ -170,7 +171,7 @@ def open_rule_form(page: ft.Page, rule=None, on_done=None) -> ft.AlertDialog:
                 note,
                 ft.Text(
                     "到期后会自动生成真实交易（标注「周期」），最多补生成 12 期。",
-                    size=10,
+                    size=th.FONT_CAPTION,
                     color=th.TEXT_MUTED,
                 ),
             ],
@@ -198,15 +199,19 @@ def open_recurring_dialog(page: ft.Page, refresh) -> ft.AlertDialog:
                         [
                             ft.Column(
                                 [
-                                    ft.Text(rule.name, size=12, color=th.TEXT, weight="bold"),
+                                    ft.Text(rule.name, size=th.FONT_CARD_TITLE,
+                                            color=th.TEXT, weight="bold",
+                                            max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
                                     ft.Text(
                                         f"{money(rule.amount)} · "
                                         f"{'每周' if rule.period == 'week' else '每月'} "
                                         f"{(f'周{rule.day}' if rule.period == 'week' else rule.day)} 日 · "
                                         f"下次 {rule.next_date.isoformat() if rule.next_date else '未定'}"
                                         + ("" if rule.active else " · 已停用"),
-                                        size=10,
+                                        size=th.FONT_CAPTION,
                                         color=th.TEXT_MUTED,
+                                        max_lines=2,
+                                        overflow=ft.TextOverflow.ELLIPSIS,
                                     ),
                                 ],
                                 spacing=2,
@@ -250,7 +255,7 @@ def open_recurring_dialog(page: ft.Page, refresh) -> ft.AlertDialog:
             [
                 ft.Text(
                     f"按月合计约 {money(budget_service.monthly_fixed_total())}",
-                    size=11,
+                    size=th.FONT_BODY,
                     color=th.TEXT_MUTED,
                 ),
                 list_box,
@@ -279,7 +284,8 @@ def open_recurring_dialog(page: ft.Page, refresh) -> ft.AlertDialog:
 def open_quick_parse_dialog(page: ft.Page, refresh) -> ft.AlertDialog:
     """规则版「一句话记账」：不依赖 AI，解析金额/分类/日期后确认保存。"""
     text = form_field("用一句话记账，例如「今天午饭花了 32 元」", "", multiline=True)
-    preview = ft.Text("", size=11, color=th.TEXT_MUTED)
+    preview = ft.Text("", size=th.FONT_BODY, color=th.TEXT_MUTED, max_lines=2,
+                      overflow=ft.TextOverflow.ELLIPSIS)
 
     def parse(_) -> dict | None:
         data = parse_transaction(text.value or "")

@@ -23,7 +23,18 @@ from .budget_dialogs import (
     open_recurring_dialog,
 )
 from .state import state
-from .widgets import card, delete_with_confirm, divider, dropdown, empty, icon_button, primary_button, section_header
+from .widgets import (
+    card,
+    delete_with_confirm,
+    divider,
+    dropdown,
+    empty,
+    equal_height_row,
+    icon_button,
+    metric_card,
+    page_header,
+    primary_button,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +46,7 @@ _PAGE_SIZE = 10
 
 def _chart_placeholder() -> ft.Control:
     return ft.Container(
-        content=ft.Text("加载中…", size=11, color=th.TEXT_MUTED),
+        content=ft.Text("图表加载中…", size=th.FONT_CAPTION, color=th.TEXT_MUTED),
         alignment=ft.Alignment.CENTER,
         expand=True,
     )
@@ -69,13 +80,19 @@ def _tx_row(tx: Transaction, page, refresh, show_actions: bool = True) -> ft.Con
         content=ft.Row(
             [
                 ft.Column(
-                    [ft.Text(f"{sign} {money(tx.amount)}", size=14, color=color, weight="bold"),
-                     ft.Text(f"{tx.date} · {note} · {tx.note}", size=10, color=th.TEXT_MUTED)],
+                    [
+                        ft.Text(f"{sign} {money(tx.amount)}", size=14, color=color, weight="bold",
+                                max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
+                        ft.Text(f"{tx.date} · {note} · {tx.note}", size=th.FONT_CAPTION,
+                                color=th.TEXT_MUTED, max_lines=1,
+                                overflow=ft.TextOverflow.ELLIPSIS),
+                    ],
                     spacing=3, expand=True,
                 ),
                 *actions,
             ],
             spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
         border=ft.Border.all(1, th.DIVIDER), border_radius=10,
         padding=ft.Padding.symmetric(vertical=9, horizontal=12),
@@ -131,22 +148,29 @@ def _render_overview(page: ft.Page, refresh, data) -> ft.Control:
     recent_txs = data["recent_txs"]
     tx_max_updated = data["tx_max_updated"]
 
-    summary_cards = ft.Row(
+    summary_cards = equal_height_row(
         [
-            card(ft.Text(money(summary["income"]), size=20, color=th.TEXT, weight="bold"), title="本月收入"),
-            card(ft.Text(money(summary["expense"]), size=20, color=th.ACCENT, weight="bold"), title="本月支出"),
-            card(ft.Text(money(summary["balance"]), size=20, color=th.TEXT, weight="bold"), title="月度结余"),
-            card(ft.Text(money(assets), size=20, color=th.PRIMARY, weight="bold"), title="总资产"),
+            metric_card("本月收入", money(summary["income"]), height=96, expand=1),
+            metric_card("本月支出", money(summary["expense"]), value_color=th.ACCENT,
+                        height=96, expand=1),
+            metric_card("月度结余", money(summary["balance"]), height=96, expand=1),
+            metric_card("总资产", money(assets), value_color=th.PRIMARY, height=96, expand=1),
         ],
         spacing=12,
+        height=96,
     )
 
     pie_slot = _chart_slot(320, 220)
     trend_slot = _chart_slot(420, 220)
     charts = ft.Row(
-        [card(pie_slot, title="支出占比"), card(trend_slot, title="收支趋势")],
+        [
+            card(pie_slot, title="支出占比", width=352, height=284),
+            card(trend_slot, title="收支趋势", width=452, height=284),
+        ],
         spacing=12,
         scroll=ft.ScrollMode.AUTO,
+        vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+        height=284,
     )
 
     def render_charts() -> None:
@@ -181,16 +205,20 @@ def _render_overview(page: ft.Page, refresh, data) -> ft.Control:
         recent_rows.append(
             ft.Row(
                 [
-                    ft.Text(f"{sign} {money(tx.amount)}", size=12, color=color, weight="bold"),
-                    ft.Text(note_label, size=11, color=th.TEXT_MUTED, expand=True,
-                            overflow=ft.TextOverflow.ELLIPSIS),
-                    ft.Text(tx.date.isoformat(), size=10, color=th.TEXT_MUTED),
+                    ft.Text(f"{sign} {money(tx.amount)}", size=th.FONT_BODY, color=color,
+                            weight="bold"),
+                    ft.Text(note_label, size=th.FONT_CAPTION, color=th.TEXT_MUTED, expand=True,
+                            max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
+                    ft.Text(tx.date.isoformat(), size=th.FONT_CAPTION, color=th.TEXT_MUTED),
                 ],
                 spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
             )
         )
     recent_card = card(
-        ft.Column(recent_rows, spacing=6) if recent_rows else empty("暂无收支记录"),
+        ft.Column(recent_rows, spacing=6, scroll=ft.ScrollMode.AUTO)
+        if recent_rows
+        else empty("暂无收支记录"),
         title="最新收支",
         expand=2,
     )
@@ -200,8 +228,12 @@ def _render_overview(page: ft.Page, refresh, data) -> ft.Control:
             ft.Column(
                 [
                     ft.Icon(ico(icon), size=26, color=th.PRIMARY),
-                    ft.Text(title, size=13, color=th.TEXT, weight="bold"),
-                    ft.Text(subtitle, size=10, color=th.TEXT_MUTED),
+                    ft.Text(title, size=th.FONT_CARD_TITLE, color=th.TEXT, weight="bold",
+                            text_align=ft.TextAlign.CENTER, max_lines=1,
+                            overflow=ft.TextOverflow.ELLIPSIS),
+                    ft.Text(subtitle, size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+                            text_align=ft.TextAlign.CENTER, max_lines=2,
+                            overflow=ft.TextOverflow.ELLIPSIS),
                 ],
                 spacing=6,
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -211,8 +243,8 @@ def _render_overview(page: ft.Page, refresh, data) -> ft.Control:
             expand=1,
         )
 
-    # 最新收支、收支记录、账户列表 一行三卡片
-    entries = ft.Row(
+    # 最新收支、收支记录、账户列表 一行三卡片（等高）
+    entries = equal_height_row(
         [
             recent_card,
             entry("RECEIPT_LONG_OUTLINED", "收支记录", "查看、筛选与新增", "records"),
@@ -231,10 +263,10 @@ def _render_overview(page: ft.Page, refresh, data) -> ft.Control:
                     [
                         ft.Text(
                             f"预算 {money(budget_data.get('total_budget', 0))}",
-                            size=13, color=th.TEXT, weight="bold",
+                            size=th.FONT_CARD_TITLE, color=th.TEXT, weight="bold",
+                            max_lines=1, overflow=ft.TextOverflow.ELLIPSIS, expand=True,
                         ),
-                        ft.Container(expand=True),
-                        ft.Text(f"{budget_used}%", size=12,
+                        ft.Text(f"{budget_used}%", size=th.FONT_CAPTION,
                                 color=th.DANGER if budget_used >= 100 else th.PRIMARY),
                     ]
                 ),
@@ -248,10 +280,12 @@ def _render_overview(page: ft.Page, refresh, data) -> ft.Control:
                     f"剩余 {money(budget_data.get('remaining', 0))}"
                     if budget_data.get("total_budget")
                     else "还没有设置本月预算，设置后可在首页看到进度",
-                    size=10, color=th.TEXT_MUTED,
+                    size=th.FONT_CAPTION, color=th.TEXT_MUTED, max_lines=2,
+                    overflow=ft.TextOverflow.ELLIPSIS,
                 ),
                 *[
-                    ft.Text(f"⚠ {message}", size=10, color=th.DANGER)
+                    ft.Text(f"⚠ {message}", size=th.FONT_CAPTION, color=th.DANGER,
+                            max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
                     for message in (data.get("budget_alerts") or [])[:2]
                 ],
                 ft.Row(
@@ -261,9 +295,12 @@ def _render_overview(page: ft.Page, refresh, data) -> ft.Control:
                                       on_click=lambda e: open_quick_parse_dialog(page, refresh)),
                     ],
                     spacing=4,
+                    wrap=True,
+                    run_spacing=4,
                 ),
             ],
             spacing=8,
+            scroll=ft.ScrollMode.AUTO,
         ),
         title="本月预算",
         expand=1,
@@ -272,11 +309,13 @@ def _render_overview(page: ft.Page, refresh, data) -> ft.Control:
     upcoming_rows = [
         ft.Row(
             [
-                ft.Text(item["name"], size=11, color=th.TEXT, expand=True,
+                ft.Text(item["name"], size=th.FONT_BODY, color=th.TEXT, expand=True,
                         max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
-                ft.Text(item["next_date"].isoformat(), size=10, color=th.TEXT_MUTED),
+                ft.Text(item["next_date"].isoformat(), size=th.FONT_CAPTION,
+                        color=th.TEXT_MUTED),
             ],
             spacing=6,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
         for item in (data.get("upcoming") or [])
     ]
@@ -285,10 +324,11 @@ def _render_overview(page: ft.Page, refresh, data) -> ft.Control:
             [
                 ft.Text(
                     f"按月合计 {money(data.get('fixed_total', 0))}",
-                    size=13, color=th.TEXT, weight="bold",
+                    size=th.FONT_CARD_TITLE, color=th.TEXT, weight="bold",
+                    max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
                 ),
-                ft.Text("即将扣款", size=10, color=th.TEXT_MUTED),
-                *(upcoming_rows or [ft.Text("最近 30 天没有固定支出", size=10,
+                ft.Text("即将扣款", size=th.FONT_CAPTION, color=th.TEXT_MUTED),
+                *(upcoming_rows or [ft.Text("最近 30 天没有固定支出", size=th.FONT_CAPTION,
                                             color=th.TEXT_MUTED)]),
                 ft.Row(
                     [
@@ -296,9 +336,11 @@ def _render_overview(page: ft.Page, refresh, data) -> ft.Control:
                                       on_click=lambda e: open_recurring_dialog(page, refresh)),
                     ],
                     spacing=4,
+                    wrap=True,
                 ),
             ],
             spacing=6,
+            scroll=ft.ScrollMode.AUTO,
         ),
         title="固定支出与订阅",
         expand=1,
@@ -306,11 +348,21 @@ def _render_overview(page: ft.Page, refresh, data) -> ft.Control:
 
     return ft.Column(
         [
-            section_header("记账", primary_button("记一笔", lambda e: open_transaction_dialog(page, "expense", None, refresh), ACTIONS["add"])),
+            page_header(
+                "记账",
+                f"本月概览 · 总资产 {money(assets)}",
+                actions=[
+                    primary_button(
+                        "记一笔",
+                        lambda e: open_transaction_dialog(page, "expense", None, refresh),
+                        ACTIONS["add"],
+                    )
+                ],
+            ),
             summary_cards,
             charts,
             entries,
-            ft.Row([budget_card, fixed_card], spacing=12, height=210),
+            equal_height_row([budget_card, fixed_card], spacing=12, height=210),
         ],
         spacing=12,
         expand=True,
@@ -382,8 +434,14 @@ def _render_records(page: ft.Page, refresh, data) -> ft.Control:
     month_dd.on_select = lambda e: set_month(e.control.value)
 
     filter_row = ft.Row(
-        [year_dd, month_dd, ft.Container(expand=True), ft.Text(f"共 {total} 条", size=11, color=th.TEXT_MUTED)],
+        [
+            year_dd,
+            month_dd,
+            ft.Container(expand=True),
+            ft.Text(f"共 {total} 条", size=th.FONT_CAPTION, color=th.TEXT_MUTED),
+        ],
         spacing=8,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
 
     rows = [_tx_row(tx, page, refresh) for tx in page_items]
@@ -392,7 +450,8 @@ def _render_records(page: ft.Page, refresh, data) -> ft.Control:
         [
             ft.TextButton("上一页", disabled=current_page == 0,
                           on_click=lambda e: (_state.__setitem__("page", max(0, current_page - 1)), refresh())),
-            ft.Text(f"{current_page + 1} / {total_pages}", size=11, color=th.TEXT_MUTED),
+            ft.Text(f"{current_page + 1} / {total_pages}", size=th.FONT_CAPTION,
+                    color=th.TEXT_MUTED),
             ft.TextButton("下一页", disabled=current_page >= total_pages - 1,
                           on_click=lambda e: (_state.__setitem__("page", min(total_pages - 1, current_page + 1)), refresh())),
         ],
@@ -402,8 +461,18 @@ def _render_records(page: ft.Page, refresh, data) -> ft.Control:
 
     return ft.Column(
         [
-            section_header("收支记录", primary_button("记一笔", lambda e: open_transaction_dialog(page, "expense", None, refresh), ACTIONS["add"])),
-            _back(page, refresh),
+            page_header(
+                "记账",
+                f"收支记录 · 共 {total} 条",
+                actions=[
+                    _back(page, refresh),
+                    primary_button(
+                        "记一笔",
+                        lambda e: open_transaction_dialog(page, "expense", None, refresh),
+                        ACTIONS["add"],
+                    ),
+                ],
+            ),
             filter_row,
             divider(),
             ft.Column(rows, spacing=8, scroll=ft.ScrollMode.AUTO, expand=True) if rows else empty("暂无记录"),
@@ -438,26 +507,56 @@ def _render_accounts(page: ft.Page, refresh, data) -> ft.Control:
                 ft.Row(
                     [
                         ft.Column(
-                            [ft.Text(account.name, size=13, color=th.TEXT, weight="bold"),
-                             ft.Text(f"{account.kind} · 初始 {money(account.initial_balance)}", size=10, color=th.TEXT_MUTED)],
+                            [
+                                ft.Text(account.name, size=th.FONT_CARD_TITLE, color=th.TEXT,
+                                        weight="bold", max_lines=1,
+                                        overflow=ft.TextOverflow.ELLIPSIS),
+                                ft.Text(
+                                    f"{account.kind} · 初始 {money(account.initial_balance)}",
+                                    size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+                                    max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+                                ),
+                            ],
                             spacing=3, expand=True,
                         ),
-                        ft.Text(money(balance), size=16, color=th.PRIMARY, weight="bold"),
+                        ft.Text(money(balance), size=16, color=th.PRIMARY, weight="bold",
+                                max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
                         icon_button(ACTIONS["edit"], lambda e, a=account: open_account_dialog(page, a, refresh), "编辑"),
                         icon_button(ACTIONS["delete"], lambda e, a=account.id: _delete(Account, a, page, refresh), "删除"),
                     ],
                     spacing=10,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 width=300,
+                height=96,
             )
         )
 
     return ft.Column(
         [
-            section_header("账户列表", primary_button("新增账户", lambda e: open_account_dialog(page, None, refresh), ACTIONS["add"])),
-            _back(page, refresh),
-            divider(),
-            ft.Row(account_cards, spacing=12, wrap=True, scroll=ft.ScrollMode.AUTO, expand=True) if account_cards else empty("暂无账户"),
+            page_header(
+                "记账",
+                f"账户列表 · 共 {len(accounts)} 个账户",
+                actions=[
+                    _back(page, refresh),
+                    primary_button(
+                        "新增账户",
+                        lambda e: open_account_dialog(page, None, refresh),
+                        ACTIONS["add"],
+                    ),
+                ],
+            ),
+            ft.Row(
+                account_cards,
+                spacing=12,
+                run_spacing=12,
+                wrap=True,
+                scroll=ft.ScrollMode.AUTO,
+                expand=True,
+                vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+            )
+            if account_cards
+            else empty("暂无账户"),
         ],
         spacing=10,
         expand=True,

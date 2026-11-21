@@ -134,8 +134,15 @@ def main(page: ft.Page) -> None:
     page.theme = th.build_theme()
 
     state = {"current": "home", "preview_note": None, "palette": False}
-    sync_text = ft.Text(sync_client.status, size=11, color=th.TEXT_MUTED)
-    queue_text = ft.Text("", size=11, color=th.TEXT_MUTED)
+    # 顶栏状态文字限宽 + 省略号：内容再长也不会把右侧图标按钮挤出屏幕。
+    sync_text = ft.Text(
+        sync_client.status, size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+        max_lines=1, overflow=ft.TextOverflow.ELLIPSIS, width=176,
+    )
+    queue_text = ft.Text(
+        "", size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+        max_lines=1, overflow=ft.TextOverflow.ELLIPSIS, width=110,
+    )
     # 有失败记录时整块可点击，直接打开同步明细看重试/忽略。
     queue_box = ft.Container(
         content=queue_text,
@@ -146,10 +153,12 @@ def main(page: ft.Page) -> None:
     body = ft.Container(expand=True, padding=ft.Padding.all(16))
     date_text = ft.Text(
         f"{date.today().year}年{date.today().month}月{date.today().day}日 {weekday_cn(date.today())}",
-        size=12, color=th.TEXT_MUTED,
+        size=th.FONT_CAPTION, color=th.TEXT_MUTED,
     )
-    greeting_text = ft.Text(f"{_greeting()}，欢迎回来", size=18, color=th.TEXT, weight="bold")
-    slogan_text = ft.Text("刻意练习  要事第一  持续精进", size=18, color=th.PRIMARY, weight="bold")
+    greeting_text = ft.Text(f"{_greeting()}，欢迎回来", size=th.FONT_PAGE_TITLE,
+                            color=th.TEXT, weight="bold")
+    slogan_text = ft.Text("刻意练习  要事第一  持续精进", size=th.FONT_SECTION_TITLE,
+                          color=th.PRIMARY, weight="bold")
     dot = ft.Container(width=7, height=7, bgcolor=th.PRIMARY, border_radius=4)
 
     def toggle_maximize(_=None) -> None:
@@ -199,6 +208,12 @@ def main(page: ft.Page) -> None:
                         lambda e: open_settings_dialog(page, refresh, refresh_status), "设置"),
         ]
 
+    # 座右铭单独放在左右两块之间，居中显示；窄窗口下自动隐藏，优先保证按钮完整。
+    slogan_box = ft.Container(
+        content=slogan_text,
+        expand=True,
+        alignment=ft.Alignment.CENTER,
+    )
     header_box = ft.Container(
         content=ft.Row(
             [
@@ -209,12 +224,7 @@ def main(page: ft.Page) -> None:
                     ],
                     spacing=4,
                 ),
-                # 座右铭单独放在左右两块之间，居中显示
-                ft.Container(
-                    content=slogan_text,
-                    expand=True,
-                    alignment=ft.Alignment.CENTER,
-                ),
+                slogan_box,
                 header_row,
                 ft.Container(width=1, height=20, bgcolor=th.DIVIDER,
                              margin=ft.Margin.symmetric(horizontal=6)),
@@ -227,6 +237,15 @@ def main(page: ft.Page) -> None:
     )
     build_header_row()
 
+    def fit_header(width: float | None = None) -> None:
+        """1120 宽下顶栏放不下座右铭：按窗口宽度收起，避免按钮被裁切。"""
+        current = width or page.width or page.window.width or 1280
+        slogan_box.visible = current >= 1240
+        try:
+            page.update()
+        except Exception:
+            logger.debug("顶栏自适应刷新失败", exc_info=True)
+
     # 双击顶栏空白处 = 最大化/还原；拖动交给 start_dragging。
     # 不用 WindowDragArea：它的 on_double_tap 在 Windows 上收不到事件（原生拖动区把手势吃掉了）。
     header = ft.GestureDetector(
@@ -235,9 +254,12 @@ def main(page: ft.Page) -> None:
         on_pan_start=lambda e: page.run_task(page.window.start_dragging),
     )
 
-    nav_column = ft.Column(spacing=2, expand=True)
+    # 导航在 600 高度下仍要能看全 10 个模块：主体区可滚动，底部信息固定。
+    nav_column = ft.Column(spacing=2, expand=True, scroll=ft.ScrollMode.AUTO)
+    nav_footer = ft.Container()
     nav_box = ft.Container(
-        content=nav_column, width=th.NAV_WIDTH, bgcolor=th.CARD,
+        content=ft.Column([nav_column, nav_footer], spacing=0, expand=True),
+        width=th.NAV_WIDTH, bgcolor=th.CARD,
         border=ft.Border.only(right=ft.BorderSide(1, th.DIVIDER)),
     )
 
@@ -261,6 +283,8 @@ def main(page: ft.Page) -> None:
     def refresh_status() -> None:
         sync_text.value = sync_client.status
         sync_text.color = th.TEXT_MUTED if "已同步" in sync_client.status else th.ACCENT
+        # 限宽后可能被省略，完整状态放进 tooltip
+        sync_text.tooltip = sync_client.status
         # 队列可见性：单条聚合查询，告诉用户「还有多少没传上去 / 有多少被拒」。
         pending, failed = queue_counts()
         parts = []
@@ -319,10 +343,10 @@ def main(page: ft.Page) -> None:
             ft.Container(
                 content=ft.Row(
                     [ft.Icon(ico("WINDSOCK_OUTLINED"), size=22, color=th.PRIMARY),
-                     ft.Text("定风波", size=16, color=th.TEXT, weight="bold")],
+                     ft.Text("定风波", size=th.FONT_SECTION_TITLE, color=th.TEXT, weight="bold")],
                     spacing=10,
                 ),
-                padding=ft.Padding.symmetric(vertical=22, horizontal=18),
+                padding=ft.Padding.symmetric(vertical=20, horizontal=18),
             )
         ]
         for key, label in _module_list():
@@ -333,19 +357,21 @@ def main(page: ft.Page) -> None:
                         [
                             ft.Icon(ico(NAV.get(key, "CIRCLE_OUTLINED")), size=20,
                                     color=th.PRIMARY if active else th.TEXT_MUTED),
-                            ft.Text(label, size=13, color=th.PRIMARY if active else th.TEXT_MUTED,
-                                    weight="bold" if active else "normal"),
+                            ft.Text(label, size=th.FONT_NAV,
+                                    color=th.PRIMARY if active else th.TEXT_MUTED,
+                                    weight="bold" if active else "normal",
+                                    max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+                                    expand=True),
                         ],
                         spacing=12,
                     ),
                     bgcolor=th.PRIMARY_LIGHT if active else None,
                     border_radius=8,
-                    padding=ft.Padding.symmetric(vertical=10, horizontal=14),
+                    padding=ft.Padding.symmetric(vertical=9, horizontal=14),
                     margin=ft.Margin.symmetric(horizontal=10),
                     on_click=lambda e, k=key: navigate(k),
                 )
             )
-        controls.append(ft.Container(expand=True))
         # 帮助不是业务模块：不进 MODULES，也不参与 Ctrl+数字与设置里的排序
         help_active = state["current"] == "help"
         controls.append(
@@ -354,35 +380,46 @@ def main(page: ft.Page) -> None:
                     [
                         ft.Icon(ico("HELP_OUTLINE"), size=20,
                                 color=th.PRIMARY if help_active else th.TEXT_MUTED),
-                        ft.Text("帮助", size=13,
+                        ft.Text("帮助", size=th.FONT_NAV,
                                 color=th.PRIMARY if help_active else th.TEXT_MUTED,
-                                weight="bold" if help_active else "normal"),
+                                weight="bold" if help_active else "normal",
+                                max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+                                expand=True),
                     ],
                     spacing=12,
                 ),
                 bgcolor=th.PRIMARY_LIGHT if help_active else None,
                 border_radius=8,
-                padding=ft.Padding.symmetric(vertical=10, horizontal=14),
+                padding=ft.Padding.symmetric(vertical=9, horizontal=14),
                 margin=ft.Margin.symmetric(horizontal=10),
                 on_click=lambda e: navigate("help"),
             )
         )
-        controls.append(
-            ft.Container(
-                content=ft.Column(
-                    [
-                        ft.Row([ft.Container(width=7, height=7, bgcolor=th.PRIMARY, border_radius=4),
-                                ft.Text("本地优先 · 离线可用", size=10, color=th.TEXT_MUTED)], spacing=6),
-                        ft.Text(f"数据目录 {DATA_DIR}", size=9, color=th.TEXT_MUTED),
-                        ft.Text("Ctrl+K 搜索", size=9, color=th.TEXT_MUTED),
-                    ],
-                    spacing=4,
-                ),
-                border=ft.Border.only(top=ft.BorderSide(1, th.DIVIDER)),
-                padding=ft.Padding.all(16),
-            )
-        )
         nav_column.controls = controls
+        # 辅助信息固定在导航底部：字号仍为 12，只靠颜色弱化。
+        nav_footer.content = ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Container(width=7, height=7, bgcolor=th.PRIMARY, border_radius=4),
+                        ft.Text("本地优先 · 离线可用", size=th.FONT_CAPTION,
+                                color=th.TEXT_MUTED, max_lines=1,
+                                overflow=ft.TextOverflow.ELLIPSIS, expand=True),
+                    ],
+                    spacing=6,
+                ),
+                ft.Text(
+                    f"数据目录 {DATA_DIR}", size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+                    max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+                    tooltip=str(DATA_DIR),
+                ),
+                ft.Text("Ctrl+K 搜索", size=th.FONT_CAPTION, color=th.TEXT_MUTED),
+            ],
+            spacing=4,
+            tight=True,
+        )
+        nav_footer.border = ft.Border.only(top=ft.BorderSide(1, th.DIVIDER))
+        nav_footer.padding = ft.Padding.all(14)
 
     def open_diary_day(day: date) -> None:
         diary_ui.set_selected(day)
@@ -492,6 +529,8 @@ def main(page: ft.Page) -> None:
     theme_switch.bind(apply_theme)
     _render_nav()
     page.add(ft.Row([nav_box, ft.Column([header, body], expand=True)], expand=True, spacing=0))
+    fit_header()
+    page.on_resize = lambda e: fit_header(e.width)
     refresh()
     bind_sync(page, refresh_status, lambda: refresh(force=False))
     page.on_keyboard_event = on_keyboard

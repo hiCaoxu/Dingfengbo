@@ -38,9 +38,9 @@ def _row(icon: str, title: str, subtitle: str, on_click, tag: str = "") -> ft.Co
         ft.Icon(ico(icon), size=16, color=th.PRIMARY),
         ft.Column(
             [
-                ft.Text(title, size=12, color=th.TEXT, weight="bold", max_lines=1,
-                        overflow=ft.TextOverflow.ELLIPSIS),
-                ft.Text(subtitle, size=10, color=th.TEXT_MUTED, max_lines=1,
+                ft.Text(title, size=th.FONT_CARD_TITLE, color=th.TEXT, weight="bold",
+                        max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
+                ft.Text(subtitle, size=th.FONT_CAPTION, color=th.TEXT_MUTED, max_lines=1,
                         overflow=ft.TextOverflow.ELLIPSIS),
             ],
             spacing=2,
@@ -51,7 +51,7 @@ def _row(icon: str, title: str, subtitle: str, on_click, tag: str = "") -> ft.Co
     if tag:
         controls.append(
             ft.Container(
-                ft.Text(tag, size=9, color=th.TEXT_MUTED),
+                ft.Text(tag, size=th.FONT_CAPTION, color=th.TEXT_MUTED),
                 bgcolor=th.PRIMARY_LIGHT,
                 border_radius=8,
                 padding=ft.Padding.symmetric(vertical=2, horizontal=6),
@@ -76,7 +76,8 @@ def open_command_palette(
 ) -> ft.AlertDialog:
     """打开命令面板。``navigate/refresh`` 沿用主界面回调，避免重复实现路由。"""
     results = ft.Column(spacing=2, scroll=ft.ScrollMode.AUTO, height=360)
-    status = ft.Text("输入关键字，或直接选择下面的命令", size=10, color=th.TEXT_MUTED)
+    status = ft.Text("输入关键字，或直接选择下面的命令", size=th.FONT_CAPTION,
+                     color=th.TEXT_MUTED)
     query_field = ft.TextField(
         hint_text="搜索任务 / 笔记 / 日记 / 收支 / 娱乐，或输入命令…",
         autofocus=True,
@@ -208,7 +209,8 @@ def open_command_palette(
                 continue
             controls.append(
                 ft.Container(
-                    ft.Text(hits[0].label, size=10, color=th.TEXT_MUTED, weight="bold"),
+                    ft.Text(hits[0].label, size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+                            weight="bold"),
                     padding=ft.Padding.only(left=6, top=6, bottom=2),
                 )
             )
@@ -231,7 +233,8 @@ def open_command_palette(
         if not controls:
             controls.append(
                 ft.Container(
-                    ft.Text("没有匹配结果，试试「任务 今天 高优先级」这类过滤", size=11,
+                    ft.Text("没有匹配结果，试试「任务 今天 高优先级」这类过滤",
+                            size=th.FONT_CAPTION,
                             color=th.TEXT_MUTED),
                     padding=ft.Padding.all(12),
                 )
@@ -299,7 +302,7 @@ def open_command_palette(
             ft.Container(
                 ft.Text(
                     "支持自然语言过滤：任务 今天 高优先级 / 笔记 AI / 日记 本月",
-                    size=10, color=th.TEXT_MUTED,
+                    size=th.FONT_CAPTION, color=th.TEXT_MUTED,
                 ),
                 padding=ft.Padding.only(left=4, top=2),
             ),
@@ -313,9 +316,10 @@ def open_command_palette(
         title=ft.Row(
             [
                 ft.Icon(ico("SEARCH_OUTLINED"), size=18, color=th.PRIMARY),
-                ft.Text("搜索与命令", size=14, color=th.TEXT, weight="bold"),
+                ft.Text("搜索与命令", size=th.FONT_SECTION_TITLE, color=th.TEXT,
+                        weight="bold"),
                 ft.Container(expand=True),
-                ft.Text("Ctrl+K", size=10, color=th.TEXT_MUTED),
+                ft.Text("Ctrl+K", size=th.FONT_CAPTION, color=th.TEXT_MUTED),
             ],
             spacing=8,
         ),

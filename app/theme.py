@@ -56,6 +56,27 @@ NAV_WIDTH = 200
 CARD_RADIUS = 12
 CARD_PADDING = 16
 
+# ---------------------------------------------------------------- 字号 token
+# 硬性规则：用户可见文字不得小于 FONT_MIN。辅助文字只靠颜色/字重弱化。
+# 层级：PAGE_TITLE > SECTION_TITLE > CARD_TITLE > BODY(=CAPTION=MIN)。
+FONT_MIN = 12
+FONT_BODY = 12
+FONT_CAPTION = 12
+FONT_CARD_TITLE = 13
+FONT_SECTION_TITLE = 15
+FONT_PAGE_TITLE = 20
+# 导航/顶栏标签与正文同级，靠颜色区分激活态
+FONT_NAV = 13
+# 指标卡上的大数字
+FONT_METRIC = 22
+
+# 同行卡片常用高度：内容过多时卡片内部滚动，不让内容把卡片撑高。
+CARD_HEIGHT_SM = 132
+CARD_HEIGHT = 180
+CARD_HEIGHT_LG = 240
+# 三栏/看板列的固定高度（600 高窗口下仍可完整显示）
+COLUMN_HEIGHT = 460
+
 _mode = "light"
 
 # 默认值先落成模块属性，兼容仍按常量导入的历史代码。
@@ -90,16 +111,33 @@ def card_border() -> Border:
     return ft.Border.all(1, DIVIDER)
 
 
-def title_style(size: int = 13, color: str | None = None, bold: bool = True) -> TextStyle:
-    return TextStyle(size=size, color=color or TEXT, weight="bold" if bold else "normal")
+def title_style(size: int = FONT_CARD_TITLE, color: str | None = None, bold: bool = True) -> TextStyle:
+    return TextStyle(size=max(size, FONT_MIN), color=color or TEXT, weight="bold" if bold else "normal")
 
 
-def body_style(size: int = 12, color: str | None = None) -> TextStyle:
-    return TextStyle(size=size, color=color or TEXT_MUTED)
+def body_style(size: int = FONT_BODY, color: str | None = None) -> TextStyle:
+    return TextStyle(size=max(size, FONT_MIN), color=color or TEXT_MUTED)
 
 
-def money_style(size: int = 20) -> TextStyle:
-    return TextStyle(size=size, color=TEXT, weight="bold")
+def money_style(size: int = FONT_METRIC) -> TextStyle:
+    return TextStyle(size=max(size, FONT_MIN), color=TEXT, weight="bold")
+
+
+def page_title_style(color: str | None = None) -> TextStyle:
+    return TextStyle(size=FONT_PAGE_TITLE, color=color or TEXT, weight="bold")
+
+
+def section_title_style(color: str | None = None) -> TextStyle:
+    return TextStyle(size=FONT_SECTION_TITLE, color=color or TEXT, weight="bold")
+
+
+def card_title_style(color: str | None = None) -> TextStyle:
+    return TextStyle(size=FONT_CARD_TITLE, color=color or TEXT, weight="bold")
+
+
+def caption_style(color: str | None = None) -> TextStyle:
+    """辅助文字：只靠颜色弱化，字号仍为 FONT_MIN。"""
+    return TextStyle(size=FONT_CAPTION, color=color or TEXT_MUTED)
 
 
 def card_padding() -> ft.Padding:
@@ -166,22 +204,30 @@ def _patch_control_fonts() -> None:
 
 
 def _text_theme() -> ft.TextTheme:
-    """内部控件（输入框、下拉、按钮）走 TextTheme，同样带上中文回退。"""
+    """内部控件（输入框、下拉、按钮）走 TextTheme，同样带上中文回退。
 
-    def style() -> ft.TextStyle:
-        return ft.TextStyle(font_family=FONT_LATIN, font_family_fallback=list(FONT_FALLBACK))
+    字号显式给出并全部 >= FONT_MIN：Material 默认的 labelSmall 只有 11 号，
+    会让 Checkbox/Dropdown 之类的内部文字跌破最小字号。
+    """
+
+    def style(size: int = FONT_BODY) -> ft.TextStyle:
+        return ft.TextStyle(
+            size=max(size, FONT_MIN),
+            font_family=FONT_LATIN,
+            font_family_fallback=list(FONT_FALLBACK),
+        )
 
     return ft.TextTheme(
-        body_large=style(),
-        body_medium=style(),
-        body_small=style(),
-        label_large=style(),
-        label_medium=style(),
-        label_small=style(),
-        title_large=style(),
-        title_medium=style(),
-        title_small=style(),
-        headline_small=style(),
+        body_large=style(14),
+        body_medium=style(13),
+        body_small=style(FONT_BODY),
+        label_large=style(14),
+        label_medium=style(13),
+        label_small=style(FONT_BODY),
+        title_large=style(FONT_PAGE_TITLE),
+        title_medium=style(FONT_SECTION_TITLE),
+        title_small=style(FONT_CARD_TITLE),
+        headline_small=style(FONT_SECTION_TITLE),
     )
 
 

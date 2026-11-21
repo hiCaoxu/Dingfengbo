@@ -501,7 +501,7 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
                 custom_panel,
                 ft.Column(
                     [
-                        ft.Text("提前提醒（可多选）", size=11, color=th.TEXT_MUTED),
+                        ft.Text("提前提醒（可多选）", size=th.FONT_CAPTION, color=th.TEXT_MUTED),
                         remind_chip_row,
                         remind_time,
                     ],
@@ -774,7 +774,8 @@ def open_diet_dialog(page: ft.Page, item: Diet | None = None, on_done: Callable 
     dialog = modal(
         page, "记录饮食" if not item else "编辑饮食",
         ft.Column([ft.Row([meal, food], spacing=12), ft.Row([grams, calories], spacing=12), day, note,
-                   ft.Text("热量按《中国食物成分表（第 6 版）》每 100g 可食部自动计算，可手动覆盖。", size=11, color=th.TEXT_MUTED)],
+                   ft.Text("热量按《中国食物成分表（第 6 版）》每 100g 可食部自动计算，可手动覆盖。",
+                           size=th.FONT_CAPTION, color=th.TEXT_MUTED)],
                   spacing=10, tight=True),
         [ft.TextButton("取消", on_click=lambda e: _close_and_refresh(page, dialog, None)),
          ft.TextButton("重算热量", on_click=recalc), primary_button("保存", save)],
@@ -1005,8 +1006,8 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
     ai_provider_dd.on_select = on_provider_change
 
     # 未保存配置的连通性自检：后台线程发请求，回到 UI 线程更新提示。
-    sync_probe_text = ft.Text("", size=11, color=th.TEXT_MUTED)
-    ai_probe_text = ft.Text("", size=11, color=th.TEXT_MUTED)
+    sync_probe_text = ft.Text("", size=th.FONT_CAPTION, color=th.TEXT_MUTED)
+    ai_probe_text = ft.Text("", size=th.FONT_CAPTION, color=th.TEXT_MUTED)
 
     def _run_probe(target: ft.Text, work: Callable[[], str]) -> None:
         target.value = "正在测试连接…"
@@ -1067,7 +1068,7 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
             if stats.get("error")
             else ""
         ),
-        size=11,
+        size=th.FONT_CAPTION,
         color=th.ACCENT if stats.get("error") else th.TEXT_MUTED,
     )
 
@@ -1091,7 +1092,8 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
             ft.Container(height=1, bgcolor=th.DIVIDER),
             ft.Row(
                 [
-                    ft.Text(f"被拒明细（最近 {len(issues)} 条）", size=12, color=th.TEXT, weight="bold"),
+                    ft.Text(f"被拒明细（最近 {len(issues)} 条）", size=th.FONT_CARD_TITLE,
+                            color=th.TEXT, weight="bold"),
                     ft.Container(expand=True),
                     ft.TextButton("全部重试", on_click=retry_all),
                 ]
@@ -1099,28 +1101,32 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
             *[
                 ft.Row(
                     [
-                        ft.Text(table_label(issue.table_name), size=11, color=th.TEXT, width=48),
+                        ft.Text(table_label(issue.table_name), size=th.FONT_CAPTION,
+                                color=th.TEXT, width=48),
                         ft.Text(
                             issue.reason or "未提供原因",
-                            size=11, color=th.TEXT_MUTED, expand=True,
+                            size=th.FONT_CAPTION, color=th.TEXT_MUTED, expand=True,
                             max_lines=2, overflow=ft.TextOverflow.ELLIPSIS,
                         ),
-                        ft.Text(issue.record_id[:8], size=10, color=th.TEXT_MUTED),
+                        ft.Text(issue.record_id[:8], size=th.FONT_CAPTION,
+                                color=th.TEXT_MUTED),
                     ],
                     spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 )
                 for issue in issues
             ],
             ft.Text(
                 "被拒记录已退出待同步队列，不会反复上传；修改该记录会自动重试，"
                 "若载荷本身不合法则重试后仍会被拒。",
-                size=10, color=th.TEXT_MUTED,
+                size=th.FONT_CAPTION, color=th.TEXT_MUTED,
             ),
         ]
 
     # 本地备份：自动每日一次，也可手动触发与打开目录
     last_backup = settings.get("last_backup_date") or "从未备份"
-    backup_text = ft.Text(f"最近备份：{last_backup}", size=11, color=th.TEXT_MUTED)
+    backup_text = ft.Text(f"最近备份：{last_backup}", size=th.FONT_CAPTION,
+                          color=th.TEXT_MUTED)
 
     def backup_now(_):
         # 备份要拷贝整个 SQLite 文件，放事件循环里会卡住窗口，改到后台线程执行。
@@ -1207,28 +1213,46 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
         elif theme_dd.value == "亮色" and th.is_dark():
             theme_switch.apply("light")
 
+    def _group(title: str) -> ft.Control:
+        return ft.Column(
+            [
+                ft.Text(title, size=th.FONT_CARD_TITLE, color=th.TEXT, weight="bold"),
+                ft.Container(height=1, bgcolor=th.DIVIDER),
+            ],
+            spacing=6,
+            tight=True,
+        )
+
     dialog = modal(
         page, "设置",
         ft.Column(
             [
+                # 同步
+                _group("同步"),
                 server, token,
-                ft.Row([ft.TextButton("测试同步连接", on_click=test_sync), sync_probe_text], spacing=10),
+                ft.Row([ft.TextButton("测试同步连接", on_click=test_sync), sync_probe_text],
+                       spacing=10, wrap=True),
+                enabled,
                 queue_note,
                 *issue_section,
-                ft.Row([height, gender], spacing=12), enabled,
-                ft.Container(height=1, bgcolor=th.DIVIDER),
-                ft.Text("AI 助手（国产大模型）", size=12, color=th.TEXT, weight="bold"),
+                # 健康档案
+                _group("健康档案"),
+                ft.Row([height, gender], spacing=12),
+                # AI
+                _group("AI 助手（国产大模型）"),
                 ai_provider_dd,
                 ft.Row([ai_base_url, ai_model], spacing=12),
                 ai_key,
-                ft.Row([ft.TextButton("测试 AI 连接", on_click=test_ai), ai_probe_text], spacing=10),
+                ft.Row([ft.TextButton("测试 AI 连接", on_click=test_ai), ai_probe_text],
+                       spacing=10, wrap=True),
                 ft.Text(
                     "隐私提示：使用 AI 助手时，被「@引用」的数据（任务、日记、笔记、收支等）"
                     "会通过网络发送至你所配置的大模型服务商；请勿在引用范围内填写密码等敏感信息。"
                     "首次发送前还会再次确认。",
-                    size=11, color=th.TEXT_MUTED,
+                    size=th.FONT_CAPTION, color=th.TEXT_MUTED,
                 ),
-                ft.Container(height=1, bgcolor=th.DIVIDER),
+                # 数据
+                _group("数据"),
                 ft.Row(
                     [
                         ft.TextButton("立即备份", on_click=backup_now),
@@ -1261,16 +1285,20 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
                 ),
                 ft.Text(
                     "每天首次启动会自动备份一次，默认保留最近 7 份（可在备份恢复中心改目录/份数）。",
-                    size=10, color=th.TEXT_MUTED,
+                    size=th.FONT_CAPTION, color=th.TEXT_MUTED,
                 ),
-                ft.Container(height=1, bgcolor=th.DIVIDER),
-                ft.Text("外观与系统集成", size=12, color=th.TEXT, weight="bold"),
+                # 外观
+                _group("外观与导航"),
                 ft.Row([theme_dd], spacing=12),
                 autostart,
                 close_to_tray,
-                ft.Text("导航模块（取消勾选即隐藏，↑↓ 调整顺序）", size=11, color=th.TEXT_MUTED),
+                ft.Text("导航模块（取消勾选即隐藏，↑↓ 调整顺序）",
+                        size=th.FONT_CAPTION, color=th.TEXT_MUTED),
                 order_box,
-                ft.Text(f"数据目录：{DATA_DIR}", size=11, color=th.TEXT_MUTED),
+                # 系统
+                _group("系统"),
+                ft.Text(f"数据目录：{DATA_DIR}", size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+                        max_lines=2, overflow=ft.TextOverflow.ELLIPSIS),
             ],
             spacing=10, tight=True, scroll=ft.ScrollMode.AUTO, height=520,
         ),

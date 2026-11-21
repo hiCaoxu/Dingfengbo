@@ -23,7 +23,7 @@ from ..services.timeline import (
 )
 from .async_utils import background_section
 from .state import state
-from .widgets import card, empty, modal, primary_button, snack, tag_chip
+from .widgets import card, empty, modal, page_header, primary_button, snack, tag_chip
 
 logger = logging.getLogger(__name__)
 
@@ -96,13 +96,14 @@ def open_links_dialog(page: ft.Page, item: TimelineItem, refresh) -> ft.AlertDia
     def render_links() -> None:
         rows = links_for(item.table, item.record_id)
         if not rows:
-            links_box.controls = [ft.Text("还没有关联", size=11, color=th.TEXT_MUTED)]
+            links_box.controls = [ft.Text("还没有关联", size=th.FONT_CAPTION,
+                                          color=th.TEXT_MUTED)]
             return
         links_box.controls = [
             ft.Row(
                 [
-                    ft.Text(link["label"], size=9, color=th.PRIMARY),
-                    ft.Text(link["title"], size=11, color=th.TEXT, expand=True,
+                    ft.Text(link["label"], size=th.FONT_CAPTION, color=th.PRIMARY),
+                    ft.Text(link["title"], size=th.FONT_BODY, color=th.TEXT, expand=True,
                             max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
                     ft.TextButton(
                         "取消关联",
@@ -139,11 +140,12 @@ def open_links_dialog(page: ft.Page, item: TimelineItem, refresh) -> ft.AlertDia
                 ft.Container(
                     ft.Row(
                         [
-                            ft.Text(row["label"], size=9, color=th.TEXT_MUTED),
-                            ft.Text(row["title"], size=11, color=th.TEXT, expand=True,
+                            ft.Text(row["label"], size=th.FONT_CAPTION, color=th.TEXT_MUTED),
+                            ft.Text(row["title"], size=th.FONT_BODY, color=th.TEXT, expand=True,
                                     max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
                         ],
                         spacing=6,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     data=row["record_id"],
                     padding=ft.Padding.symmetric(vertical=5, horizontal=6),
@@ -151,7 +153,9 @@ def open_links_dialog(page: ft.Page, item: TimelineItem, refresh) -> ft.AlertDia
                     on_click=pick,
                 )
             )
-        targets_box.controls = controls or [ft.Text("没有匹配记录", size=10, color=th.TEXT_MUTED)]
+        targets_box.controls = controls or [
+            ft.Text("没有匹配记录", size=th.FONT_CAPTION, color=th.TEXT_MUTED)
+        ]
         page.update()
 
     def add(_) -> None:
@@ -211,10 +215,10 @@ def open_links_dialog(page: ft.Page, item: TimelineItem, refresh) -> ft.AlertDia
         f"关联记录 · {item.title[:24]}",
         ft.Column(
             [
-                ft.Text("已有关联", size=11, color=th.TEXT, weight="bold"),
+                ft.Text("已有关联", size=th.FONT_CARD_TITLE, color=th.TEXT, weight="bold"),
                 links_box,
                 ft.Container(height=1, bgcolor=th.DIVIDER),
-                ft.Text("新增关联", size=11, color=th.TEXT, weight="bold"),
+                ft.Text("新增关联", size=th.FONT_CARD_TITLE, color=th.TEXT, weight="bold"),
                 search_field,
                 targets_box,
             ],
@@ -307,12 +311,15 @@ def _render(page, refresh, navigate, on_open_note, on_open_diary, data) -> ft.Co
         rows.append(
             ft.Row(
                 [
-                    ft.Text(f"{day.month}月{day.day}日", size=12, color=th.TEXT, weight="bold"),
-                    ft.Text(weekday_cn(day), size=10, color=th.TEXT_MUTED),
+                    ft.Text(f"{day.month}月{day.day}日", size=th.FONT_CARD_TITLE,
+                            color=th.TEXT, weight="bold"),
+                    ft.Text(weekday_cn(day), size=th.FONT_CAPTION, color=th.TEXT_MUTED),
                     ft.Container(expand=True),
-                    ft.Text(f"{len(day_items)} 条", size=10, color=th.TEXT_MUTED),
+                    ft.Text(f"{len(day_items)} 条", size=th.FONT_CAPTION,
+                            color=th.TEXT_MUTED),
                 ],
                 spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
             )
         )
         for item in day_items:
@@ -331,13 +338,15 @@ def _render(page, refresh, navigate, on_open_note, on_open_diary, data) -> ft.Co
                             ),
                             ft.Column(
                                 [
-                                    ft.Text(item.title, size=12, color=th.TEXT, weight="bold",
+                                    ft.Text(item.title, size=th.FONT_CARD_TITLE,
+                                            color=th.TEXT, weight="bold",
                                             max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
                                     ft.Text(
                                         " · ".join(
                                             x for x in (item.label, item.detail) if x
                                         ),
-                                        size=10, color=th.TEXT_MUTED, max_lines=1,
+                                        size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+                                        max_lines=1,
                                         overflow=ft.TextOverflow.ELLIPSIS,
                                     ),
                                 ],
@@ -365,32 +374,20 @@ def _render(page, refresh, navigate, on_open_note, on_open_diary, data) -> ft.Co
     if not rows:
         rows = [empty("这个时间段还没有记录")]
 
-    header = ft.Row(
-        [
-            ft.Row(
-                [
-                    ft.Icon(ico("TIMELINE"), size=20, color=th.PRIMARY),
-                    ft.Text("时间轴", size=15, color=th.TEXT, weight="bold"),
-                    ft.Text(
-                        f"{data['start'].isoformat()} ~ {data['end'].isoformat()} · {len(items)} 条",
-                        size=11, color=th.TEXT_MUTED,
-                    ),
-                ],
-                spacing=8,
-            ),
-            ft.Container(expand=True),
-            range_row,
-        ],
-        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+    header = page_header(
+        "时间轴",
+        f"{data['start'].isoformat()} ~ {data['end'].isoformat()} · {len(items)} 条",
+        actions=[range_row],
     )
 
     filters = card(
         ft.Column(
             [
-                ft.Text("模块", size=10, color=th.TEXT_MUTED),
+                ft.Text("模块", size=th.FONT_CAPTION, color=th.TEXT_MUTED),
                 module_chips,
-                ft.Text("标签（跨模块）", size=10, color=th.TEXT_MUTED),
-                tag_cloud if tags else ft.Text("还没有标签，去待办或笔记里加吧", size=10,
+                ft.Text("标签（跨模块）", size=th.FONT_CAPTION, color=th.TEXT_MUTED),
+                tag_cloud if tags else ft.Text("还没有标签，去待办或笔记里加吧",
+                                               size=th.FONT_CAPTION,
                                                color=th.TEXT_MUTED),
             ],
             spacing=8,

@@ -23,23 +23,30 @@ def card(
     height: int | float | None = None,
     width: int | float | None = None,
     alignment: ft.Alignment | None = None,
+    title_size: int = th.FONT_CARD_TITLE,
 ) -> ft.Container:
     header: list[ft.Control] = []
     if title:
         header.append(
             ft.Row(
                 [
-                    ft.Text(title, size=13, color=th.TEXT, weight="bold"),
+                    ft.Text(title, size=title_size, color=th.TEXT, weight="bold"),
                     trailing or ft.Container(),
                 ],
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
             )
         )
     body = header + ([content] if content is not None else [])
+    # 固定高度的卡片：内容用 expand 撑满剩余空间，多出来的部分在卡片内部滚动，
+    # 而不是把卡片顶出一截和同行的卡片底边不齐。
+    if height is not None and isinstance(content, ft.Column) and content.expand is None:
+        content.expand = True
+    fills = bool(expand) or height is not None
     # expand 必须一路传给内层 Column：否则卡片高度撑满了，内部带 expand 的
     # 列表/滚动区拿不到高度，Flet 会渲染成一块空白。
     return ft.Container(
-        content=ft.Column(body, spacing=12, tight=not expand, expand=True if expand else None),
+        content=ft.Column(body, spacing=12, tight=not fills, expand=True if fills else None),
         bgcolor=th.CARD,
         border=th.card_border(),
         border_radius=th.CARD_RADIUS,
@@ -50,6 +57,294 @@ def card(
         width=width,
         alignment=alignment,
     )
+
+
+def equal_height_row(
+    controls: list[ft.Control],
+    spacing: int = 14,
+    height: int | float | None = None,
+    wrap: bool = False,
+) -> ft.Row:
+    """同行卡片：统一垂直拉伸 + 可选统一高度，避免一张高一张矮、底边不齐。
+
+    子控件自身若已有固定高度，``height`` 会覆盖它；否则仅靠 STRETCH 让
+    Row 内所有卡片被拉成同一高度（以最高者为基准）。
+    """
+    if height is not None:
+        for control in controls:
+            if isinstance(control, ft.Container):
+                control.height = height
+    row = ft.Row(
+        controls,
+        spacing=spacing,
+        wrap=wrap,
+        run_spacing=spacing,
+        vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+    )
+    if height is not None:
+        row.height = height
+    return row
+
+
+def page_header(
+    title: str,
+    subtitle: str | None = None,
+    actions: list[ft.Control] | None = None,
+) -> ft.Control:
+    """统一页面标题区：左标题（+说明），右动作区。"""
+    left: list[ft.Control] = [
+        ft.Text(title, size=th.FONT_PAGE_TITLE, color=th.TEXT, weight="bold")
+    ]
+    if subtitle:
+        left.append(
+            ft.Text(
+                subtitle,
+                size=th.FONT_CAPTION,
+                color=th.TEXT_MUTED,
+                max_lines=2,
+                overflow=ft.TextOverflow.ELLIPSIS,
+            )
+        )
+    return ft.Row(
+        [
+            ft.Column(left, spacing=4, tight=True, expand=True),
+            ft.Row(actions or [], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+        ],
+        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        spacing=12,
+    )
+
+
+def toolbar_row(controls: list[ft.Control], spacing: int = 8) -> ft.Row:
+    """统一筛选/工具条：可换行，避免 1120 宽下按钮被裁切。"""
+    return ft.Row(
+        controls,
+        spacing=spacing,
+        wrap=True,
+        run_spacing=spacing,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+
+
+def metric_card(
+    label: str,
+    value: str,
+    hint: str | None = None,
+    value_color: str | None = None,
+    height: int | float | None = th.CARD_HEIGHT_SM,
+    expand: int | None = None,
+    on_click=None,
+) -> ft.Container:
+    """统一指标卡：标题/数值/说明三段，行内等高靠 equal_height_row 保证。"""
+    body: list[ft.Control] = [
+        ft.Text(
+            label,
+            size=th.FONT_CAPTION,
+            color=th.TEXT_MUTED,
+            max_lines=1,
+            overflow=ft.TextOverflow.ELLIPSIS,
+        ),
+        ft.Text(
+            value,
+            size=th.FONT_METRIC,
+            color=value_color or th.TEXT,
+            weight="bold",
+            max_lines=1,
+            overflow=ft.TextOverflow.ELLIPSIS,
+        ),
+    ]
+    if hint:
+        body.append(
+            ft.Text(
+                hint,
+                size=th.FONT_CAPTION,
+                color=th.TEXT_MUTED,
+                max_lines=2,
+                overflow=ft.TextOverflow.ELLIPSIS,
+            )
+        )
+    return ft.Container(
+        content=ft.Column(body, spacing=4, tight=True, alignment=ft.MainAxisAlignment.CENTER),
+        bgcolor=th.CARD,
+        border=th.card_border(),
+        border_radius=th.CARD_RADIUS,
+        padding=ft.Padding.symmetric(vertical=12, horizontal=14),
+        height=height,
+        expand=expand,
+        on_click=on_click,
+        alignment=ft.Alignment.CENTER_LEFT,
+    )
+
+
+def status_badge(text: str, tone: str = "muted") -> ft.Container:
+    """统一状态标签；颜色区分语义，字号不低于 FONT_MIN。"""
+    palette = {
+        "primary": (th.PRIMARY_LIGHT, th.PRIMARY),
+        "accent": (th.ACCENT_LIGHT, th.ACCENT),
+        "danger": (th.ACCENT_LIGHT, th.DANGER),
+        "muted": (th.SUBTLE, th.TEXT_MUTED),
+    }
+    bg, fg = palette.get(tone, palette["muted"])
+    return ft.Container(
+        content=ft.Text(text, size=th.FONT_CAPTION, color=fg, max_lines=1,
+                        overflow=ft.TextOverflow.ELLIPSIS),
+        bgcolor=bg,
+        border_radius=10,
+        padding=ft.Padding.symmetric(vertical=2, horizontal=8),
+    )
+
+
+def list_row(
+    title: str,
+    subtitle: str | None = None,
+    leading: ft.Control | None = None,
+    trailing: ft.Control | None = None,
+    on_click=None,
+    padding: ft.Padding | None = None,
+) -> ft.Container:
+    """统一列表项：左侧可选图标、中间标题+副标题、右侧操作。"""
+    middle: list[ft.Control] = [
+        ft.Text(
+            title,
+            size=th.FONT_BODY,
+            color=th.TEXT,
+            weight="bold",
+            max_lines=1,
+            overflow=ft.TextOverflow.ELLIPSIS,
+        )
+    ]
+    if subtitle:
+        middle.append(
+            ft.Text(
+                subtitle,
+                size=th.FONT_CAPTION,
+                color=th.TEXT_MUTED,
+                max_lines=2,
+                overflow=ft.TextOverflow.ELLIPSIS,
+            )
+        )
+    controls: list[ft.Control] = []
+    if leading is not None:
+        controls.append(leading)
+    controls.append(ft.Column(middle, spacing=2, tight=True, expand=True))
+    if trailing is not None:
+        controls.append(trailing)
+    return ft.Container(
+        content=ft.Row(
+            controls,
+            spacing=10,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        padding=padding or ft.Padding.symmetric(vertical=8, horizontal=10),
+        border=ft.Border.only(bottom=ft.BorderSide(1, th.DIVIDER)),
+        on_click=on_click,
+    )
+
+
+def state_container(
+    kind: str = "empty",
+    message: str = "",
+    hint: str | None = None,
+    on_retry: Callable | None = None,
+    height: int | float | None = None,
+) -> ft.Container:
+    """统一的状态块（loading/empty/error），可与同行卡片等高。"""
+    icons = {
+        "loading": "HOURGLASS_EMPTY",
+        "empty": "NOTE_ADD_OUTLINED",
+        "error": "ERROR_OUTLINE",
+    }
+    colors = {
+        "loading": th.TEXT_MUTED,
+        "empty": th.DIVIDER,
+        "error": th.ACCENT,
+    }
+    body: list[ft.Control] = [
+        ft.Icon(ico(icons.get(kind, "NOTE_ADD_OUTLINED")), size=28,
+                color=colors.get(kind, th.DIVIDER)),
+        ft.Text(
+            message,
+            size=th.FONT_BODY,
+            color=th.TEXT_MUTED,
+            text_align=ft.TextAlign.CENTER,
+            max_lines=3,
+            overflow=ft.TextOverflow.ELLIPSIS,
+        ),
+    ]
+    if hint:
+        body.append(
+            ft.Text(
+                hint,
+                size=th.FONT_CAPTION,
+                color=th.TEXT_MUTED,
+                text_align=ft.TextAlign.CENTER,
+                max_lines=3,
+                overflow=ft.TextOverflow.ELLIPSIS,
+            )
+        )
+    if on_retry is not None:
+        body.append(ft.TextButton("重试", on_click=lambda e: on_retry()))
+    return ft.Container(
+        content=ft.Column(
+            body,
+            spacing=8,
+            tight=True,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            alignment=ft.MainAxisAlignment.CENTER,
+        ),
+        padding=ft.Padding.symmetric(vertical=16, horizontal=12),
+        alignment=ft.Alignment.CENTER,
+        height=height,
+        expand=True if height is None else None,
+    )
+
+
+def busy_button(
+    text: str,
+    on_click: Callable | None = None,
+    icon: str | None = None,
+    busy_text: str = "处理中…",
+    **kwargs,
+) -> ft.Button:
+    """忙碌态按钮：执行期间禁用并换成 busy_text，防止重复点击。"""
+    label = ft.Text(text, size=th.FONT_BODY)
+    controls: list[ft.Control] = [ft.Icon(ico(icon), size=16)] if icon else []
+    controls.append(label)
+    button = ft.Button(
+        content=ft.Row(controls, spacing=6, tight=True),
+        bgcolor=th.PRIMARY,
+        color=th.ON_PRIMARY,
+        elevation=0,
+        style=ft.ButtonStyle(
+            shape=ft.RoundedRectangleBorder(radius=8),
+            padding=ft.Padding.symmetric(vertical=10, horizontal=14),
+        ),
+        **kwargs,
+    )
+
+    def handler(e) -> None:
+        if on_click is None or button.disabled:
+            return
+        button.disabled = True
+        label.value = busy_text
+        try:
+            button.update()
+        except Exception:
+            logger.debug("忙碌按钮状态更新失败", exc_info=True)
+        try:
+            on_click(e)
+        finally:
+            button.disabled = False
+            label.value = text
+            try:
+                button.update()
+            except Exception:
+                # 回调里通常已关闭弹窗，控件不在树上时会抛，忽略即可。
+                logger.debug("忙碌按钮复位失败", exc_info=True)
+
+    button.on_click = handler
+    return button
 
 
 def primary_button(text: str, on_click: Callable, icon: str | None = None, **kwargs) -> ft.Button:
@@ -110,7 +405,7 @@ def tag_chip(text: str, active: bool = False, on_click=None) -> ft.Container:
     bg = th.PRIMARY_LIGHT if active else th.CARD
     fg = th.PRIMARY if active else th.TEXT_MUTED
     return ft.Container(
-        content=ft.Text(text, size=11, color=fg),
+        content=ft.Text(text, size=th.FONT_CAPTION, color=fg),
         bgcolor=bg,
         border=th.card_border(),
         border_radius=14,
@@ -185,8 +480,12 @@ def confirm(page: ft.Page, message: str, on_confirm: Callable) -> None:
 
 def section_header(text: str, action: ft.Control | None = None) -> ft.Row:
     return ft.Row(
-        [ft.Text(text, size=13, color=th.TEXT, weight="bold"), action or ft.Container()],
+        [
+            ft.Text(text, size=th.FONT_SECTION_TITLE, color=th.TEXT, weight="bold"),
+            action or ft.Container(),
+        ],
         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
 
 
@@ -217,14 +516,15 @@ def dropdown(label: str, options: list[str], value: str | None = None, width: in
         border_color=th.DIVIDER,
         focused_border_color=th.PRIMARY,
         color=th.TEXT,
-        label_style=ft.TextStyle(color=th.TEXT_MUTED, size=12),
+        label_style=ft.TextStyle(color=th.TEXT_MUTED, size=th.FONT_CAPTION),
+        text_style=ft.TextStyle(color=th.TEXT, size=th.FONT_CARD_TITLE),
         border_radius=8,
     )
 
 
 def modal(page: ft.Page, title: str, body: ft.Control, actions: list[ft.Control], width: int = 560) -> ft.AlertDialog:
     dialog = ft.AlertDialog(
-        title=ft.Text(title, size=14, color=th.TEXT, weight="bold"),
+        title=ft.Text(title, size=th.FONT_SECTION_TITLE, color=th.TEXT, weight="bold"),
         content=ft.Container(content=body, width=width),
         actions=actions,
         actions_alignment=ft.MainAxisAlignment.END,

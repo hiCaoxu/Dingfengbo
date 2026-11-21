@@ -15,7 +15,14 @@ from .. import theme as th
 from .async_utils import background_section
 from .forms import ENTERTAINMENT_KINDS, open_entertainment_dialog
 from .state import state
-from .widgets import card, delete_with_confirm, divider, empty, icon_button, primary_button, section_header
+from .widgets import (
+    delete_with_confirm,
+    divider,
+    empty,
+    icon_button,
+    page_header,
+    primary_button,
+)
 
 COLUMNS = ["想看", "在看", "看完"]
 _state = state.entertainment
@@ -70,19 +77,22 @@ def _item_card(item: Entertainment, cover_src: str, page, refresh) -> ft.Control
                         _cover(cover_src, item.cover or ""),
                         ft.Column(
                             [
-                                ft.Text(item.title, size=12, color=th.TEXT, weight="bold",
-                                        max_lines=2, overflow=ft.TextOverflow.ELLIPSIS),
-                                ft.Text(item.kind, size=10, color=th.TEXT_MUTED),
+                                ft.Text(item.title, size=th.FONT_CARD_TITLE, color=th.TEXT,
+                                        weight="bold", max_lines=2,
+                                        overflow=ft.TextOverflow.ELLIPSIS),
+                                ft.Text(item.kind, size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+                                        max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
                                 ft.Text(f"评分 {item.rating}" if item.rating else "未评分",
-                                        size=10, color=th.TEXT_MUTED),
+                                        size=th.FONT_CAPTION, color=th.TEXT_MUTED),
                             ],
                             spacing=4, expand=True,
                         ),
                     ],
                     spacing=10,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
                 ),
-                ft.Text(item.note or "", size=10, color=th.TEXT_MUTED, max_lines=2,
-                        overflow=ft.TextOverflow.ELLIPSIS),
+                ft.Text(item.note or "", size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+                        max_lines=2, overflow=ft.TextOverflow.ELLIPSIS),
                 divider(),
                 ft.Row(
                     [
@@ -138,9 +148,16 @@ def _render(page: ft.Page, refresh, records) -> ft.Control:
             ft.Container(
                 content=ft.Column(
                     [
-                        ft.Row([ft.Text(status, size=13, color=th.TEXT, weight="bold"),
+                        ft.Row(
+                            [
+                                ft.Text(status, size=th.FONT_CARD_TITLE, color=th.TEXT,
+                                        weight="bold"),
                                 ft.Container(expand=True),
-                                ft.Text(f"{len(filtered)} 项", size=11, color=th.TEXT_MUTED)]),
+                                ft.Text(f"{len(filtered)} 项", size=th.FONT_CAPTION,
+                                        color=th.TEXT_MUTED),
+                            ],
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
                         divider(),
                         ft.Column(
                             [
@@ -165,9 +182,25 @@ def _render(page: ft.Page, refresh, records) -> ft.Control:
 
     return ft.Column(
         [
-            section_header("娱乐", primary_button("新增条目", lambda e: open_entertainment_dialog(page, None, refresh), ACTIONS["add"])),
+            page_header(
+                "娱乐",
+                f"三列看板 · 共 {len(items)} 条",
+                actions=[
+                    primary_button(
+                        "新增条目",
+                        lambda e: open_entertainment_dialog(page, None, refresh),
+                        ACTIONS["add"],
+                    )
+                ],
+            ),
             kind_row,
-            ft.Row(columns, spacing=14, expand=True),
+            # 三列等高：列内滚动，列本身不被内容撑高
+            ft.Row(
+                columns,
+                spacing=14,
+                expand=True,
+                vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+            ),
         ],
         spacing=12,
         expand=True,

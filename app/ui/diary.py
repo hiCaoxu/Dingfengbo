@@ -28,8 +28,8 @@ from .widgets import (
     empty,
     icon_button,
     modal,
+    page_header,
     primary_button,
-    section_header,
 )
 
 _state = state.diary
@@ -105,15 +105,18 @@ def _editor(page: ft.Page, data: dict, refresh) -> ft.Control:
             [
                 ft.Row(
                     [
-                        ft.Text(title, size=14, color=th.TEXT, weight="bold"),
+                        ft.Text(title, size=th.FONT_CARD_TITLE, color=th.TEXT,
+                                weight="bold", max_lines=1,
+                                overflow=ft.TextOverflow.ELLIPSIS, expand=True),
                         ft.Container(width=7, height=7, bgcolor=th.PRIMARY if has_diary else th.DIVIDER, border_radius=4),
-                        ft.Text("有日记" if has_diary else "暂无日记", size=11, color=th.PRIMARY if has_diary else th.TEXT_MUTED),
-                        ft.Container(expand=True),
+                        ft.Text("有日记" if has_diary else "暂无日记", size=th.FONT_CAPTION,
+                                color=th.PRIMARY if has_diary else th.TEXT_MUTED),
                         upload_button(page, insert_image, "插入图片", "选择要插入的图片"),
                     ],
                     spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
-                ft.Text("光标离开正文即自动保存", size=10, color=th.TEXT_MUTED),
+                ft.Text("光标离开正文即自动保存", size=th.FONT_CAPTION, color=th.TEXT_MUTED),
                 divider(),
                 field,
                 *([image_strip] if image_strip else []),
@@ -155,7 +158,7 @@ def _life_panel(page: ft.Page, refresh, events: list[dict]) -> ft.Control:
             text_style=ft.TextStyle(size=12, color=th.TEXT),
             on_submit=lambda e: submit(),
         )
-        error_text = ft.Text("", size=10, color=th.DANGER)
+        error_text = ft.Text("", size=th.FONT_CAPTION, color=th.DANGER)
 
         def submit() -> None:
             title = (title_field.value or "").strip()
@@ -197,11 +200,13 @@ def _life_panel(page: ft.Page, refresh, events: list[dict]) -> ft.Control:
                 # 会把标题挤成一字一行，这里把整行剩余宽度都给标题
                 ft.Column(
                     [
-                        ft.Text(event["title"], size=12, color=th.TEXT),
+                        # 标题不截断：面板窄，长标题宁可换行也不要出现省略号
+                        ft.Text(event["title"], size=th.FONT_BODY, color=th.TEXT),
                         ft.Text(
                             target.isoformat() if target else "未定",
-                            size=9,
+                            size=th.FONT_CAPTION,
                             color=th.TEXT_MUTED,
+                            max_lines=1,
                         ),
                     ],
                     spacing=1,
@@ -269,7 +274,8 @@ def _month_view(refresh, data) -> ft.Control:
     for week in grid:
         cells.append(
             ft.Container(
-                content=ft.Text(f"{iso_week(week[0])}周", size=10, color=th.TEXT_MUTED),
+                content=ft.Text(f"{iso_week(week[0])}周", size=th.FONT_CAPTION,
+                                color=th.TEXT_MUTED, max_lines=1),
                 width=38,
                 alignment=ft.Alignment.CENTER,
             )
@@ -280,7 +286,8 @@ def _month_view(refresh, data) -> ft.Control:
             selected = day == _state["selected"]
             body = ft.Column(
                 [
-                    ft.Text(str(day.day), size=11, color=th.TEXT if in_month else th.TEXT_MUTED,
+                    ft.Text(str(day.day), size=th.FONT_CAPTION,
+                            color=th.TEXT if in_month else th.TEXT_MUTED,
                             weight="bold" if selected else "normal"),
                     ft.Container(
                         width=5, height=5, bgcolor=th.PRIMARY, border_radius=3,
@@ -298,7 +305,7 @@ def _month_view(refresh, data) -> ft.Control:
                     border_radius=4,
                     padding=3,
                     width=36,
-                    height=30,
+                    height=32,
                     opacity=1 if in_month else 0.55,
                     on_click=(
                         lambda e, d=day: (_state.__setitem__("selected", d), refresh())
@@ -307,7 +314,7 @@ def _month_view(refresh, data) -> ft.Control:
             )
     history_section = ft.Column(
         [
-            ft.Text("历史上的今天", size=11, color=th.TEXT_MUTED, weight="bold"),
+            ft.Text("历史上的今天", size=th.FONT_CARD_TITLE, color=th.TEXT, weight="bold"),
             *(
                 [
                     ft.TextButton(
@@ -317,7 +324,7 @@ def _month_view(refresh, data) -> ft.Control:
                     for day in history
                 ]
                 if history
-                else [ft.Text("暂无", size=10, color=th.TEXT_MUTED)]
+                else [ft.Text("暂无", size=th.FONT_CAPTION, color=th.TEXT_MUTED)]
             ),
         ],
         spacing=2,
@@ -399,10 +406,12 @@ def _list_view(refresh, data) -> ft.Control:
                 ft.Column(
                     [
                         ft.ListTile(
-                            title=ft.Text(title, size=12, color=th.TEXT),
+                            title=ft.Text(title, size=th.FONT_BODY, color=th.TEXT,
+                                          max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
                             subtitle=ft.Text(
                                 (snippet or "").replace("\n", " ")[:60],
-                                size=10, color=th.TEXT_MUTED,
+                                size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+                                max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
                             ),
                             on_click=lambda e, day=day: (
                                 _state.__setitem__("selected", day), refresh()
@@ -459,7 +468,11 @@ def _render(page: ft.Page, refresh, payload) -> ft.Control:
     )
     return ft.Column(
         [
-            section_header("日记", tabs),
+            page_header(
+                "日记",
+                f"{_state['selected'].isoformat()} · {view}视图 · 共 {len(payload.get('life') or [])} 件人生大事",
+                actions=[tabs],
+            ),
             ft.Row(
                 [
                     main,

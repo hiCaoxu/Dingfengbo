@@ -82,7 +82,7 @@ def open_habit_dialog(page: ft.Page, habit=None, on_done=None) -> ft.AlertDialog
                 note,
                 ft.Text(
                     "连续天数按自然日计算：今天没打卡时，连续记录保留到昨天为止。",
-                    size=10,
+                    size=th.FONT_CAPTION,
                     color=th.TEXT_MUTED,
                 ),
             ],
@@ -123,8 +123,10 @@ def open_calendar_dialog(page: ft.Page, item: dict) -> ft.AlertDialog:
             )
         grid_rows.append(
             ft.Row(
-                [ft.Text(WEEK_LABELS[weekday], size=9, color=th.TEXT_MUTED, width=14), *cells],
+                [ft.Text(WEEK_LABELS[weekday], size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+                         width=22), *cells],
                 spacing=3,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
             )
         )
     dialog = modal(
@@ -134,17 +136,22 @@ def open_calendar_dialog(page: ft.Page, item: dict) -> ft.AlertDialog:
             [
                 ft.Row(
                     [
-                        ft.Text(f"连续 {item['streak']} 天", size=12, color=th.PRIMARY, weight="bold"),
-                        ft.Text(f"最长 {item['longest']} 天", size=11, color=th.TEXT_MUTED),
+                        ft.Text(f"连续 {item['streak']} 天", size=th.FONT_CARD_TITLE,
+                                color=th.PRIMARY, weight="bold"),
+                        ft.Text(f"最长 {item['longest']} 天", size=th.FONT_CAPTION,
+                                color=th.TEXT_MUTED),
                         ft.Text(
                             f"本周 {item['week_done']}/{item['target_per_week']}",
-                            size=11, color=th.TEXT_MUTED,
+                            size=th.FONT_CAPTION, color=th.TEXT_MUTED,
                         ),
                     ],
                     spacing=16,
+                    wrap=True,
+                    run_spacing=6,
                 ),
                 *grid_rows,
-                ft.Text("最近 12 周，颜色越深表示当天已打卡。", size=10, color=th.TEXT_MUTED),
+                ft.Text("最近 12 周，颜色越深表示当天已打卡。", size=th.FONT_CAPTION,
+                        color=th.TEXT_MUTED),
             ],
             spacing=6,
             tight=True,
@@ -241,18 +248,20 @@ def render_panel(page: ft.Page, refresh, items: list[dict]) -> ft.Control:
                                 ),
                                 ft.Text(
                                     f"连续 {item['streak']} 天" if item["streak"] else "",
-                                    size=9,
+                                    size=th.FONT_CAPTION,
                                     color=th.PRIMARY if item["streak"] else th.TEXT_MUTED,
+                                    max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
                                 ),
                             ],
                             spacing=4,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         ),
                         ft.Row(
                             [
                                 ft.Row(_week_cells(item, today), spacing=2),
                                 ft.Text(
                                     f"{item['week_done']}/{item['target_per_week']}",
-                                    size=9,
+                                    size=th.FONT_CAPTION,
                                     color=th.PRIMARY if on_target else th.TEXT_MUTED,
                                 ),
                                 ft.Container(expand=True),
@@ -295,10 +304,11 @@ def render_panel(page: ft.Page, refresh, items: list[dict]) -> ft.Control:
             [
                 ft.Row(
                     [
-                        ft.Text("习惯", size=13, color=th.TEXT, weight="bold"),
+                        ft.Text("习惯", size=th.FONT_CARD_TITLE, color=th.TEXT,
+                                weight="bold"),
                         ft.Text(
                             f"{done_count}/{len(items)}" if items else "0",
-                            size=10,
+                            size=th.FONT_CAPTION,
                             color=th.PRIMARY if items and done_count == len(items) else th.TEXT_MUTED,
                         ),
                         ft.Container(expand=True),
@@ -314,8 +324,10 @@ def render_panel(page: ft.Page, refresh, items: list[dict]) -> ft.Control:
                     "待打卡：" + "、".join(pending[:3]) + ("…" if len(pending) > 3 else "")
                     if pending
                     else "今天全部打卡完成",
-                    size=9,
+                    size=th.FONT_CAPTION,
                     color=th.TEXT_MUTED,
+                    max_lines=2,
+                    overflow=ft.TextOverflow.ELLIPSIS,
                 ),
             ],
             spacing=8,
@@ -365,15 +377,19 @@ def _render(page: ft.Page, refresh, items: list[dict]) -> ft.Control:
                         ),
                         ft.Column(
                             [
-                                ft.Text(item["name"], size=13, color=th.TEXT, weight="bold"),
+                                ft.Text(item["name"], size=th.FONT_CARD_TITLE,
+                                        color=th.TEXT, weight="bold",
+                                        max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
                                 ft.Text(
                                     f"连续 {item['streak']} 天 · 最长 {item['longest']} 天"
                                     + (
                                         f" · 单次目标 {item['target_minutes']} 分钟"
                                         if item["target_minutes"] else ""
                                     ),
-                                    size=10,
+                                    size=th.FONT_CAPTION,
                                     color=th.TEXT_MUTED,
+                                    max_lines=1,
+                                    overflow=ft.TextOverflow.ELLIPSIS,
                                 ),
                             ],
                             spacing=2,
@@ -383,10 +399,10 @@ def _render(page: ft.Page, refresh, items: list[dict]) -> ft.Control:
                         ft.Row(week_cells, spacing=3),
                         ft.Text(
                             f"{item['week_done']}/{item['target_per_week']}",
-                            size=11,
+                            size=th.FONT_CAPTION,
                             color=th.PRIMARY if item["week_done"] >= item["target_per_week"]
                             else th.TEXT_MUTED,
-                            width=44,
+                            width=48,
                         ),
                         icon_button(ACTIONS["calendar"],
                                     lambda e, it=item: open_calendar_dialog(page, it), "打卡日历"),
@@ -425,8 +441,11 @@ def _render(page: ft.Page, refresh, items: list[dict]) -> ft.Control:
                         ft.Text(
                             f"今天已打卡 {today_done}/{len(items)} 个习惯"
                             if items else "习惯会记录你的连续天数与周目标完成度",
-                            size=11,
+                            size=th.FONT_CAPTION,
                             color=th.TEXT_MUTED,
+                            max_lines=2,
+                            overflow=ft.TextOverflow.ELLIPSIS,
+                            expand=True,
                         ),
                         ft.Container(expand=True),
                         primary_button("新增习惯",

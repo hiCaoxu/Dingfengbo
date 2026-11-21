@@ -47,7 +47,8 @@ EXPORT_DIR = DATA_DIR / "exports"
 
 def open_backup_center(page: ft.Page, refresh=None) -> ft.AlertDialog:
     list_box = ft.Column(spacing=6, scroll=ft.ScrollMode.AUTO, height=340)
-    info = ft.Text("", size=10, color=th.TEXT_MUTED)
+    info = ft.Text("", size=th.FONT_CAPTION, color=th.TEXT_MUTED, max_lines=2,
+                   overflow=ft.TextOverflow.ELLIPSIS)
     dir_field = form_field("备份目录（留空使用默认）", str(configured_dir()))
     busy = {"value": False}
     fixed_buttons: list[ft.Control] = []
@@ -114,11 +115,13 @@ def open_backup_center(page: ft.Page, refresh=None) -> ft.AlertDialog:
                                     [
                                         ft.Text(
                                             item["created"].strftime("%Y-%m-%d %H:%M:%S"),
-                                            size=12, color=th.TEXT, weight="bold",
+                                            size=th.FONT_CARD_TITLE, color=th.TEXT,
+                                            weight="bold",
                                         ),
                                         ft.Text(
                                             f"{item['label']} · {human_size(item['size'])} · {item['name']}",
-                                            size=10, color=th.TEXT_MUTED, max_lines=1,
+                                            size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+                                            max_lines=1,
                                             overflow=ft.TextOverflow.ELLIPSIS,
                                         ),
                                     ],
@@ -261,7 +264,7 @@ def open_backup_center(page: ft.Page, refresh=None) -> ft.AlertDialog:
             ft.Text(
                 "每天首次启动自动备份一次；恢复前会自动再备份当前库（pre-restore）。"
                 "导出的 zip 含数据库快照与 settings.json，请妥善保管。",
-                size=10,
+                size=th.FONT_CAPTION,
                 color=th.TEXT_MUTED,
             ),
         ],

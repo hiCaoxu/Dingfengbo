@@ -45,8 +45,8 @@ from .widgets import (
     divider,
     empty,
     icon_button,
+    page_header,
     primary_button,
-    section_header,
     tag_chip,
 )
 
@@ -176,7 +176,7 @@ def _calendar_card(page, refresh, items, today: date) -> ft.Control:
                     icon_color=th.TEXT_MUTED, tooltip="上一月",
                     on_click=lambda e: _set_month(page, refresh, -1),
                 ),
-                ft.Text(f"{_state.year} 年 {_state.month} 月", size=13,
+                ft.Text(f"{_state.year} 年 {_state.month} 月", size=th.FONT_CARD_TITLE,
                         color=th.TEXT, weight="bold"),
                 ft.IconButton(
                     icon=ico(ACTIONS["chevron_right"]), icon_size=16,
@@ -199,7 +199,7 @@ def _calendar_card(page, refresh, items, today: date) -> ft.Control:
             content=ft.Column(
                 [
                     ft.Text(
-                        f"{day.day}", size=11,
+                        f"{day.day}", size=th.FONT_CAPTION,
                         color=th.ON_PRIMARY if is_selected else (th.PRIMARY if is_today else color),
                         weight="bold" if (is_today or is_selected) else None,
                     ),
@@ -212,7 +212,7 @@ def _calendar_card(page, refresh, items, today: date) -> ft.Control:
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                 alignment=ft.MainAxisAlignment.CENTER,
             ),
-            height=32,
+            height=36,
             expand=True,
             bgcolor=th.PRIMARY if is_selected else None,
             border=None if (is_selected or not is_today) else ft.Border.all(1, th.PRIMARY),
@@ -226,8 +226,8 @@ def _calendar_card(page, refresh, items, today: date) -> ft.Control:
             [
                 header(),
                 ft.Row(
-                    [ft.Text(label, size=9, color=th.TEXT_MUTED, expand=True,
-                             text_align=ft.TextAlign.CENTER)
+                    [ft.Text(label, size=th.FONT_CAPTION, color=th.TEXT_MUTED, expand=True,
+                             text_align=ft.TextAlign.CENTER, max_lines=1)
                      for label in WEEK_LABELS],
                     spacing=2,
                 ),
@@ -238,8 +238,10 @@ def _calendar_card(page, refresh, items, today: date) -> ft.Control:
                 divider(),
                 ft.Row(
                     [
-                        ft.Text(f"本月 {month_total} 项", size=10, color=th.TEXT_MUTED),
-                        ft.Text(f"逾期 {overdue}" if overdue else "", size=10, color=th.DANGER),
+                        ft.Text(f"本月 {month_total} 项", size=th.FONT_CAPTION,
+                                color=th.TEXT_MUTED),
+                        ft.Text(f"逾期 {overdue}" if overdue else "", size=th.FONT_CAPTION,
+                                color=th.DANGER),
                         ft.Container(expand=True),
                         ft.TextButton(
                             "清除日期",
@@ -285,7 +287,7 @@ def _quadrant_card(page, refresh, items, today: date) -> ft.Control:
             return ft.Container(
                 content=ft.Text(
                     f"{item.title}{due}",
-                    size=9,
+                    size=th.FONT_CAPTION,
                     color=th.DANGER if overdue else th.TEXT,
                     max_lines=1,
                     overflow=ft.TextOverflow.ELLIPSIS,
@@ -298,9 +300,9 @@ def _quadrant_card(page, refresh, items, today: date) -> ft.Control:
 
         body: list[ft.Control] = [entry(item) for item in preview]
         if rest:
-            body.append(ft.Text(f"还有 {rest} 项", size=8, color=th.TEXT_MUTED))
+            body.append(ft.Text(f"还有 {rest} 项", size=th.FONT_CAPTION, color=th.TEXT_MUTED))
         if not bucket:
-            body.append(ft.Text("暂无任务", size=9, color=th.DIVIDER))
+            body.append(ft.Text("暂无任务", size=th.FONT_CAPTION, color=th.TEXT_MUTED))
 
         return ft.Container(
             content=ft.Column(
@@ -310,8 +312,13 @@ def _quadrant_card(page, refresh, items, today: date) -> ft.Control:
                             ft.Container(width=3, height=20, bgcolor=color, border_radius=2),
                             ft.Column(
                                 [
-                                    ft.Text(label, size=10, color=th.TEXT, weight="bold"),
-                                    ft.Text(QUADRANT_HINTS[key], size=8, color=th.TEXT_MUTED),
+                                    ft.Text(label, size=th.FONT_CARD_TITLE, color=th.TEXT,
+                                            weight="bold", max_lines=1,
+                                            overflow=ft.TextOverflow.ELLIPSIS),
+                                    ft.Text(QUADRANT_HINTS[key], size=th.FONT_CAPTION,
+                                            color=th.TEXT_MUTED, max_lines=1,
+                                            overflow=ft.TextOverflow.ELLIPSIS,
+                                            tooltip=QUADRANT_HINTS[key]),
                                 ],
                                 spacing=0,
                                 tight=True,
@@ -321,16 +328,17 @@ def _quadrant_card(page, refresh, items, today: date) -> ft.Control:
                         ],
                         spacing=6,
                     ),
-                    *body,
+                    # 内容多了在格子内部滚动，不让格子被内容撑高
+                    ft.Column(body, spacing=2, tight=True, scroll=ft.ScrollMode.AUTO,
+                              expand=True),
                 ],
                 spacing=2,
                 tight=True,
+                expand=True,
             ),
             padding=ft.Padding.all(9),
             expand=True,
             alignment=ft.Alignment.TOP_LEFT,
-            # 窗口很矮时裁掉溢出内容，避免出现黄黑溢出条
-            clip_behavior=ft.ClipBehavior.HARD_EDGE,
             bgcolor=th.PRIMARY_LIGHT if active else th.CARD,
             border=ft.Border.all(2 if active else 1, color if active else th.DIVIDER),
             border_radius=10,
@@ -342,12 +350,11 @@ def _quadrant_card(page, refresh, items, today: date) -> ft.Control:
     return card(
         ft.Column(
             [
-                ft.Row(
-                    [
-                        ft.Text("四象限", size=13, color=th.TEXT, weight="bold"),
-                        ft.Container(expand=True),
-                        ft.Text("高/中优先级=重要 · 今明到期/逾期=紧急", size=8, color=th.TEXT_MUTED),
-                    ]
+                ft.Text("四象限", size=th.FONT_CARD_TITLE, color=th.TEXT, weight="bold"),
+                ft.Text(
+                    "高/中优先级=重要 · 今明到期/逾期=紧急",
+                    size=th.FONT_CAPTION, color=th.TEXT_MUTED, max_lines=2,
+                    overflow=ft.TextOverflow.ELLIPSIS,
                 ),
                 ft.Row(
                     [cell("q1"), cell("q2")],
@@ -414,7 +421,7 @@ def _row_for(page, refresh, item: Todo, today: date, overdue: bool) -> ft.Contro
                         [
                             ft.Text(
                                 item.title + (" · 循环模板" if item.is_template else ""),
-                                size=13,
+                                size=th.FONT_CARD_TITLE,
                                 color=th.DANGER if overdue
                                 else (th.TEXT_MUTED if item.completed else th.TEXT),
                                 weight="bold",
@@ -423,7 +430,8 @@ def _row_for(page, refresh, item: Todo, today: date, overdue: bool) -> ft.Contro
                             ),
                             ft.Text(
                                 f"{label}{due}" + (" · " + " · ".join(extras) if extras else ""),
-                                size=11, color=th.DANGER if overdue else th.TEXT_MUTED,
+                                size=th.FONT_CAPTION,
+                                color=th.DANGER if overdue else th.TEXT_MUTED,
                                 max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
                             ),
                         ],
@@ -475,24 +483,7 @@ def _render(page: ft.Page, refresh, data) -> ft.Control:
     middle_card = card(
         ft.Column(
             [
-                section_header(
-                    "任务",
-                    ft.Row(
-                        [
-                            primary_button(
-                                "番茄钟",
-                                lambda e: open_pomodoro_dialog(page, refresh),
-                                ACTIONS["timer"],
-                            ),
-                            primary_button(
-                                "新增任务",
-                                lambda e: open_todo_dialog(page, None, refresh),
-                                ACTIONS["add"],
-                            ),
-                        ],
-                        spacing=8,
-                    ),
-                ),
+                ft.Text("任务列表", size=th.FONT_CARD_TITLE, color=th.TEXT, weight="bold"),
                 ft.Row(
                     [
                         ft.Dropdown(
@@ -500,6 +491,8 @@ def _render(page: ft.Page, refresh, data) -> ft.Control:
                             value=_state.status,
                             options=[ft.dropdown.Option(v) for v in ["未完成", "已完成", "全部"]],
                             width=104,
+                            label_style=ft.TextStyle(size=th.FONT_CAPTION, color=th.TEXT_MUTED),
+                            text_style=ft.TextStyle(size=th.FONT_BODY, color=th.TEXT),
                             on_select=lambda e: (_state.__setitem__("status", e.control.value), refresh()),
                         ),
                         ft.Dropdown(
@@ -507,10 +500,12 @@ def _render(page: ft.Page, refresh, data) -> ft.Control:
                             value=_state.tag,
                             options=[ft.dropdown.Option(v) for v in ["全部", *tags]],
                             width=118,
+                            label_style=ft.TextStyle(size=th.FONT_CAPTION, color=th.TEXT_MUTED),
+                            text_style=ft.TextStyle(size=th.FONT_BODY, color=th.TEXT),
                             on_select=lambda e: (_state.__setitem__("tag", e.control.value), refresh()),
                         ),
                         ft.Container(expand=True),
-                        ft.Text(f"{len(shown)} 项", size=10, color=th.TEXT_MUTED),
+                        ft.Text(f"{len(shown)} 项", size=th.FONT_CAPTION, color=th.TEXT_MUTED),
                     ],
                     spacing=8,
                     # 这里绝不能加 wrap=True：Wrap 内出现 expand 的间隔器时，
@@ -575,9 +570,32 @@ def _render(page: ft.Page, refresh, data) -> ft.Control:
     )
     # STRETCH 很关键：Row 的 START 对齐会给子项「无界高度」，三栏内部的
     # expand/滚动区因拿不到高度会被 Flet 渲染成灰块。
-    return ft.Row(
+    columns = ft.Row(
         [left_column, ft.Column([middle_card], expand=True), right_column],
         spacing=12,
         expand=True,
         vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+    )
+    return ft.Column(
+        [
+            page_header(
+                "任务",
+                f"{len(shown)} 项在列表中" + (f" · 逾期 {len(overdue_ids)} 项" if overdue_ids else ""),
+                actions=[
+                    primary_button(
+                        "番茄钟",
+                        lambda e: open_pomodoro_dialog(page, refresh),
+                        ACTIONS["timer"],
+                    ),
+                    primary_button(
+                        "新增任务",
+                        lambda e: open_todo_dialog(page, None, refresh),
+                        ACTIONS["add"],
+                    ),
+                ],
+            ),
+            columns,
+        ],
+        spacing=10,
+        expand=True,
     )

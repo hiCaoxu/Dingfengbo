@@ -18,7 +18,15 @@ from .. import theme as th
 from .async_utils import background_section
 from .forms import open_diet_dialog, open_exercise_dialog, open_sleep_dialog, open_weight_dialog
 from .state import state
-from .widgets import card, delete_with_confirm, empty, icon_button, primary_button, section_header
+from .widgets import (
+    card,
+    delete_with_confirm,
+    empty,
+    equal_height_row,
+    icon_button,
+    page_header,
+    primary_button,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +44,7 @@ _TABS = {
 
 def _chart_placeholder() -> ft.Control:
     return ft.Container(
-        content=ft.Text("加载中…", size=11, color=th.TEXT_MUTED),
+        content=ft.Text("图表加载中…", size=th.FONT_CAPTION, color=th.TEXT_MUTED),
         alignment=ft.Alignment.CENTER,
         expand=True,
     )
@@ -84,12 +92,21 @@ def _row(item, tab: str, page, refresh) -> ft.Control:
     return ft.Container(
         content=ft.Row(
             [
-                ft.Column([ft.Text(primary, size=12, color=th.TEXT, weight="bold"),
-                           ft.Text(secondary, size=10, color=th.TEXT_MUTED)], spacing=3, expand=True),
+                ft.Column(
+                    [
+                        ft.Text(primary, size=th.FONT_BODY, color=th.TEXT, weight="bold",
+                                max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
+                        ft.Text(secondary, size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+                                max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
+                    ],
+                    spacing=3,
+                    expand=True,
+                ),
                 icon_button(ACTIONS["edit"], lambda e, i=item: _TABS[tab][1](page, i, refresh), "编辑"),
                 icon_button(ACTIONS["delete"], lambda e, i=item.id: _delete(_TABS[tab][0], i, page, refresh), "删除"),
             ],
             spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
         border=ft.Border.all(1, th.DIVIDER),
         border_radius=10,
@@ -199,14 +216,17 @@ def _summary_card(title: str, value: str, subtitle: str, accent: bool = False) -
     return card(
         ft.Column(
             [
-                ft.Text(value, size=21, color=th.ACCENT if accent else th.TEXT, weight="bold"),
-                ft.Text(subtitle, size=10, color=th.TEXT_MUTED),
+                ft.Text(value, size=th.FONT_METRIC, color=th.ACCENT if accent else th.TEXT,
+                        weight="bold", max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
+                ft.Text(subtitle, size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+                        max_lines=2, overflow=ft.TextOverflow.ELLIPSIS),
             ],
             spacing=4,
+            tight=True,
         ),
         title=title,
         expand=1,
-        height=96,
+        height=100,
     )
 
 
@@ -214,7 +234,7 @@ def _quick_record_row(page: ft.Page, refresh) -> ft.Control:
     """汇总页的分类快捷记录：不必先进二级页再选分类。"""
     return ft.Row(
         [
-            ft.Text("快捷记录", size=11, color=th.TEXT_MUTED),
+            ft.Text("快捷记录", size=th.FONT_CAPTION, color=th.TEXT_MUTED),
             *[
                 ft.TextButton(
                     f"+ {name}",
@@ -224,6 +244,9 @@ def _quick_record_row(page: ft.Page, refresh) -> ft.Control:
             ],
         ],
         spacing=6,
+        wrap=True,
+        run_spacing=4,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
 
 
@@ -301,21 +324,25 @@ def _chart_grid(page: ft.Page, data: dict) -> ft.Control:
     if page is not None:
         page.run_thread(render_charts)
 
+    # 同行图表卡：等高 + STRETCH，图表槽内部固定尺寸，卡片不会被内容撑高。
+    chart_card_h = _CHART_H + 60
     return ft.Column(
         [
-            ft.Row(
+            equal_height_row(
                 [
-                    card(weight_slot, title="体重趋势", expand=1),
-                    card(sleep_slot, title="睡眠时长", expand=1),
+                    card(weight_slot, title="体重趋势", expand=1, height=chart_card_h),
+                    card(sleep_slot, title="睡眠时长", expand=1, height=chart_card_h),
                 ],
                 spacing=12,
+                height=chart_card_h,
             ),
-            ft.Row(
+            equal_height_row(
                 [
-                    card(exercise_slot, title="锻炼时长", expand=1),
-                    card(diet_slot, title="饮食热量", expand=1),
+                    card(exercise_slot, title="锻炼时长", expand=1, height=chart_card_h),
+                    card(diet_slot, title="饮食热量", expand=1, height=chart_card_h),
                 ],
                 spacing=12,
+                height=chart_card_h,
             ),
         ],
         spacing=12,
@@ -330,25 +357,23 @@ def _render_summary(page: ft.Page, refresh, data: dict) -> ft.Control:
 
     return ft.Column(
         [
-            section_header(
+            page_header(
                 "健康",
-                ft.Row(
-                    [
-                        primary_button(
-                            "新增记录",
-                            lambda e: _TABS[_state["tab"]][1](page, None, refresh),
-                            ACTIONS["add"],
-                        ),
-                        primary_button(
-                            "查看记录",
-                            lambda e: _goto("records", refresh),
-                            ACTIONS["list"],
-                        ),
-                    ],
-                    spacing=8,
-                ),
+                f"{_state['range']}汇总 · 体重 / 饮食 / 锻炼 / 睡眠",
+                actions=[
+                    primary_button(
+                        "新增记录",
+                        lambda e: _TABS[_state["tab"]][1](page, None, refresh),
+                        ACTIONS["add"],
+                    ),
+                    primary_button(
+                        "查看记录",
+                        lambda e: _goto("records", refresh),
+                        ACTIONS["list"],
+                    ),
+                ],
             ),
-            ft.Row(
+            equal_height_row(
                 [
                     _summary_card("最新体重", weight_value, weight_sub),
                     _summary_card(
@@ -369,6 +394,7 @@ def _render_summary(page: ft.Page, refresh, data: dict) -> ft.Control:
                     ),
                 ],
                 spacing=12,
+                height=100,
             ),
             _quick_record_row(page, refresh),
             _chart_grid(page, data),
@@ -414,25 +440,23 @@ def _render_records(page: ft.Page, refresh, data: dict) -> ft.Control:
 
     return ft.Column(
         [
-            section_header(
-                "健康 · 记录",
-                ft.Row(
-                    [
-                        ft.TextButton(
-                            "返回汇总",
-                            on_click=lambda e: _goto("summary", refresh),
-                        ),
-                        primary_button(
-                            "新增记录",
-                            lambda e: opener(page, None, refresh),
-                            ACTIONS["add"],
-                        ),
-                    ],
-                    spacing=8,
-                ),
+            page_header(
+                "健康",
+                f"记录 · {tab} · {data['range']}",
+                actions=[
+                    ft.TextButton(
+                        "返回汇总",
+                        on_click=lambda e: _goto("summary", refresh),
+                    ),
+                    primary_button(
+                        "新增记录",
+                        lambda e: opener(page, None, refresh),
+                        ACTIONS["add"],
+                    ),
+                ],
             ),
             tab_row,
-            ft.Text(_records_summary(tab, items), size=11, color=th.TEXT_MUTED),
+            ft.Text(_records_summary(tab, items), size=th.FONT_CAPTION, color=th.TEXT_MUTED),
             card(
                 ft.Column(
                     [_row(item, tab, page, refresh) for item in items],

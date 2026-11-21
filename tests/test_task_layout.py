@@ -77,7 +77,17 @@ class TaskPageLayoutTests(unittest.TestCase):
     def build(self) -> ft.Control:
         holder = todo.build(self.page, lambda: None)
         self.assertIsNotNone(holder.content)
-        return holder.content
+        content = holder.content
+        # 页面顶部是 page_header（标题 + 番茄钟/新增任务），三栏 Row 在它下面
+        if isinstance(content, ft.Column):
+            rows = [
+                c
+                for c in content.controls
+                if isinstance(c, ft.Row) and len(c.controls) == 3
+            ]
+            self.assertEqual(len(rows), 1)
+            return rows[0]
+        return content
 
     def test_three_columns(self) -> None:
         row = self.build()

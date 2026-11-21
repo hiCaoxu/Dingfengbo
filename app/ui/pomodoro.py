@@ -140,7 +140,8 @@ def open_pomodoro_dialog(page: ft.Page, refresh=None):
 
     duration = dropdown("专注时长", ["25 分钟", "45 分钟", "60 分钟"], "25 分钟", width=150)
     remain_text = ft.Text("25:00", size=44, color=th.PRIMARY, weight="bold")
-    status_text = ft.Text("选择任务与时长后点开始", size=11, color=th.TEXT_MUTED)
+    status_text = ft.Text("选择任务与时长后点开始", size=th.FONT_BODY, color=th.TEXT_MUTED,
+                          text_align=ft.TextAlign.CENTER)
 
     def stop(_=None):
         _session["active"] = False

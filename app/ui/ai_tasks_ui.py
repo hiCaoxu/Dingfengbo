@@ -49,11 +49,12 @@ def ensure_consent(page: ft.Page, refs: list[str], on_agree) -> bool:
         on_agree()
 
     dialog = ft.AlertDialog(
-        title=ft.Text("数据将发送至第三方大模型", size=14, color=th.TEXT, weight="bold"),
+        title=ft.Text("数据将发送至第三方大模型", size=th.FONT_SECTION_TITLE,
+                      color=th.TEXT, weight="bold"),
         content=ft.Text(
             f"本次任务引用了 {tables}，其近期记录会发送至 {provider}。"
             "该提示只出现一次，取消则不会发送任何内容。",
-            size=12,
+            size=th.FONT_BODY,
             color=th.TEXT_MUTED,
         ),
         actions=[ft.TextButton("取消", on_click=close), primary_button("同意并发送", agree)],
@@ -82,7 +83,7 @@ def run_task_dialog(
         return
 
     output = ft.Column(
-        [ft.Text("正在思考…", size=12, color=th.TEXT_MUTED, italic=True)],
+        [ft.Text("正在思考…", size=th.FONT_CAPTION, color=th.TEXT_MUTED, italic=True)],
         spacing=8,
         scroll=ft.ScrollMode.AUTO,
         height=360,
@@ -94,7 +95,7 @@ def run_task_dialog(
         title=ft.Row(
             [
                 ft.Icon(ico("AUTO_AWESOME_OUTLINED"), size=18, color=th.PRIMARY),
-                ft.Text(title, size=14, color=th.TEXT, weight="bold"),
+                ft.Text(title, size=th.FONT_SECTION_TITLE, color=th.TEXT, weight="bold"),
             ],
             spacing=8,
         ),
@@ -118,13 +119,13 @@ def run_task_dialog(
         return text, draft_service.extract(text) if request.draft else []
 
     def finish(text: str, drafts: list) -> None:
-        output.controls = [ft.Text(text, size=12, color=th.TEXT, selectable=True)]
+        output.controls = [ft.Text(text, size=th.FONT_BODY, color=th.TEXT, selectable=True)]
         if drafts:
             valid = [item for item in drafts if item.valid]
             output.controls.append(
                 ft.Text(
                     f"识别到 {len(drafts)} 条草稿（可保存 {len(valid)} 条）",
-                    size=11,
+                    size=th.FONT_CAPTION,
                     color=th.PRIMARY if valid else th.ACCENT,
                 )
             )
@@ -182,23 +183,27 @@ def open_draft_dialog(page: ft.Page, drafts: list, on_saved=None) -> ft.AlertDia
                         ft.Row(
                             [
                                 ft.Container(
-                                    ft.Text(draft.label, size=9, color=th.PRIMARY),
+                                    ft.Text(draft.label, size=th.FONT_CAPTION, color=th.PRIMARY),
                                     bgcolor=th.PRIMARY_LIGHT,
                                     border_radius=6,
                                     padding=ft.Padding.symmetric(vertical=2, horizontal=6),
                                 ),
-                                ft.Text(draft.title, size=12, color=th.TEXT, weight="bold",
-                                        expand=True, max_lines=1,
+                                ft.Text(draft.title, size=th.FONT_CARD_TITLE, color=th.TEXT,
+                                        weight="bold", expand=True, max_lines=1,
                                         overflow=ft.TextOverflow.ELLIPSIS),
                                 ft.Text(
                                     "可保存" if draft.valid else draft.reason,
-                                    size=9,
+                                    size=th.FONT_CAPTION,
                                     color=th.PRIMARY if draft.valid else th.DANGER,
+                                    max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
                                 ),
                             ],
                             spacing=6,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         ),
-                        ft.Text(" · ".join(detail_parts)[:200], size=10, color=th.TEXT_MUTED),
+                        ft.Text(" · ".join(detail_parts)[:200], size=th.FONT_CAPTION,
+                                color=th.TEXT_MUTED, max_lines=2,
+                                overflow=ft.TextOverflow.ELLIPSIS),
                     ],
                     spacing=4,
                     tight=True,
@@ -221,7 +226,7 @@ def open_draft_dialog(page: ft.Page, drafts: list, on_saved=None) -> ft.AlertDia
             snack(page, "没有可保存的草稿", th.TEXT_MUTED)
             return
         bar = ft.SnackBar(
-            ft.Text(f"已保存 {len(saved)} 条记录", color=th.ON_PRIMARY, size=12),
+            ft.Text(f"已保存 {len(saved)} 条记录", color=th.ON_PRIMARY, size=th.FONT_BODY),
             bgcolor=th.PRIMARY,
             action="撤销",
             on_action=lambda e: _undo(saved),
@@ -245,7 +250,7 @@ def open_draft_dialog(page: ft.Page, drafts: list, on_saved=None) -> ft.AlertDia
             [
                 ft.Text(
                     "以下内容由模型生成，保存前请确认；保存后仍可在对应模块修改。",
-                    size=10, color=th.TEXT_MUTED,
+                    size=th.FONT_CAPTION, color=th.TEXT_MUTED,
                 ),
                 ft.Column(rows, spacing=6, scroll=ft.ScrollMode.AUTO, height=340),
             ],

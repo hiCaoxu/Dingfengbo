@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 def _placeholder(text: str) -> ft.Control:
     return ft.Container(
-        content=ft.Text(text, size=11, color=th.TEXT_MUTED),
+        content=ft.Text(text, size=th.FONT_CAPTION, color=th.TEXT_MUTED),
         alignment=ft.Alignment.CENTER,
         expand=True,
     )
@@ -28,7 +28,8 @@ def _error_state(on_retry: Callable[[], None]) -> ft.Control:
     return ft.Container(
         content=ft.Column(
             [
-                ft.Text("加载失败（可能是数据库忙或磁盘异常）", size=11, color=th.ACCENT),
+                ft.Text("加载失败（可能是数据库忙或磁盘异常）", size=th.FONT_BODY,
+                        color=th.ACCENT, text_align=ft.TextAlign.CENTER),
                 ft.TextButton("重试", on_click=lambda e: on_retry()),
             ],
             alignment=ft.MainAxisAlignment.CENTER,

@@ -58,10 +58,11 @@ def open_data_io_dialog(page: ft.Page, refresh=None) -> ft.AlertDialog:
             for table in EXPORT_TABLES
             if snapshot.get(table)
         ),
-        size=10,
+        size=th.FONT_CAPTION,
         color=th.TEXT_MUTED,
     )
-    result = ft.Text("", size=10, color=th.TEXT_MUTED)
+    result = ft.Text("", size=th.FONT_CAPTION, color=th.TEXT_MUTED, max_lines=3,
+                     overflow=ft.TextOverflow.ELLIPSIS)
 
     table_options = [
         ft.dropdown.Option(key=table, text=f"{table_label(table)}（{snapshot.get(table, 0)}）")
@@ -187,7 +188,7 @@ def open_data_io_dialog(page: ft.Page, refresh=None) -> ft.AlertDialog:
         [
             summary,
             ft.Container(height=1, bgcolor=th.DIVIDER),
-            ft.Text("导出", size=12, color=th.TEXT, weight="bold"),
+            ft.Text("导出", size=th.FONT_CARD_TITLE, color=th.TEXT, weight="bold"),
             ft.Row(
                 [
                     primary_button("导出 JSON（全量）", do_export_json, "download"),
@@ -199,7 +200,7 @@ def open_data_io_dialog(page: ft.Page, refresh=None) -> ft.AlertDialog:
                 wrap=True,
             ),
             ft.Container(height=1, bgcolor=th.DIVIDER),
-            ft.Text("导入", size=12, color=th.TEXT, weight="bold"),
+            ft.Text("导入", size=th.FONT_CARD_TITLE, color=th.TEXT, weight="bold"),
             ft.Row([path_field, ft.TextButton("浏览…", on_click=do_browse)], spacing=8),
             ft.Row(
                 [
@@ -212,10 +213,11 @@ def open_data_io_dialog(page: ft.Page, refresh=None) -> ft.AlertDialog:
                 "JSON 导入按「最后写入获胜」合并，适合换机或从旧备份恢复；导入的行会重新进入待同步队列。"
                 "CSV 按列名匹配、缺列用默认值，已有记录按 ID 或业务键（日期 / 习惯+日期）去重，"
                 "文件里更旧的行不会覆盖较新的数据，单行失败不影响其他行。",
-                size=10,
+                size=th.FONT_CAPTION,
                 color=th.TEXT_MUTED,
             ),
-            ft.Row([ft.TextButton("打开导出目录", on_click=open_dir), result], spacing=8),
+            ft.Row([ft.TextButton("打开导出目录", on_click=open_dir), result],
+                   spacing=8, wrap=True),
         ],
         spacing=10,
         tight=True,

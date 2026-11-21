@@ -19,7 +19,14 @@ from .. import theme as th
 from ..db.repo import create
 from .async_utils import RenderToken, background_section
 from .forms import open_quick_action
-from .widgets import card, empty, section_header, tag_chip
+from .widgets import (
+    card,
+    empty,
+    equal_height_row,
+    page_header,
+    section_header,
+    tag_chip,
+)
 
 QUICK_ITEMS = [
     ("todo", "新增任务"),
@@ -73,7 +80,8 @@ def _calendar_card(selected: date, set_date, width: int | None = None, height: i
             ft.Container(expand=True),
             ft.Text(
                 f"距今年结束还有 {days_left} 天",
-                size=11, color=th.TEXT_MUTED, text_align=ft.TextAlign.CENTER,
+                size=th.FONT_CAPTION, color=th.TEXT_MUTED, text_align=ft.TextAlign.CENTER,
+                max_lines=2, overflow=ft.TextOverflow.ELLIPSIS,
             ),
         ],
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -99,7 +107,10 @@ def _calendar_card(selected: date, set_date, width: int | None = None, height: i
 
 def _stat_card(title: str, value: str, accent: bool = False, width: int | None = None, height: int | None = None) -> ft.Container:
     return card(
-        ft.Text(value, size=20, color=th.ACCENT if accent else th.TEXT, weight="bold"),
+        ft.Text(
+            value, size=th.FONT_METRIC, color=th.ACCENT if accent else th.TEXT,
+            weight="bold", max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+        ),
         title=title,
         expand=1,
         width=width,
@@ -129,11 +140,12 @@ def _activity_counts(since: date | None = None) -> dict[date, int]:
 
 
 _WEEKDAY_LABELS = ["一", "二", "三", "四", "五", "六", "日"]
-# 宽度不变（避免 53 周撑破列宽），只增高格子，让 9 号字的星期标签能完整显示。
+# 标签字号不得低于 12，因此格子/行高按 12 号字撑开；整行放在横向滚动容器里，
+# 窗口变窄时左右滚动，而不是把内容压小或者溢出。
 _HEAT_CELL_W = 10
-_HEAT_CELL_H = 14
+_HEAT_CELL_H = 16
 _HEAT_GAP = 2
-_HEAT_LABEL_W = 20
+_HEAT_LABEL_W = 26
 
 
 def _heatmap_cell(day: date, count: int, on_open) -> ft.Container:
@@ -168,7 +180,8 @@ def _heatmap_card(year: int, on_open, set_year, height: int | None = None) -> ft
     rows = []
     for weekday in range(7):
         label = ft.Container(
-            content=ft.Text(_WEEKDAY_LABELS[weekday], size=10, color=th.TEXT_MUTED),
+            content=ft.Text(_WEEKDAY_LABELS[weekday], size=th.FONT_CAPTION,
+                            color=th.TEXT_MUTED),
             width=_HEAT_LABEL_W,
             height=_HEAT_CELL_H,
             alignment=ft.Alignment.CENTER_RIGHT,
@@ -179,35 +192,16 @@ def _heatmap_card(year: int, on_open, set_year, height: int | None = None) -> ft
         )
         rows.append(ft.Row([label, cells], spacing=4))
 
-    grid = ft.Column(
-        [
-            ft.Row(
-                [
-                    ft.Container(width=_HEAT_LABEL_W + 4, height=10),
-                    *[
-                        ft.Container(
-                            content=ft.Text(f"{w[0].month}月", size=9, color=th.TEXT_MUTED)
-                            if w[0].day <= 7
-                            else None,
-                            width=_HEAT_CELL_W,
-                        )
-                        for w in weeks
-                    ],
-                ],
-                spacing=_HEAT_GAP,
-            ),
-            *rows,
-        ],
-        spacing=_HEAT_GAP,
-    )
+    # 12 号字的月份标签放不进 10px 宽的列，改为在标题下方给一行区间说明。
+    grid = ft.Column(rows, spacing=_HEAT_GAP)
     legend = ft.Row(
         [
-            ft.Text("少", size=9, color=th.TEXT_MUTED),
+            ft.Text("少", size=th.FONT_CAPTION, color=th.TEXT_MUTED),
             *[
                 ft.Container(width=10, height=10, bgcolor=th.HEATMAP_LEVELS[i], border_radius=3)
                 for i in range(6)
             ],
-            ft.Text("多", size=9, color=th.TEXT_MUTED),
+            ft.Text("多", size=th.FONT_CAPTION, color=th.TEXT_MUTED),
         ],
         spacing=3,
         alignment=ft.MainAxisAlignment.END,
@@ -215,7 +209,15 @@ def _heatmap_card(year: int, on_open, set_year, height: int | None = None) -> ft
     return card(
         ft.Column(
             [
-                grid,
+                ft.Text(
+                    f"{start.year}年{start.month}月起 · 截至 {end.year}年{end.month}月",
+                    size=th.FONT_CAPTION,
+                    color=th.TEXT_MUTED,
+                    max_lines=1,
+                    overflow=ft.TextOverflow.ELLIPSIS,
+                ),
+                # 窄窗口下横向滚动，绝不通过压小字号来塞进可视区。
+                ft.Row([grid], scroll=ft.ScrollMode.AUTO),
                 legend,
             ],
             spacing=8,
@@ -278,18 +280,11 @@ def _focus_page(page, refresh, data, on_open_diary, on_open_note, navigate) -> f
 
     return ft.Column(
         [
-            ft.Row(
-                [
-                    ft.Text("今日聚焦", size=15, color=th.TEXT, weight="bold"),
-                    ft.Text(
-                        f"{data['today'].isoformat()} {weekday_cn(data['today'])}"
-                        + (f" · {data['weekday_festival']}" if data["weekday_festival"] else ""),
-                        size=11, color=th.TEXT_MUTED,
-                    ),
-                    ft.Container(expand=True),
-                    _view_switch(refresh),
-                ],
-                spacing=10,
+            page_header(
+                "首页",
+                f"今日聚焦 · {data['today'].isoformat()} {weekday_cn(data['today'])}"
+                + (f" · {data['weekday_festival']}" if data["weekday_festival"] else ""),
+                actions=[_view_switch(refresh)],
             ),
             ft.Container(
                 focus_ui.render(page, refresh, data, on_open_diary, on_open_note, navigate),
@@ -380,38 +375,52 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
     def todo_rows(items, empty_text):
         if not items:
             return empty(empty_text)
-        return ft.Column(
-            [
+        rows: list[ft.Control] = []
+        for item in items:
+            overdue = bool(item.due_date and item.due_date < today)
+            due_label = (
+                ("已过期 · " if overdue else "")
+                + (item.due_date.isoformat() if item.due_date else "")
+                + (f" {item.due_time}" if item.due_date and item.due_time else "")
+            )
+            # 日期放第二行：12 号字放同一行会把标题挤没。
+            rows.append(
                 ft.Row(
                     [
-                        ft.Icon(ico("RADIO_BUTTON_UNCHECKED_OUTLINED"), size=16, color=th.TEXT_MUTED),
-                        ft.Text(
-                            item.title,
-                            size=12,
-                            color=th.DANGER if (item.due_date and item.due_date < today) else th.TEXT,
+                        ft.Icon(ico("RADIO_BUTTON_UNCHECKED_OUTLINED"), size=16,
+                                color=th.TEXT_MUTED),
+                        ft.Column(
+                            [
+                                ft.Text(
+                                    item.title, size=th.FONT_BODY,
+                                    color=th.DANGER if overdue else th.TEXT,
+                                    max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+                                ),
+                                ft.Text(
+                                    due_label or "未设置日期", size=th.FONT_CAPTION,
+                                    color=th.DANGER if overdue else th.TEXT_MUTED,
+                                    max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+                                ),
+                            ],
+                            spacing=1,
+                            tight=True,
                             expand=True,
-                            overflow=ft.TextOverflow.ELLIPSIS,
-                        ),
-                        ft.Text(
-                            ("已过期 · " if (item.due_date and item.due_date < today) else "")
-                            + (item.due_date.isoformat() if item.due_date else "")
-                            + (f" {item.due_time}" if item.due_date and item.due_time else ""),
-                            size=10,
-                            color=th.DANGER if (item.due_date and item.due_date < today) else th.TEXT_MUTED,
                         ),
                     ],
                     spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 )
-                for item in items
-            ],
-            spacing=10,
-        )
+            )
+        return ft.Column(rows, spacing=8, scroll=ft.ScrollMode.AUTO)
 
     note_body = (
         ft.Column(
             [
-                ft.Text(note.title, size=13, color=th.TEXT, weight="bold"),
-                ft.Text((note.content or "").replace("\n", " ")[:100] or "（暂无正文）", size=11, color=th.TEXT_MUTED),
+                ft.Text(note.title, size=th.FONT_CARD_TITLE, color=th.TEXT, weight="bold",
+                        max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
+                ft.Text((note.content or "").replace("\n", " ")[:100] or "（暂无正文）",
+                        size=th.FONT_CAPTION, color=th.TEXT_MUTED, max_lines=3,
+                        overflow=ft.TextOverflow.ELLIPSIS),
             ],
             spacing=6,
         )
@@ -446,7 +455,9 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
                             width=36, height=36, bgcolor=th.PRIMARY_LIGHT, border_radius=10,
                             alignment=ft.Alignment.CENTER,
                         ),
-                        ft.Text(label, size=10, color=th.TEXT_MUTED, text_align=ft.TextAlign.CENTER),
+                        ft.Text(label, size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+                                text_align=ft.TextAlign.CENTER, max_lines=1,
+                                overflow=ft.TextOverflow.ELLIPSIS),
                     ],
                     horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                     spacing=6,
@@ -462,26 +473,24 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
 
     return ft.Column(
         [
-            ft.Row(
-                [
-                    ft.Text("数据概览", size=15, color=th.TEXT, weight="bold"),
-                    ft.Container(expand=True),
-                    _view_switch(refresh),
-                ],
-                spacing=10,
+            page_header(
+                "首页",
+                f"数据概览 · {today.isoformat()} {weekday_cn(today)}",
+                actions=[_view_switch(refresh)],
             ),
             ft.Row(
                 [
                     ft.Column(
                         [
                             _heatmap_card(_HOME_STATE["year"], open_day, set_year, height=228),
-                            ft.Row(
+                            equal_height_row(
                                 [
                                     _stat_card("本月收入", money(summary["income"]), height=96),
                                     _stat_card("本月支出", money(summary["expense"]), accent=True, height=96),
                                     _stat_card("总资产", money(assets), height=96),
                                 ],
                                 spacing=12,
+                                height=96,
                             ),
                         ],
                         spacing=8,
@@ -491,8 +500,9 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
                     _calendar_card(_HOME_STATE["selected_date"], set_date, width=280, height=332),
                 ],
                 spacing=12,
+                vertical_alignment=ft.CrossAxisAlignment.STRETCH,
             ),
-            ft.Row(
+            equal_height_row(
                 [
                     card(todo_rows(todo_today, "今天没有任务"), title="今日任务", expand=1, height=180),
                     card(todo_rows(todo_soon, "最近 7 天没有任务"), title="最近 7 天", expand=1, height=180),
@@ -500,9 +510,11 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
                          expand=1, height=180),
                 ],
                 spacing=12,
+                height=180,
             ),
             card(quick, title="快捷入口", padding=ft.Padding.symmetric(vertical=8, horizontal=16)),
         ],
         spacing=8,
         expand=True,
+        scroll=ft.ScrollMode.AUTO,
     )

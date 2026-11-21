@@ -10,7 +10,7 @@ import flet as ft
 
 from .. import theme as th
 from ..icons import NAV, ico
-from .widgets import card, divider, ghost_button
+from .widgets import card, divider, ghost_button, page_header
 
 QUICK_START: tuple[str, ...] = (
     "左侧导航切换模块；顶栏右侧依次是「立即同步」、搜索、主题和设置，最右是最小化/最大化/关闭。",
@@ -133,7 +133,7 @@ def _bullets(points: tuple[str, ...]) -> ft.Column:
     return ft.Column(
         [
             ft.Row(
-                [_dot(), ft.Text(point, size=11, color=th.TEXT_MUTED, expand=True)],
+                [_dot(), ft.Text(point, size=th.FONT_BODY, color=th.TEXT_MUTED, expand=True)],
                 spacing=8,
                 vertical_alignment=ft.CrossAxisAlignment.START,
             )
@@ -148,7 +148,7 @@ def _module_card(key: str, label: str, navigate) -> ft.Container:
     head = ft.Row(
         [
             ft.Icon(ico(NAV.get(key, "CIRCLE_OUTLINED")), size=16, color=th.PRIMARY),
-            ft.Text(label, size=13, color=th.TEXT, weight="bold"),
+            ft.Text(label, size=th.FONT_CARD_TITLE, color=th.TEXT, weight="bold"),
             ft.Container(expand=True),
             ghost_button("去看看", lambda e, k=key: navigate(k)),
         ],
@@ -164,8 +164,8 @@ def _module_card(key: str, label: str, navigate) -> ft.Container:
 def _shortcut_row(key: str, desc: str) -> ft.Row:
     return ft.Row(
         [
-            ft.Container(content=ft.Text(key, size=11, color=th.TEXT), width=136),
-            ft.Text(desc, size=11, color=th.TEXT_MUTED, expand=True),
+            ft.Container(content=ft.Text(key, size=th.FONT_BODY, color=th.TEXT), width=150),
+            ft.Text(desc, size=th.FONT_BODY, color=th.TEXT_MUTED, expand=True),
         ],
         spacing=10,
         vertical_alignment=ft.CrossAxisAlignment.START,
@@ -175,8 +175,8 @@ def _shortcut_row(key: str, desc: str) -> ft.Row:
 def _faq_row(question: str, answer: str) -> ft.Column:
     return ft.Column(
         [
-            ft.Text(question, size=12, color=th.TEXT, weight="bold"),
-            ft.Text(answer, size=11, color=th.TEXT_MUTED),
+            ft.Text(question, size=th.FONT_CARD_TITLE, color=th.TEXT, weight="bold"),
+            ft.Text(answer, size=th.FONT_BODY, color=th.TEXT_MUTED),
         ],
         spacing=2,
         tight=True,
@@ -187,12 +187,9 @@ def build(page: ft.Page, navigate) -> ft.Control:
     """帮助页：快速上手 + 各模块说明 + 快捷键 + 数据与同步 + 常见问题。"""
     from ..main import MODULE_LABELS  # 延迟导入：main 反过来依赖本模块
 
-    heading = ft.Row(
-        [
-            ft.Icon(ico("HELP_OUTLINE"), size=20, color=th.PRIMARY),
-            ft.Text("帮助与上手", size=16, color=th.TEXT, weight="bold"),
-        ],
-        spacing=8,
+    heading = page_header(
+        "帮助与上手",
+        "说明按当前版本的界面整理；如果和界面有出入，以界面为准。",
     )
     module_cards = [
         _module_card(key, MODULE_LABELS.get(key, key), navigate) for key in MODULE_HELP
@@ -200,13 +197,9 @@ def build(page: ft.Page, navigate) -> ft.Control:
     return ft.Column(
         [
             heading,
-            ft.Text(
-                "说明按当前版本的界面整理；如果和界面有出入，以界面为准。",
-                size=11,
-                color=th.TEXT_MUTED,
-            ),
             card(_bullets(QUICK_START), title="快速上手"),
-            ft.Text("各模块能做什么", size=13, color=th.TEXT, weight="bold"),
+            ft.Text("各模块能做什么", size=th.FONT_SECTION_TITLE, color=th.TEXT,
+                    weight="bold"),
             ft.Row(module_cards, wrap=True, spacing=12, run_spacing=12),
             card(
                 ft.Column([_shortcut_row(key, desc) for key, desc in SHORTCUTS], spacing=8, tight=True),

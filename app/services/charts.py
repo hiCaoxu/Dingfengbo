@@ -82,7 +82,7 @@ def _style(ax: plt.Axes) -> None:
     for spine in ("top", "right", "left"):
         ax.spines[spine].set_visible(False)
     ax.spines["bottom"].set_color(th.DIVIDER)
-    ax.tick_params(colors=th.TEXT_MUTED, labelsize=9)
+    ax.tick_params(colors=th.TEXT_MUTED, labelsize=th.FONT_CAPTION)
 
 
 def line_chart(
@@ -130,14 +130,14 @@ def line_chart(
                 ax.fill_between(range(len(labels)), values, alpha=0.12, color=color)
         _style(ax)
         if len(labels) > 7:
-            # 14 天的日期标签横排会互相挤压，斜置并缩一号字。
-            ax.tick_params(axis="x", labelrotation=45, labelsize=8)
+            # 14 天的日期标签横排会互相挤压，斜置而不是缩小字号（最小 12 号）。
+            ax.tick_params(axis="x", labelrotation=45, labelsize=th.FONT_CAPTION)
         if ylim is not None:
             ax.set_ylim(*ylim)
         if title:
-            ax.set_title(title, color=th.TEXT, fontsize=11, loc="left", pad=8)
+            ax.set_title(title, color=th.TEXT, fontsize=th.FONT_SECTION_TITLE, loc="left", pad=8)
         if len(series) > 1:
-            ax.legend(frameon=False, fontsize=9, labelcolor=th.TEXT_MUTED)
+            ax.legend(frameon=False, fontsize=th.FONT_CAPTION, labelcolor=th.TEXT_MUTED)
         fig.tight_layout()
         data = _encode(fig, tight=False)
     _cache_put(key, data)
@@ -179,9 +179,9 @@ def bar_chart(
         if y_range is not None:
             ax.set_ylim(float(y_range[0]), float(y_range[1]))
         if len(labels) > 7:
-            ax.tick_params(axis="x", labelrotation=45, labelsize=8)
+            ax.tick_params(axis="x", labelrotation=45, labelsize=th.FONT_CAPTION)
         if title:
-            ax.set_title(title, color=th.TEXT, fontsize=11, loc="left", pad=8)
+            ax.set_title(title, color=th.TEXT, fontsize=th.FONT_SECTION_TITLE, loc="left", pad=8)
         fig.tight_layout()
         data = _encode(fig, tight=False)
     _cache_put(key, data)
@@ -216,14 +216,14 @@ def pie_chart(items: dict[str, float], title: str = "", cache_key: Any = None) -
                 autopct="%1.1f%%",
                 startangle=90,
                 colors=[colors[i % len(colors)] for i in range(len(key_items))],
-                textprops={"color": th.TEXT, "fontsize": 9},
+                textprops={"color": th.TEXT, "fontsize": th.FONT_CAPTION},
                 wedgeprops={"width": 0.55, "edgecolor": th.CHART_BG},
             )
         else:
             ax.text(0.5, 0.5, "暂无数据", ha="center", va="center", color=th.TEXT_MUTED, transform=ax.transAxes)
         ax.axis("equal")
         if title:
-            ax.set_title(title, color=th.TEXT, fontsize=11, loc="left")
+            ax.set_title(title, color=th.TEXT, fontsize=th.FONT_SECTION_TITLE, loc="left")
         fig.tight_layout()
         data = _encode(fig)
     _cache_put(key, data)

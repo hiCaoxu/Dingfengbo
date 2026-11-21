@@ -105,12 +105,14 @@ def open_sync_detail(page: ft.Page, refresh_status=None) -> ft.AlertDialog:
         controls: list[ft.Control] = [
             ft.Text(
                 f"待同步 {stats.get('pending', 0)} 条 · 被拒 {stats.get('error', 0)} 条",
-                size=11,
+                size=th.FONT_BODY,
                 color=th.ACCENT if stats.get("error") else th.TEXT_MUTED,
+                weight="bold",
             )
         ]
         if not errors:
-            controls.append(ft.Text("没有被拒记录。", size=11, color=th.TEXT_MUTED))
+            controls.append(ft.Text("没有被拒记录。", size=th.FONT_CAPTION,
+                                    color=th.TEXT_MUTED))
             return controls
         for row in errors:
             controls.append(
@@ -121,8 +123,10 @@ def open_sync_detail(page: ft.Page, refresh_status=None) -> ft.AlertDialog:
                                 [
                                     ft.Row(
                                         [
-                                            ft.Text(row["table_label"], size=9, color=th.PRIMARY),
-                                            ft.Text(row["title"], size=11, color=th.TEXT,
+                                            ft.Text(row["table_label"], size=th.FONT_CAPTION,
+                                                    color=th.PRIMARY),
+                                            ft.Text(row["title"], size=th.FONT_CARD_TITLE,
+                                                    color=th.TEXT,
                                                     weight="bold", max_lines=1,
                                                     overflow=ft.TextOverflow.ELLIPSIS),
                                         ],
@@ -133,7 +137,7 @@ def open_sync_detail(page: ft.Page, refresh_status=None) -> ft.AlertDialog:
                                         + " · "
                                         + (row["created_at"].strftime("%m-%d %H:%M")
                                            if isinstance(row["created_at"], datetime) else ""),
-                                        size=10,
+                                        size=th.FONT_CAPTION,
                                         color=th.TEXT_MUTED,
                                         max_lines=2,
                                         overflow=ft.TextOverflow.ELLIPSIS,
@@ -162,7 +166,7 @@ def open_sync_detail(page: ft.Page, refresh_status=None) -> ft.AlertDialog:
         controls.append(
             ft.Text(
                 "重试会把该条放回待同步队列；忽略则标记为已同步并停止重推。",
-                size=10,
+                size=th.FONT_CAPTION,
                 color=th.TEXT_MUTED,
             )
         )
@@ -173,12 +177,13 @@ def open_sync_detail(page: ft.Page, refresh_status=None) -> ft.AlertDialog:
         controls: list[ft.Control] = [
             ft.Text(
                 "同步冲突：远端版本比本地旧，本地获胜并保留了冲突记录，供人工核对。",
-                size=10,
+                size=th.FONT_CAPTION,
                 color=th.TEXT_MUTED,
             )
         ]
         if not conflicts:
-            controls.append(ft.Text("没有冲突记录。", size=11, color=th.TEXT_MUTED))
+            controls.append(ft.Text("没有冲突记录。", size=th.FONT_CAPTION,
+                                    color=th.TEXT_MUTED))
             return controls
         for row in conflicts:
             controls.append(
@@ -189,8 +194,10 @@ def open_sync_detail(page: ft.Page, refresh_status=None) -> ft.AlertDialog:
                                 [
                                     ft.Row(
                                         [
-                                            ft.Text(row["table_label"], size=9, color=th.PRIMARY),
-                                            ft.Text(row["title"], size=11, color=th.TEXT,
+                                            ft.Text(row["table_label"], size=th.FONT_CAPTION,
+                                                    color=th.PRIMARY),
+                                            ft.Text(row["title"], size=th.FONT_CARD_TITLE,
+                                                    color=th.TEXT,
                                                     weight="bold", max_lines=1,
                                                     overflow=ft.TextOverflow.ELLIPSIS),
                                         ],
@@ -203,7 +210,7 @@ def open_sync_detail(page: ft.Page, refresh_status=None) -> ft.AlertDialog:
                                         + " / 远端 "
                                         + (row["remote"].strftime("%m-%d %H:%M")
                                            if isinstance(row["remote"], datetime) else "?"),
-                                        size=10,
+                                        size=th.FONT_CAPTION,
                                         color=th.TEXT_MUTED,
                                     ),
                                 ],
@@ -232,14 +239,18 @@ def open_sync_detail(page: ft.Page, refresh_status=None) -> ft.AlertDialog:
     def _history_view() -> list[ft.Control]:
         history = data["history"]
         if not history:
-            return [ft.Text("还没有同步记录。", size=11, color=th.TEXT_MUTED)]
+            return [ft.Text("还没有同步记录。", size=th.FONT_CAPTION, color=th.TEXT_MUTED)]
         return [
             ft.Row(
                 [
-                    ft.Text(item.get("time", ""), size=10, color=th.TEXT_MUTED, width=140),
-                    ft.Text(item.get("status", ""), size=11, color=th.TEXT),
+                    ft.Text(item.get("time", ""), size=th.FONT_CAPTION,
+                            color=th.TEXT_MUTED, width=140),
+                    ft.Text(item.get("status", ""), size=th.FONT_BODY, color=th.TEXT,
+                            expand=True, max_lines=2,
+                            overflow=ft.TextOverflow.ELLIPSIS),
                 ],
                 spacing=10,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
             )
             for item in history
         ]
@@ -247,17 +258,19 @@ def open_sync_detail(page: ft.Page, refresh_status=None) -> ft.AlertDialog:
     def _devices_view() -> list[ft.Control]:
         devices = data["devices"]
         if not devices:
-            return [ft.Text("还没有同步过，本机设备记录会在首次同步后出现。", size=11,
-                            color=th.TEXT_MUTED)]
+            return [ft.Text("还没有同步过，本机设备记录会在首次同步后出现。",
+                            size=th.FONT_CAPTION, color=th.TEXT_MUTED)]
         return [
             ft.Container(
                 ft.Column(
                     [
-                        ft.Text(f"{item['host']} · {item['server']}", size=11,
-                                color=th.TEXT, weight="bold"),
+                        ft.Text(f"{item['host']} · {item['server']}", size=th.FONT_CARD_TITLE,
+                                color=th.TEXT, weight="bold", max_lines=2,
+                                overflow=ft.TextOverflow.ELLIPSIS),
                         ft.Text(
                             f"首次 {item['first_seen']} · 最近 {item['last_sync']}",
-                            size=10, color=th.TEXT_MUTED,
+                            size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+                            max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
                         ),
                     ],
                     spacing=2,
@@ -286,10 +299,10 @@ def open_sync_detail(page: ft.Page, refresh_status=None) -> ft.AlertDialog:
         controls: list[ft.Control] = [
             ft.Text(
                 "取消勾选的模块不参与上传/下载（游标也会保留，重新勾选后会补拉历史）。",
-                size=10,
+                size=th.FONT_CAPTION,
                 color=th.TEXT_MUTED,
             ),
-            ft.Row(boxes, wrap=True, spacing=8),
+            ft.Row(boxes, wrap=True, spacing=8, run_spacing=4),
         ]
 
         def save(_) -> None:

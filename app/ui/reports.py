@@ -19,20 +19,24 @@ from ..services.ai.provider import AIError
 from ..services.reports import PERIODS, build_report, render_markdown, report_prompt
 from .async_utils import background_section
 from .state import state
-from .widgets import card, empty, primary_button, snack
+from .widgets import card, empty, equal_height_row, page_header, primary_button, snack
 
 logger = logging.getLogger(__name__)
 
 EXPORT_DIR = DATA_DIR / "exports"
 
+# 同行卡片统一高度：内容多少不同也不会一张高一张矮。
+_ROW_H = 176
+
 
 def _metric(title: str, value: str, hint: str = "", color: str | None = None) -> ft.Control:
     return ft.Column(
         [
-            ft.Text(title, size=10, color=th.TEXT_MUTED),
-            ft.Text(value, size=18, color=color or th.TEXT, weight="bold"),
-            ft.Text(hint, size=9, color=th.TEXT_MUTED, max_lines=1,
+            ft.Text(title, size=th.FONT_CAPTION, color=th.TEXT_MUTED),
+            ft.Text(value, size=18, color=color or th.TEXT, weight="bold", max_lines=1,
                     overflow=ft.TextOverflow.ELLIPSIS),
+            ft.Text(hint, size=th.FONT_CAPTION, color=th.TEXT_MUTED, max_lines=1,
+                    overflow=ft.TextOverflow.ELLIPSIS, tooltip=hint or None),
         ],
         spacing=2,
         tight=True,
@@ -40,7 +44,13 @@ def _metric(title: str, value: str, hint: str = "", color: str | None = None) ->
 
 
 def _section_row(items: list[ft.Control], spacing: int = 18) -> ft.Row:
-    return ft.Row(items, spacing=spacing, wrap=True)
+    return ft.Row(
+        items,
+        spacing=spacing,
+        run_spacing=8,
+        wrap=True,
+        vertical_alignment=ft.CrossAxisAlignment.START,
+    )
 
 
 def _render(page: ft.Page, refresh, report: dict) -> ft.Control:
@@ -91,13 +101,16 @@ def _render(page: ft.Page, refresh, report: dict) -> ft.Control:
                 ft.Text(
                     "高频标签：" + "、".join(f"{tag}({count})" for tag, count in todo["top_tags"])
                     if todo["top_tags"] else "本期没有未完成标签",
-                    size=10, color=th.TEXT_MUTED,
+                    size=th.FONT_CAPTION, color=th.TEXT_MUTED, max_lines=2,
+                    overflow=ft.TextOverflow.ELLIPSIS,
                 ),
             ],
             spacing=10,
+            scroll=ft.ScrollMode.AUTO,
         ),
         title="任务",
         expand=2,
+        height=_ROW_H,
     )
 
     diary_card = card(
@@ -110,13 +123,16 @@ def _render(page: ft.Page, refresh, report: dict) -> ft.Control:
                 ft.Text(
                     "笔记标签：" + "、".join(f"{tag}({count})" for tag, count in note["top_tags"])
                     if note["top_tags"] else "笔记暂无标签",
-                    size=10, color=th.TEXT_MUTED,
+                    size=th.FONT_CAPTION, color=th.TEXT_MUTED, max_lines=2,
+                    overflow=ft.TextOverflow.ELLIPSIS,
                 ),
             ],
             spacing=10,
+            scroll=ft.ScrollMode.AUTO,
         ),
         title="记录",
         expand=1,
+        height=_ROW_H,
     )
 
     health_card = card(
@@ -142,9 +158,11 @@ def _render(page: ft.Page, refresh, report: dict) -> ft.Control:
                 )
             ],
             spacing=6,
+            scroll=ft.ScrollMode.AUTO,
         ),
         title="健康",
         expand=1,
+        height=_ROW_H,
     )
 
     finance_card = card(
@@ -163,20 +181,25 @@ def _render(page: ft.Page, refresh, report: dict) -> ft.Control:
                         f"{name} ¥{value:,.0f}" for name, value in finance["top_categories"]
                     )
                     if finance["top_categories"] else "本期没有支出记录",
-                    size=10, color=th.TEXT_MUTED,
+                    size=th.FONT_CAPTION, color=th.TEXT_MUTED, max_lines=2,
+                    overflow=ft.TextOverflow.ELLIPSIS,
                 ),
                 ft.Text(
                     f"预算：¥{budget['total_budget']:,.0f}，已用 ¥{budget['expense']:,.0f}，"
                     f"剩余 ¥{budget['remaining']:,.0f}" if budget.get("total_budget")
                     else "还没有设置预算（记账页可设置）",
-                    size=10,
+                    size=th.FONT_CAPTION,
                     color=th.DANGER if budget.get("remaining", 0) < 0 else th.TEXT_MUTED,
+                    max_lines=2,
+                    overflow=ft.TextOverflow.ELLIPSIS,
                 ),
             ],
             spacing=10,
+            scroll=ft.ScrollMode.AUTO,
         ),
         title="财务",
         expand=2,
+        height=_ROW_H,
     )
 
     fun_lines = list(fun["finished"]) + [f"在看：{title}" for title in fun["watching"]]
@@ -185,36 +208,46 @@ def _render(page: ft.Page, refresh, report: dict) -> ft.Control:
             [
                 ft.Text(
                     f"本期看完 {len(fun['finished'])} 条，在看 {len(fun['watching'])} 条",
-                    size=12, color=th.TEXT,
+                    size=th.FONT_BODY, color=th.TEXT,
                 ),
-                *[ft.Text(line, size=10, color=th.TEXT_MUTED) for line in fun_lines[:6]],
+                *[
+                    ft.Text(line, size=th.FONT_CAPTION, color=th.TEXT_MUTED, max_lines=1,
+                            overflow=ft.TextOverflow.ELLIPSIS)
+                    for line in fun_lines[:6]
+                ],
                 empty("本期没有娱乐记录") if not fun_lines else ft.Container(),
             ],
             spacing=6,
+            scroll=ft.ScrollMode.AUTO,
         ),
         title="阅读与娱乐",
         expand=1,
+        height=_ROW_H,
     )
 
     habit_card = card(
         ft.Column(
             [
-                ft.Text(f"打卡 {habit['checkins']} 次", size=12, color=th.TEXT),
+                ft.Text(f"打卡 {habit['checkins']} 次", size=th.FONT_BODY, color=th.TEXT),
                 *[
-                    ft.Text(f"{name}：{count} 次", size=10, color=th.TEXT_MUTED)
+                    ft.Text(f"{name}：{count} 次", size=th.FONT_CAPTION,
+                            color=th.TEXT_MUTED, max_lines=1,
+                            overflow=ft.TextOverflow.ELLIPSIS)
                     for name, count in habit["per_habit"][:6]
                 ],
                 empty("本期没有习惯打卡") if not habit["per_habit"] else ft.Container(),
             ],
             spacing=6,
+            scroll=ft.ScrollMode.AUTO,
         ),
         title="习惯",
         expand=1,
+        height=_ROW_H,
     )
 
     narrative_text = ft.Text(
         narrative or "还没有 AI 总结。统计只在本地计算，点「生成 AI 总结」才会把数字与标题发给模型。",
-        size=11,
+        size=th.FONT_BODY,
         color=th.TEXT if narrative else th.TEXT_MUTED,
         selectable=True,
     )
@@ -293,28 +326,15 @@ def _render(page: ft.Page, refresh, report: dict) -> ft.Control:
 
     return ft.Column(
         [
-            ft.Row(
-                [
-                    ft.Row(
-                        [
-                            ft.Icon(ico("INSIGHTS_OUTLINED"), size=20, color=th.PRIMARY),
-                            ft.Text("回顾报告", size=15, color=th.TEXT, weight="bold"),
-                            ft.Text(
-                                f"{report['start'].isoformat()} ~ {report['end'].isoformat()}",
-                                size=11, color=th.TEXT_MUTED,
-                            ),
-                        ],
-                        spacing=8,
-                    ),
-                    ft.Container(expand=True),
-                    period_tabs,
-                ],
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            page_header(
+                "回顾报告",
+                f"{report['start'].isoformat()} ~ {report['end'].isoformat()}",
+                actions=[period_tabs],
             ),
             ai_card,
-            ft.Row([todo_card, diary_card], spacing=12),
-            ft.Row([health_card, finance_card], spacing=12),
-            ft.Row([fun_card, habit_card], spacing=12),
+            equal_height_row([todo_card, diary_card], spacing=12, height=_ROW_H),
+            equal_height_row([health_card, finance_card], spacing=12, height=_ROW_H),
+            equal_height_row([fun_card, habit_card], spacing=12, height=_ROW_H),
         ],
         spacing=8,
         expand=True,

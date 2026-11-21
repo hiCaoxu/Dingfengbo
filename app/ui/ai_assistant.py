@@ -18,7 +18,7 @@ from .. import theme as th
 from .ai_tasks_ui import open_draft_dialog, run_task_dialog
 from .forms import open_settings_dialog
 from .state import state
-from .widgets import dismiss, open_dialog, primary_button, snack
+from .widgets import dismiss, open_dialog, page_header, primary_button, snack, status_badge
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ def _user_bubble(text: str) -> ft.Control:
         [
             ft.Container(expand=True),
             ft.Container(
-                ft.Text(text, size=13, color=th.CARD),
+                ft.Text(text, size=th.FONT_BODY, color=th.CARD),
                 bgcolor=th.PRIMARY,
                 border_radius=12,
                 padding=ft.Padding.symmetric(vertical=10, horizontal=14),
@@ -54,7 +54,7 @@ def _ai_bubble(text: str, on_quote, on_undo, on_save_drafts=None) -> ft.Control:
         actions.append(
             ft.Button(
                 content=ft.Row([ft.Icon(ico("SAVE_OUTLINED"), size=14),
-                                ft.Text("保存为记录", size=11)], spacing=4, tight=True),
+                                ft.Text("保存为记录", size=th.FONT_BODY)], spacing=4, tight=True),
                 bgcolor=th.PRIMARY_LIGHT,
                 color=th.PRIMARY,
                 elevation=0,
@@ -68,8 +68,8 @@ def _ai_bubble(text: str, on_quote, on_undo, on_save_drafts=None) -> ft.Control:
             ft.Container(
                 ft.Column(
                     [
-                        ft.Text(text, size=13, color=th.TEXT, selectable=True),
-                        ft.Row(actions, spacing=4),
+                        ft.Text(text, size=th.FONT_BODY, color=th.TEXT, selectable=True),
+                        ft.Row(actions, spacing=4, wrap=True, run_spacing=4),
                     ],
                     spacing=4,
                 ),
@@ -89,7 +89,7 @@ def _thinking_bubble() -> ft.Control:
     return ft.Row(
         [
             ft.Container(
-                ft.Text("正在思考…", size=12, color=th.TEXT_MUTED, italic=True),
+                ft.Text("正在思考…", size=th.FONT_CAPTION, color=th.TEXT_MUTED, italic=True),
                 bgcolor=th.CARD,
                 border=th.card_border(),
                 border_radius=12,
@@ -107,11 +107,12 @@ def _welcome() -> ft.Control:
             ft.Container(
                 ft.Column(
                     [
-                        ft.Text("你好，我是 AI 助手", size=13, color=th.TEXT, weight="bold"),
+                        ft.Text("你好，我是 AI 助手", size=th.FONT_CARD_TITLE,
+                                color=th.TEXT, weight="bold"),
                         ft.Text(
                             "点击输入框上方的快捷指令可引用对应数据表（如「@任务」），再输入你的具体要求，"
                             "我会结合引用数据为你分析、整理或给出建议。",
-                            size=12, color=th.TEXT_MUTED,
+                            size=th.FONT_CAPTION, color=th.TEXT_MUTED,
                         ),
                     ],
                     spacing=6,
@@ -256,12 +257,13 @@ def build(page: ft.Page, refresh) -> ft.Control:
             on_agree()
 
         dialog = ft.AlertDialog(
-            title=ft.Text("数据将发送至第三方大模型", size=14, color=th.TEXT, weight="bold"),
+            title=ft.Text("数据将发送至第三方大模型", size=th.FONT_SECTION_TITLE,
+                          color=th.TEXT, weight="bold"),
             content=ft.Text(
                 f"本次提问引用了 {tables}，其最近 {CONTEXT_LIMIT} 条记录会通过网络发送至 "
                 f"{provider}（{model}）。若不希望这些数据离开本机，请取消并移除 @引用。"
                 "该提示仅出现一次，之后可在设置页查看隐私说明。",
-                size=12,
+                size=th.FONT_BODY,
                 color=th.TEXT_MUTED,
             ),
             actions=[
@@ -321,8 +323,8 @@ def build(page: ft.Page, refresh) -> ft.Control:
             ft.Container(
                 ft.Row(
                     [
-                        ft.Icon(ico("BOLT_OUTLINED"), size=12, color=th.PRIMARY),
-                        ft.Text(task.label, size=11, color=th.TEXT),
+                        ft.Icon(ico("BOLT_OUTLINED"), size=14, color=th.PRIMARY),
+                        ft.Text(task.label, size=th.FONT_CAPTION, color=th.TEXT),
                     ],
                     spacing=4,
                     tight=True,
@@ -342,7 +344,7 @@ def build(page: ft.Page, refresh) -> ft.Control:
     quick_chips = ft.Row(
         [
             ft.Container(
-                ft.Text(f"@{label}", size=11, color=th.PRIMARY),
+                ft.Text(f"@{label}", size=th.FONT_CAPTION, color=th.PRIMARY),
                 bgcolor=th.PRIMARY_LIGHT,
                 border_radius=14,
                 padding=ft.Padding.symmetric(vertical=6, horizontal=12),
@@ -354,19 +356,15 @@ def build(page: ft.Page, refresh) -> ft.Control:
         wrap=True,
     )
 
-    status_row = ft.Row(
-        [
-            ft.Icon(ico("AUTO_AWESOME_OUTLINED"), size=20, color=th.PRIMARY),
-            ft.Text("AI 助手", size=15, color=th.TEXT, weight="bold"),
-            ft.Container(width=6),
-            ft.Text(f"模型：{model_name}" if model_name else "未配置模型", size=11, color=th.TEXT_MUTED),
-            ft.Container(expand=True),
-            ft.Text("已连接" if configured else "未配置 API Key", size=11,
-                    color=th.PRIMARY if configured else th.ACCENT),
+    status_row = page_header(
+        "AI 助手",
+        f"模型：{model_name}" if model_name else "未配置模型",
+        actions=[
+            status_badge("已连接" if configured else "未配置 API Key",
+                         "primary" if configured else "danger"),
             ft.TextButton("去设置", on_click=lambda e: open_settings_dialog(page, refresh, refresh),
                           visible=not configured),
         ],
-        spacing=8,
     )
 
     header = ft.Column(
@@ -393,7 +391,7 @@ def build(page: ft.Page, refresh) -> ft.Control:
             ft.Column(
                 [
                     ft.Text("快捷任务（带数据的一键提问，草稿类任务可保存回本地）",
-                            size=10, color=th.TEXT_MUTED),
+                            size=th.FONT_CAPTION, color=th.TEXT_MUTED),
                     task_chips,
                 ],
                 spacing=4,

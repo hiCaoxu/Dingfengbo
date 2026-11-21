@@ -26,8 +26,8 @@ from .widgets import (
     divider,
     empty,
     icon_button,
+    page_header,
     primary_button,
-    section_header,
     tag_chip,
 )
 
@@ -84,8 +84,9 @@ def _code_block(code: str, lang: str) -> ft.Control:
             ft.Row(
                 [
                     ft.Container(
-                        content=ft.Text(str(index), size=11, color=th.TEXT_MUTED, font_family="Consolas"),
-                        width=30,
+                        content=ft.Text(str(index), size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+                                        font_family="Consolas"),
+                        width=32,
                         alignment=ft.Alignment.CENTER_RIGHT,
                     ),
                     ft.Text(spans=spans, size=12, selectable=True),
@@ -152,7 +153,8 @@ def render_blocks(blocks: list[dict]) -> ft.Control:
                     fit=ft.BoxFit.CONTAIN,
                     border_radius=8,
                     error_content=ft.Text(
-                        block.get("alt") or "图片加载失败", size=11, color=th.TEXT_MUTED
+                        block.get("alt") or "图片加载失败", size=th.FONT_CAPTION,
+                        color=th.TEXT_MUTED,
                     ),
                 )
             )
@@ -270,8 +272,9 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
         border_width=0,
         filled=False,
         color=th.TEXT_MUTED,
-        text_style=ft.TextStyle(size=11, color=th.TEXT_MUTED),
+        text_style=ft.TextStyle(size=th.FONT_BODY, color=th.TEXT_MUTED),
         hint_text="标签（逗号分隔，路径用 /）",
+        hint_style=ft.TextStyle(size=th.FONT_BODY, color=th.TEXT_MUTED),
         on_change=lambda e: (
             _schedule_save(),
             _on_tags_change(e.control.value or ""),
@@ -389,15 +392,13 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
 
     return ft.Column(
         [
-            section_header(
+            page_header(
                 "编辑笔记",
-                ft.Row(
-                    [
-                        upload_button(page, insert_image, "插入图片", "选择要插入的图片"),
-                        ft.TextButton("返回", on_click=go_back),
-                    ],
-                    spacing=4,
-                ),
+                "光标离开正文自动保存 · 预览实时刷新",
+                actions=[
+                    upload_button(page, insert_image, "插入图片", "选择要插入的图片"),
+                    ft.TextButton("返回", on_click=go_back),
+                ],
             ),
             card(
                 ft.Column(
@@ -405,6 +406,7 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
                         title_field,
                         ft.Column([tags_field, suggestion_row], spacing=6),
                         divider(),
+                        # 源码 / 预览并排等高：内容长短不一也不让两张卡片底边错开
                         ft.Row(
                             [
                                 card(ft.Column([source], spacing=10, expand=True), title="源码", expand=1),
@@ -412,6 +414,7 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
                             ],
                             spacing=14,
                             expand=True,
+                            vertical_alignment=ft.CrossAxisAlignment.STRETCH,
                         ),
                     ],
                     spacing=8,
@@ -420,6 +423,7 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
                 expand=True,
             ),
         ],
+        spacing=12,
         expand=True,
     )
 
@@ -481,14 +485,18 @@ def _render(page: ft.Page, refresh, on_open, records) -> ft.Control:
                         [
                             ft.Container(width=depth * 14),
                             ft.Container(
-                                content=ft.Text("▾" if expanded else "▸", size=11, color=th.TEXT_MUTED),
+                                content=ft.Text("▾" if expanded else "▸",
+                                                size=th.FONT_CAPTION, color=th.TEXT_MUTED),
                                 width=18,
                                 alignment=ft.Alignment.CENTER,
                                 on_click=lambda e, p=path: toggle_expand(p),
                                 visible=has_children,
                             ),
-                            ft.Text(name, size=12, color=th.PRIMARY if active else th.TEXT,
-                                    weight="bold" if active else "normal"),
+                            ft.Text(name, size=th.FONT_BODY,
+                                    color=th.PRIMARY if active else th.TEXT,
+                                    weight="bold" if active else "normal",
+                                    max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+                                    expand=True),
                         ],
                         spacing=2,
                     ),
@@ -528,10 +536,12 @@ def _render(page: ft.Page, refresh, on_open, records) -> ft.Control:
 
     rows = [
         ft.ListTile(
-            title=ft.Text(title, size=13, color=th.TEXT, weight="bold"),
+            title=ft.Text(title, size=th.FONT_CARD_TITLE, color=th.TEXT, weight="bold",
+                           max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
             subtitle=ft.Text(
                 (snippet or "").replace("\n", " ")[:60] or "（暂无正文）",
-                size=11, color=th.TEXT_MUTED, overflow=ft.TextOverflow.ELLIPSIS,
+                size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+                overflow=ft.TextOverflow.ELLIPSIS,
             ),
             trailing=icon_button(
                 ACTIONS["delete"], lambda e, i=note_id: delete_note(i), "删除"
@@ -543,7 +553,11 @@ def _render(page: ft.Page, refresh, on_open, records) -> ft.Control:
 
     return ft.Column(
         [
-            section_header("笔记", primary_button("新增笔记", add_note, ACTIONS["add"])),
+            page_header(
+                "笔记",
+                f"共 {len(records)} 条笔记 · 当前筛选 {len(filtered)} 条",
+                actions=[primary_button("新增笔记", add_note, ACTIONS["add"])],
+            ),
             ft.Row(
                 [
                     card(
@@ -558,6 +572,7 @@ def _render(page: ft.Page, refresh, on_open, records) -> ft.Control:
                 ],
                 spacing=12,
                 expand=True,
+                vertical_alignment=ft.CrossAxisAlignment.STRETCH,
             ),
         ],
         spacing=12,
