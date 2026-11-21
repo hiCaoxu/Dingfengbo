@@ -11,8 +11,10 @@ from app.db.models import Account, Note, Todo, Transaction
 from app.db.repo import (
     apply_remote,
     create,
+    list_sync_issues,
     mark_clean,
     mark_rejected,
+    retry_rejected,
     serialize,
     sync_queue_stats,
     update,
@@ -135,6 +137,37 @@ class DataLogicTests(unittest.TestCase):
         self.assertEqual(stats["clean"], 1)
         self.assertEqual(stats["error"], 1)
         self.assertEqual(stats["pending"], 1)
+
+    def test_rejected_reason_is_listed_and_cleared_after_upload(self) -> None:
+        note = create(self.session, Note, title="坏记录", content="", tags="[]")
+        mark_rejected(
+            self.session,
+            [{"table": "notes", "id": note.id, "reason": "updated_at 缺失"}],
+        )
+
+        issues = list_sync_issues(self.session)
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].table_name, "notes")
+        self.assertEqual(issues[0].reason, "updated_at 缺失")
+
+        # 用户改好后上传成功，明细随之消失
+        update(self.session, note, title="修好了")
+        mark_clean(self.session, [serialize(note)])
+        self.assertEqual(list_sync_issues(self.session), [])
+
+    def test_retry_rejected_requeues_records_and_clears_issues(self) -> None:
+        todo = create(self.session, Todo, title="坏待办")
+        mark_rejected(
+            self.session, [{"table": "todos", "id": todo.id, "reason": "字段非法"}]
+        )
+        self.assertEqual(sync_queue_stats(self.session)["error"], 1)
+        self.assertEqual(len(list_sync_issues(self.session)), 1)
+
+        self.assertEqual(retry_rejected(self.session), 1)
+        self.session.refresh(todo)
+        self.assertEqual(todo.sync_status, "pending")
+        self.assertEqual(sync_queue_stats(self.session)["error"], 0)
+        self.assertEqual(list_sync_issues(self.session), [])
 
     def test_rejected_record_leaves_pending_queue_until_edited(self) -> None:
         note = create(self.session, Note, title="坏记录", content="", tags="[]")

@@ -27,6 +27,12 @@ python -m pytest -q          # 或：python -m unittest discover -s tests -t .
 
 测试依赖锁在 `requirements-dev.txt`：**不要装 `pytest-timeout` 2.7 以下版本**，它在 pytest 8 的 `addini` 类型校验下会让 pytest 在收集阶段直接崩溃，本项目也不需要超时插件。
 
+已知技术债（暂不处理，出现实际问题再启动）：
+
+- 金额仍用 `float` + 入库取两位小数，尚未迁移 `Decimal`；当前无分位误差故障报告。
+- `ft.TextButton` 之外的 Flet 控件已全部避开弃用项（`ElevatedButton` 已换 `ft.Button`），Flet 1.0 正式版发布时再统一升级验证。
+- Caddy TLS 仅在文档层面就绪，尚未在真实域名上做生产演练。
+
 ## 数据目录
 
 - 应用数据：统一在 `D:\Data\Dingfengbo\`（`dingfengbo.db`、`settings.json`、`logs\`），与 exe 所在目录分离，替换升级不丢数据。
@@ -58,7 +64,8 @@ python -m pytest -q          # 或：python -m unittest discover -s tests -t .
 - 冲突：按 `updated_at` 最后写入获胜；删除使用软删除，同步完成后物理清理。
 - 序列：服务端用全局单调递增的 `sync_seq` 分配号，客户端以 `sync_seq > cursor` 增量拉取；已有数据的服务端库升级时会把计数器锚定到存量最大值（启动日志会打印「同步序列当前值」）。需要自检时在服务端跑 `python scripts/check_sync_sequence.py <cloud.db 路径>`，输出计数器与各表 `MAX(sync_seq)` 的比对结论。
 - 被拒记录：push 校验失败的记录由服务端回传 `table`/`id`，客户端标记为 `error` 退出待同步队列，不再无限重推；重新编辑该记录后自动回到 `pending`。
-- 队列可见性：顶部状态栏在有待同步或失败记录时显示「待同步 N · 失败 M」，设置页显示同样统计；统计用一条 `UNION ALL` 聚合十张表，状态栏周期刷新不会带来额外往返。
+- 队列可见性：顶部状态栏在有待同步或失败记录时显示「待同步 N · 失败 M」，统计用一条 `UNION ALL` 聚合十张表，状态栏周期刷新不会带来额外往返；有失败记录时该区域可点击，直接打开设置页。
+- 拒收明细：服务端回传的 `reason` 存在本地 `sync_issues` 表（不参与同步），设置页列出「哪张表 / 哪条记录 / 为什么」；点「全部重试」把所有 error 记录放回待同步队列并清空明细，若载荷本身非法则下次 push 会再次被拒并重新出现在明细里，不会静默循环。
 
 ## Docker 部署同步服务
 

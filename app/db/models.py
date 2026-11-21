@@ -160,6 +160,21 @@ class Transaction(SyncMixin, Base):
     note: Mapped[str] = mapped_column(Text, default="")
 
 
+class SyncIssue(Base):
+    """被服务端拒收的同步记录（本地辅助表，不参与同步）。
+
+    只保存「最近一次拒收原因」，供设置页展示明细与「全部重试」使用；
+    记录重新上传成功（``mark_clean`` 命中）或用户重试后即被删除。
+    """
+
+    __tablename__ = "sync_issues"
+
+    table_name: Mapped[str] = mapped_column(String(32), primary_key=True)
+    record_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+
 SYNC_MODELS = (
     Todo,
     Diary,
@@ -174,3 +189,21 @@ SYNC_MODELS = (
 )
 
 MODEL_BY_TABLE = {m.__tablename__: m for m in SYNC_MODELS}
+
+# 表名 → 中文名：界面展示与 AI 上下文共用同一份，避免两处各自维护而漂移。
+TABLE_LABELS = {
+    "todos": "待办",
+    "diaries": "日记",
+    "notes": "笔记",
+    "exercises": "锻炼",
+    "diets": "饮食",
+    "weights": "体重",
+    "sleeps": "睡眠",
+    "entertainments": "娱乐",
+    "accounts": "账户",
+    "transactions": "收支",
+}
+
+
+def table_label(name: str) -> str:
+    return TABLE_LABELS.get(name, name)

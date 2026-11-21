@@ -5,11 +5,11 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any, Iterable
 
-from sqlalchemy import func, literal, select, union_all, update as sql_update
+from sqlalchemy import delete, func, literal, select, union_all, update as sql_update
 from sqlalchemy.orm import Session
 
 from ..services.clock import get_clock_offset
-from .models import MODEL_BY_TABLE, Base, Diary, SyncMixin, utcnow
+from .models import MODEL_BY_TABLE, Base, Diary, SyncIssue, SyncMixin, utcnow
 
 
 def _jsonable(value: Any) -> Any:
@@ -96,6 +96,13 @@ def mark_clean(
             .execution_options(synchronize_session=False)
         )
         session.execute(stmt)
+        # 该记录已成功上传，历史上可能残留的拒收原因不再有意义。
+        session.execute(
+            delete(SyncIssue).where(
+                SyncIssue.table_name == str(change.get("table")),
+                SyncIssue.record_id == str(record_id),
+            )
+        )
 
 
 def mark_rejected(
@@ -103,11 +110,13 @@ def mark_rejected(
 ) -> int:
     """被服务端永久拒收的记录标记为 error 并退出待同步队列，避免无限重推。
 
-    ``mark_dirty`` 会把重新编辑的记录重置回 pending，因此用户改动该记录后自愈。
+    ``mark_dirty`` 会把重新编辑的记录重置回 pending，因此用户改动该记录后自愈；
+    同时把拒收原因写入 ``sync_issues``，让设置页能展示「哪张表、哪条、为什么」。
     """
     marked = 0
     for item in rejected:
-        model = MODEL_BY_TABLE.get(str(item.get("table") or ""))
+        table_name = str(item.get("table") or "")
+        model = MODEL_BY_TABLE.get(table_name)
         record_id = item.get("id")
         if model is None or not record_id:
             continue
@@ -121,8 +130,63 @@ def mark_rejected(
             .values(sync_status="error")
             .execution_options(synchronize_session=False)
         )
-        marked += int(result.rowcount or 0)
+        if not result.rowcount:
+            continue
+        marked += 1
+        _record_issue(session, table_name, str(record_id), str(item.get("reason") or ""))
     return marked
+
+
+def _record_issue(session: Session, table_name: str, record_id: str, reason: str) -> None:
+    issue = session.get(SyncIssue, (table_name, record_id))
+    if issue is None:
+        session.add(SyncIssue(table_name=table_name, record_id=record_id, reason=reason))
+    else:
+        issue.reason = reason
+        issue.created_at = utcnow()
+    session.flush()
+
+
+def list_sync_issues(session: Session, limit: int = 50) -> list[SyncIssue]:
+    """最近的拒收明细（新→旧），供设置页展示。"""
+    return list(
+        session.scalars(
+            select(SyncIssue).order_by(SyncIssue.created_at.desc()).limit(limit)
+        )
+    )
+
+
+def retry_rejected(session: Session, owner_id: str = "local") -> int:
+    """把所有 error 记录放回待同步队列，并清空对应的拒收明细。
+
+    error 记录不会自行复活（用户没编辑），所以需要显式重置；若载荷仍然非法，
+    下一轮 push 会再次被拒并重新写入明细，不会造成静默循环。
+    """
+    restored = 0
+    for model in MODEL_BY_TABLE.values():
+        table_name = model.__tablename__
+        ids = session.scalars(
+            select(model.id).where(
+                model.owner_id == owner_id, model.sync_status == "error"
+            )
+        ).all()
+        if not ids:
+            continue
+        session.execute(
+            sql_update(model)
+            .where(model.owner_id == owner_id, model.sync_status == "error")
+            .values(sync_status="pending")
+            .execution_options(synchronize_session=False)
+        )
+        restored += len(ids)
+        for record_id in ids:
+            session.execute(
+                delete(SyncIssue).where(
+                    SyncIssue.table_name == table_name,
+                    SyncIssue.record_id == str(record_id),
+                )
+            )
+    return restored
 
 
 def sync_queue_stats(session: Session, owner_id: str = "local") -> dict[str, int]:

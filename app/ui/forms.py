@@ -29,8 +29,15 @@ from ..db.models import (
     Todo,
     Transaction,
     Weight,
+    table_label,
 )
-from ..db.repo import create, sync_queue_stats, update
+from ..db.repo import (
+    create,
+    list_sync_issues,
+    retry_rejected,
+    sync_queue_stats,
+    update,
+)
 from ..db.session import session_scope
 from ..icons import ico
 from ..services.ai.client import AIConfigError, chat
@@ -625,9 +632,10 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
 
         _run_probe(ai_probe_text, work)
 
-    # 同步队列可见性：被拒记录不会无限重推，但用户需要知道它们的存在。
+    # 同步队列可见性：被拒记录不会无限重推，但用户需要知道「哪张表、哪条、为什么」。
     with session_scope() as session:
         stats = sync_queue_stats(session)
+        issues = list_sync_issues(session, limit=20)
     queue_note = ft.Text(
         f"待同步 {stats.get('pending', 0)} 条"
         + (
@@ -638,6 +646,53 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
         size=11,
         color=ACCENT if stats.get("error") else TEXT_MUTED,
     )
+
+    def retry_all(_):
+        with session_scope() as session:
+            restored = retry_rejected(session)
+        if restored:
+            mark_pending_write()
+        snack(
+            page,
+            f"已重新排队 {restored} 条记录" if restored else "没有被拒记录需要重试",
+            PRIMARY if restored else TEXT_MUTED,
+        )
+        if refresh_status:
+            refresh_status()
+        _close_and_refresh(page, dialog, on_done)
+
+    issue_section: list[ft.Control] = []
+    if stats.get("error"):
+        issue_section = [
+            ft.Container(height=1, bgcolor=DIVIDER),
+            ft.Row(
+                [
+                    ft.Text(f"被拒明细（最近 {len(issues)} 条）", size=12, color=TEXT, weight="bold"),
+                    ft.Container(expand=True),
+                    ft.TextButton("全部重试", on_click=retry_all),
+                ]
+            ),
+            *[
+                ft.Row(
+                    [
+                        ft.Text(table_label(issue.table_name), size=11, color=TEXT, width=48),
+                        ft.Text(
+                            issue.reason or "未提供原因",
+                            size=11, color=TEXT_MUTED, expand=True,
+                            max_lines=2, overflow=ft.TextOverflow.ELLIPSIS,
+                        ),
+                        ft.Text(issue.record_id[:8], size=10, color=TEXT_MUTED),
+                    ],
+                    spacing=8,
+                )
+                for issue in issues
+            ],
+            ft.Text(
+                "被拒记录已退出待同步队列，不会反复上传；修改该记录会自动重试，"
+                "若载荷本身不合法则重试后仍会被拒。",
+                size=10, color=TEXT_MUTED,
+            ),
+        ]
 
     def save(_):
         try:
@@ -663,6 +718,7 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
                 server, token,
                 ft.Row([ft.TextButton("测试同步连接", on_click=test_sync), sync_probe_text], spacing=10),
                 queue_note,
+                *issue_section,
                 ft.Row([height, gender], spacing=12), enabled,
                 ft.Container(height=1, bgcolor=DIVIDER),
                 ft.Text("AI 助手（国产大模型）", size=12, color=TEXT, weight="bold"),

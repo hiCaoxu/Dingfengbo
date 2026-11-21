@@ -77,7 +77,14 @@ def main(page: ft.Page) -> None:
 
     state = {"current": "home", "preview_note": None}
     sync_text = ft.Text(sync_client.status, size=11, color=TEXT_MUTED)
-    queue_text = ft.Text("", size=11, color=TEXT_MUTED, visible=False)
+    queue_text = ft.Text("", size=11, color=TEXT_MUTED)
+    # 有失败记录时整块可点击，直接打开设置页看明细并重试。
+    queue_box = ft.Container(
+        content=queue_text,
+        padding=ft.Padding.symmetric(horizontal=4, vertical=2),
+        border_radius=6,
+        visible=False,
+    )
     body = ft.Container(expand=True, padding=ft.Padding.all(16))
     date_text = ft.Text(
         f"{date.today().year}年{date.today().month}月{date.today().day}日 {weekday_cn(date.today())}",
@@ -120,7 +127,7 @@ def main(page: ft.Page) -> None:
                         [
                             ft.Container(width=7, height=7, bgcolor=PRIMARY, border_radius=4),
                             sync_text,
-                            queue_text,
+                            queue_box,
                             ft.TextButton("立即同步", on_click=lambda e: _manual_sync()),
                             icon_button(ACTIONS["settings"], lambda e: open_settings_dialog(page, refresh, refresh_status), "设置"),
                         ],
@@ -151,7 +158,11 @@ def main(page: ft.Page) -> None:
             parts.append(f"失败 {failed}")
         queue_text.value = " · ".join(parts)
         queue_text.color = ACCENT if failed else TEXT_MUTED
-        queue_text.visible = bool(parts)
+        queue_box.visible = bool(parts)
+        queue_box.on_click = (
+            (lambda e: open_settings_dialog(page, refresh, refresh_status)) if failed else None
+        )
+        queue_box.tooltip = "点击查看被拒明细并重试" if failed else None
 
     syncing = {"value": False}
 

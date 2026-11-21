@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ...db.models import (
+    TABLE_LABELS,
     Account,
     Diet,
     Diary,
@@ -19,21 +20,25 @@ from ...db.models import (
     Todo,
     Transaction,
     Weight,
+    table_label,
 )
 from ...db.session import session_scope
 
-# (表名, 中文名, 模型)；顺序即快捷指令展示顺序。
+# (表名, 中文名, 模型)；中文名统一取自 models.TABLE_LABELS，顺序即快捷指令展示顺序。
 TABLES: list[tuple[str, str, Any]] = [
-    ("todos", "待办", Todo),
-    ("diaries", "日记", Diary),
-    ("notes", "笔记", Note),
-    ("exercises", "锻炼", Exercise),
-    ("diets", "饮食", Diet),
-    ("weights", "体重", Weight),
-    ("sleeps", "睡眠", Sleep),
-    ("entertainments", "娱乐", Entertainment),
-    ("accounts", "账户", Account),
-    ("transactions", "收支", Transaction),
+    (name, TABLE_LABELS[name], model)
+    for name, model in (
+        ("todos", Todo),
+        ("diaries", Diary),
+        ("notes", Note),
+        ("exercises", Exercise),
+        ("diets", Diet),
+        ("weights", Weight),
+        ("sleeps", Sleep),
+        ("entertainments", Entertainment),
+        ("accounts", Account),
+        ("transactions", Transaction),
+    )
 ]
 
 TABLE_BY_NAME = {name: (label, model) for name, label, model in TABLES}
@@ -109,5 +114,4 @@ def parse_refs(text: str) -> list[str]:
 
 
 def get_label(name: str) -> str:
-    entry = TABLE_BY_NAME.get(name)
-    return entry[0] if entry else name
+    return table_label(name)
