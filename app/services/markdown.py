@@ -11,7 +11,7 @@ from pygments.lexers import get_lexer_by_name
 from pygments.lexers.special import TextLexer
 from pygments.token import Token
 
-from ..theme import PRIMARY, TEXT, TEXT_MUTED
+from .. import theme as th
 
 _TOKEN_COLORS = {
     Token.Keyword: "#7B5EA7",
@@ -21,11 +21,11 @@ _TOKEN_COLORS = {
     Token.Name.Builtin: "#4A7C59",
     Token.String: "#A66A3A",
     Token.Number: "#B0693F",
-    Token.Comment: TEXT_MUTED,
-    Token.Operator: TEXT,
-    Token.Punctuation: TEXT_MUTED,
-    Token.Generic.Heading: PRIMARY,
-    Token.Generic.Subheading: PRIMARY,
+    Token.Comment: th.TEXT_MUTED,
+    Token.Operator: th.TEXT,
+    Token.Punctuation: th.TEXT_MUTED,
+    Token.Generic.Heading: th.PRIMARY,
+    Token.Generic.Subheading: th.PRIMARY,
 }
 
 
@@ -46,7 +46,7 @@ def highlight_lines(code: str, lang: str = "") -> list[list[ft.TextSpan]]:
         for part in value.split("\n"):
             if part:
                 result[-1].append(
-                    ft.TextSpan(part, style=ft.TextStyle(color=_color_for(token) or TEXT, size=12, font_family="Consolas"))
+                    ft.TextSpan(part, style=ft.TextStyle(color=_color_for(token) or th.TEXT, size=12, font_family="Consolas"))
                 )
             if "\n" in value:
                 result.append([])
@@ -63,18 +63,18 @@ def inline_spans(text: str) -> list[ft.TextSpan]:
         if not part:
             continue
         if part.startswith("**") and part.endswith("**"):
-            spans.append(ft.TextSpan(part[2:-2], style=ft.TextStyle(size=13, color=TEXT, weight="bold")))
+            spans.append(ft.TextSpan(part[2:-2], style=ft.TextStyle(size=13, color=th.TEXT, weight="bold")))
         elif part.startswith("`") and part.endswith("`"):
             spans.append(
                 ft.TextSpan(
                     part[1:-1],
-                    style=ft.TextStyle(size=12, color=PRIMARY, font_family="Consolas", bgcolor="#F4F6F3"),
+                    style=ft.TextStyle(size=12, color=th.PRIMARY, font_family="Consolas", bgcolor="#F4F6F3"),
                 )
             )
         elif part.startswith("*") and part.endswith("*"):
-            spans.append(ft.TextSpan(part[1:-1], style=ft.TextStyle(size=13, color=TEXT, italic=True)))
+            spans.append(ft.TextSpan(part[1:-1], style=ft.TextStyle(size=13, color=th.TEXT, italic=True)))
         else:
-            spans.append(ft.TextSpan(part, style=ft.TextStyle(size=13, color=TEXT)))
+            spans.append(ft.TextSpan(part, style=ft.TextStyle(size=13, color=th.TEXT)))
     return spans
 
 

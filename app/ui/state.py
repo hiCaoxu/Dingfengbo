@@ -32,6 +32,8 @@ class _StateBase:
 class HomeState(_StateBase):
     selected_date: date = field(default_factory=date.today)
     year: int = field(default_factory=lambda: date.today().year)
+    # focus=今日聚焦（行动页），overview=数据概览（原仪表盘）
+    view: str = "focus"
 
 
 @dataclass
@@ -83,6 +85,20 @@ class AIState(_StateBase):
     busy: bool = False
 
 
+@dataclass
+class ReportsState(_StateBase):
+    period: str = "week"
+    # AI 叙述按周期缓存，切换周期不丢失
+    narrative: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class TimelineState(_StateBase):
+    days: int = 30
+    module: str = "全部"
+    tag: str | None = None
+
+
 class PageState:
     """全局页面状态容器；各模块通过 state.<模块> 访问。"""
 
@@ -95,6 +111,8 @@ class PageState:
         self.finance = FinanceState()
         self.entertainment = EntertainmentState()
         self.ai = AIState()
+        self.reports = ReportsState()
+        self.timeline = TimelineState()
 
 
 state = PageState()

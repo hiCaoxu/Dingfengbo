@@ -8,18 +8,7 @@ from collections.abc import Callable
 import flet as ft
 
 from ..icons import ico
-from ..theme import (
-    ACCENT_LIGHT,
-    CARD,
-    CARD_PADDING,
-    CARD_RADIUS,
-    DIVIDER,
-    PRIMARY,
-    PRIMARY_LIGHT,
-    TEXT,
-    TEXT_MUTED,
-    card_border,
-)
+from .. import theme as th
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +29,7 @@ def card(
         header.append(
             ft.Row(
                 [
-                    ft.Text(title, size=13, color=TEXT, weight="bold"),
+                    ft.Text(title, size=13, color=th.TEXT, weight="bold"),
                     trailing or ft.Container(),
                 ],
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -49,10 +38,10 @@ def card(
     body = header + ([content] if content is not None else [])
     return ft.Container(
         content=ft.Column(body, spacing=12, tight=not expand),
-        bgcolor=CARD,
-        border=card_border(),
-        border_radius=CARD_RADIUS,
-        padding=padding or CARD_PADDING,
+        bgcolor=th.CARD,
+        border=th.card_border(),
+        border_radius=th.CARD_RADIUS,
+        padding=padding or th.CARD_PADDING,
         expand=expand,
         on_click=on_click,
         height=height,
@@ -69,7 +58,7 @@ def primary_button(text: str, on_click: Callable, icon: str | None = None, **kwa
             spacing=6,
             tight=True,
         ),
-        bgcolor=PRIMARY,
+        bgcolor=th.PRIMARY,
         color="#FFFFFF",
         elevation=0,
         on_click=on_click,
@@ -79,13 +68,13 @@ def primary_button(text: str, on_click: Callable, icon: str | None = None, **kwa
 
 
 def ghost_button(text: str, on_click: Callable, icon: str | None = None) -> ft.TextButton:
-    controls = ([ft.Icon(ico(icon), size=16)] if icon else []) + [ft.Text(text, size=12, color=TEXT_MUTED)]
+    controls = ([ft.Icon(ico(icon), size=16)] if icon else []) + [ft.Text(text, size=12, color=th.TEXT_MUTED)]
     return ft.TextButton(content=ft.Row(controls, spacing=5, tight=True), on_click=on_click)
 
 
 def icon_button(icon: str, on_click: Callable, tooltip: str = "") -> ft.IconButton:
     return ft.IconButton(
-        icon=ico(icon), icon_size=18, icon_color=TEXT_MUTED, tooltip=tooltip, on_click=on_click
+        icon=ico(icon), icon_size=18, icon_color=th.TEXT_MUTED, tooltip=tooltip, on_click=on_click
     )
 
 
@@ -93,8 +82,8 @@ def empty(text: str) -> ft.Container:
     return ft.Container(
         content=ft.Column(
             [
-                ft.Icon(ico("NOTE_ADD_OUTLINED"), size=28, color=DIVIDER),
-                ft.Text(text, size=12, color=TEXT_MUTED, text_align=ft.TextAlign.CENTER),
+                ft.Icon(ico("NOTE_ADD_OUTLINED"), size=28, color=th.DIVIDER),
+                ft.Text(text, size=12, color=th.TEXT_MUTED, text_align=ft.TextAlign.CENTER),
             ],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=8,
@@ -105,12 +94,12 @@ def empty(text: str) -> ft.Container:
 
 
 def tag_chip(text: str, active: bool = False, on_click=None) -> ft.Container:
-    bg = PRIMARY_LIGHT if active else CARD
-    fg = PRIMARY if active else TEXT_MUTED
+    bg = th.PRIMARY_LIGHT if active else th.CARD
+    fg = th.PRIMARY if active else th.TEXT_MUTED
     return ft.Container(
         content=ft.Text(text, size=11, color=fg),
         bgcolor=bg,
-        border=card_border(),
+        border=th.card_border(),
         border_radius=14,
         padding=ft.Padding.symmetric(vertical=4, horizontal=10),
         on_click=on_click,
@@ -118,10 +107,10 @@ def tag_chip(text: str, active: bool = False, on_click=None) -> ft.Container:
 
 
 def divider() -> ft.Container:
-    return ft.Container(height=1, bgcolor=DIVIDER)
+    return ft.Container(height=1, bgcolor=th.DIVIDER)
 
 
-def snack(page: ft.Page, message: str, color: str = TEXT) -> None:
+def snack(page: ft.Page, message: str, color: str = th.TEXT) -> None:
     page.snack_bar = ft.SnackBar(ft.Text(message, color="#FFFFFF", size=12), bgcolor=color)
     page.snack_bar.open = True
     page.update()
@@ -170,8 +159,8 @@ def confirm(page: ft.Page, message: str, on_confirm: Callable) -> None:
         on_confirm()
 
     dialog = ft.AlertDialog(
-        title=ft.Text("确认操作", size=14, color=TEXT),
-        content=ft.Text(message, size=12, color=TEXT_MUTED),
+        title=ft.Text("确认操作", size=14, color=th.TEXT),
+        content=ft.Text(message, size=12, color=th.TEXT_MUTED),
         actions=[
             ft.TextButton("取消", on_click=close),
             primary_button("确定", accept),
@@ -183,7 +172,7 @@ def confirm(page: ft.Page, message: str, on_confirm: Callable) -> None:
 
 def section_header(text: str, action: ft.Control | None = None) -> ft.Row:
     return ft.Row(
-        [ft.Text(text, size=13, color=TEXT, weight="bold"), action or ft.Container()],
+        [ft.Text(text, size=13, color=th.TEXT, weight="bold"), action or ft.Container()],
         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
     )
 
@@ -196,11 +185,11 @@ def form_field(label: str, value: str = "", multiline: bool = False, width: int 
         min_lines=3 if multiline else 1,
         max_lines=8 if multiline else 1,
         width=width,
-        border_color=DIVIDER,
-        focused_border_color=PRIMARY,
-        color=TEXT,
-        label_style=ft.TextStyle(color=TEXT_MUTED, size=12),
-        text_style=ft.TextStyle(color=TEXT, size=13),
+        border_color=th.DIVIDER,
+        focused_border_color=th.PRIMARY,
+        color=th.TEXT,
+        label_style=ft.TextStyle(color=th.TEXT_MUTED, size=12),
+        text_style=ft.TextStyle(color=th.TEXT, size=13),
         border_radius=8,
         content_padding=ft.Padding.symmetric(vertical=8, horizontal=10),
     )
@@ -212,17 +201,17 @@ def dropdown(label: str, options: list[str], value: str | None = None, width: in
         value=value or (options[0] if options else None),
         options=[ft.dropdown.Option(option) for option in options],
         width=width,
-        border_color=DIVIDER,
-        focused_border_color=PRIMARY,
-        color=TEXT,
-        label_style=ft.TextStyle(color=TEXT_MUTED, size=12),
+        border_color=th.DIVIDER,
+        focused_border_color=th.PRIMARY,
+        color=th.TEXT,
+        label_style=ft.TextStyle(color=th.TEXT_MUTED, size=12),
         border_radius=8,
     )
 
 
 def modal(page: ft.Page, title: str, body: ft.Control, actions: list[ft.Control], width: int = 560) -> ft.AlertDialog:
     dialog = ft.AlertDialog(
-        title=ft.Text(title, size=14, color=TEXT, weight="bold"),
+        title=ft.Text(title, size=14, color=th.TEXT, weight="bold"),
         content=ft.Container(content=body, width=width),
         actions=actions,
         actions_alignment=ft.MainAxisAlignment.END,

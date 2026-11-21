@@ -1,6 +1,16 @@
 # 定风波 · 个人工作台
 
-单机优先、可多端同步的桌面个人工作台，覆盖首页、待办、日记、笔记、健康、娱乐、记账、AI 助手八个模块。
+单机优先、可多端同步的桌面个人工作台，覆盖首页（今日聚焦/数据概览）、待办、日记、笔记、健康、娱乐、记账、习惯、回顾、时间轴、AI 助手十一个模块。
+
+## 快捷键与入口
+
+| 快捷键 | 作用 |
+|---|---|
+| `Ctrl+K` | 全局搜索 / 命令面板：跨待办、笔记、日记、收支、娱乐检索，并可直接新建待办、记一笔、同步、打开设置 |
+| `Ctrl+T` | 亮色 / 暗色主题切换 |
+| `Ctrl+1` ~ `Ctrl+9` | 按左侧导航顺序切换模块 |
+
+命令面板支持自然语言过滤，例如 `待办 今天 高优先级`、`笔记 AI`、`日记 本月`。
 
 ## 运行
 
@@ -38,7 +48,9 @@ python -m pytest -q          # 或：python -m unittest discover -s tests -t .
 - 应用数据：统一在 `D:\Data\Dingfengbo\`（`dingfengbo.db`、`settings.json`、`logs\`、`backups\`、`covers\`），与 exe 所在目录分离，替换升级不丢数据。
 - 娱乐封面：本地路径直接用；网络地址由程序带 UA/Referer 下载到 `covers\` 缓存后再渲染（`Image.network` 会被豆瓣等图床以 403 拒绝），缓存文件可随时删除，下次进娱乐页自动重新下载。
 - 可通过环境变量 `DINGFENGBO_DATA_DIR` 覆盖本地数据目录。
-- 自动备份：`backups\dingfengbo-时间戳-auto.db` 是 SQLite 在线快照（官方 `backup` API，WAL 模式下同样一致），每天首次启动备份一次、默认保留最近 7 份；设置页提供「立即备份」与「打开备份目录」。恢复方式：关闭应用，把备份文件复制回 `D:\Data\Dingfengbo\dingfengbo.db`。
+- 自动备份：`backups\dingfengbo-时间戳-auto.db` 是 SQLite 在线快照（官方 `backup` API，WAL 模式下同样一致），每天首次启动备份一次、默认保留最近 7 份。
+- 备份恢复中心（设置 → 备份恢复中心）：查看备份时间/大小/来源、`PRAGMA quick_check` 校验、立即备份、从指定备份恢复（恢复前自动再备份当前库为 `pre-restore`）、自定义备份目录与保留份数、导出完整数据 zip（数据库快照 + settings.json）。
+- 数据导入导出（设置 → 数据导入导出 / 命令面板）：导出 JSON（全量，可回灌合并）、Markdown（待办/收支表格，日记/笔记按篇落文件）、CSV（按表）；导入 JSON 按 LWW 合并，导入 CSV 按列名匹配、单行失败不影响其他行。
 - 敏感字段：`settings.json` 中的同步令牌与 AI Key 以 Windows DPAPI 按当前用户加密（`dpapi:` 前缀），拷到别的机器或别的 Windows 账户无法解开；旧版 `b64:` 值仍可读，下次保存自动升级。
 
 ## 打包（绿色单文件）
@@ -67,8 +79,21 @@ python -m pytest -q          # 或：python -m unittest discover -s tests -t .
 - 冲突：按 `updated_at` 最后写入获胜；删除使用软删除，同步完成后物理清理。
 - 序列：服务端用全局单调递增的 `sync_seq` 分配号，客户端以 `sync_seq > cursor` 增量拉取；已有数据的服务端库升级时会把计数器锚定到存量最大值（启动日志会打印「同步序列当前值」）。需要自检时在服务端跑 `python scripts/check_sync_sequence.py <cloud.db 路径>`，输出计数器与各表 `MAX(sync_seq)` 的比对结论。
 - 被拒记录：push 校验失败的记录由服务端回传 `table`/`id`，客户端标记为 `error` 退出待同步队列，不再无限重推；重新编辑该记录后自动回到 `pending`。
-- 队列可见性：顶部状态栏在有待同步或失败记录时显示「待同步 N · 失败 M」，统计用一条 `UNION ALL` 聚合十张表，状态栏周期刷新不会带来额外往返；有失败记录时该区域可点击，直接打开设置页。
+- 队列可见性：顶部状态栏在有待同步或失败记录时显示「待同步 N · 失败 M」，统计用一条 `UNION ALL` 聚合同步表，状态栏周期刷新不会带来额外往返；点击该区域打开「同步明细」，可单条重试/忽略、查看冲突、同步历史、本机设备记录，并按模块选择性同步（未勾选模块的游标不推进，重新勾选后会补拉历史）。
+- 冲突记录：LWW 合并时远端版本更旧会被丢弃，同时写入本地 `sync_conflicts` 表（不参与同步），在「同步明细 → 冲突」里可核对与清除。
 - 拒收明细：服务端回传的 `reason` 存在本地 `sync_issues` 表（不参与同步），设置页列出「哪张表 / 哪条记录 / 为什么」；点「全部重试」把所有 error 记录放回待同步队列并清空明细，若载荷本身非法则下次 push 会再次被拒并重新出现在明细里，不会静默循环。
+
+## 个人工作台能力（P0–P3 落地）
+
+- 全局搜索 / 命令面板（`app/services/search.py`、`app/ui/command_palette.py`）：跨模块关键字检索，结果按模块分组，支持自然语言过滤与快捷命令；`LIKE` 走 `autoescape`，用户输入里的 `%`/`_` 不会被当成通配符。
+- AI 行动化（`app/services/ai/tasks.py`、`app/ui/ai_tasks_ui.py`）：今日建议、写周报、任务拆解、日记润色、消费分析、笔记摘要、健康趋势、待看清单等任务卡，一键带上对应数据提问。
+- AI 草稿写回（`app/services/ai/drafts.py`）：模型只输出 JSON 草稿，应用解析校验后在预览弹窗里等用户确认，才走 `repo.create` 落库（自动进同步队列），保存后 SnackBar 提供「撤销」。模型始终不直接写库。
+- 今日聚焦（`app/services/focus.py`、`app/ui/focus.py`）：首页默认视图，含今日必做（可直接勾选）、日记提醒与写作连续天数、健康摘要、今日支出与预算进度、习惯打卡、随机回顾与 AI 今日建议；可切回原「数据概览」。
+- 回顾报告（`app/services/reports.py`、`app/ui/reports.py`）：周/月/年本地统计（待办完成率、日记笔记、健康、财务与预算、娱乐、习惯），可生成 AI 叙述并导出 Markdown 到 `exports\`。
+- 统一标签 / 时间轴 / 关联（`app/services/timeline.py`、`app/ui/timeline.py`）：跨模块标签聚合、按模块/标签/时间段筛选的生活时间线，记录之间可建立双向关联（`record_links`）。
+- 预算与周期记账（`app/services/budget.py`、`app/services/expense_rules.py`、`app/ui/budget_dialogs.py`）：月度总预算与分类预算、超支提示、固定支出/订阅到期自动生成交易（幂等，最多补 12 期）、规则版「一句话记账」（「今天午饭花了 32 元」）。
+- 习惯（`app/services/habits.py`、`app/ui/habits.py`）：每日打卡、连续/最长天数、周目标进度、12 周打卡日历。
+- 系统体验：亮/暗主题（`app/theme.py` 运行时换色板）、`Ctrl+K`/`Ctrl+T`/`Ctrl+1..9` 快捷键、开机自启（注册表 Run 项）、关闭到系统托盘（`pystray` 可选，未安装时降级）、导航模块显隐与排序（设置页）。
 
 ## 待办提醒与番茄钟
 
@@ -118,4 +143,5 @@ docker compose --profile tls up -d
 - ISO 周数使用 `date.isocalendar()[1]`，年内天数使用 `timetuple().tm_yday`，农历使用 `zhdate`。
 - 笔记使用 Pygments 高亮，左侧行号与代码逐行对齐滚动；不支持公式与图表。
 - 图表由 matplotlib 生成，文字使用系统中文字体，配色遵循米白主题。
-- AI 助手通过 OpenAI 兼容协议对接国产大模型；被 `@引用` 的数据会发送至所配置的服务商，设置页有隐私说明，首次发送前另有一次确认。
+- AI 助手通过 OpenAI 兼容协议对接国产大模型；被 `@引用` 的数据会发送至所配置的服务商，设置页有隐私说明，首次发送前另有一次确认。任务卡与草稿写回同样复用该协议，草稿必须经用户确认才落库。
+- 主题用模块级色板常量 + 运行时 `set_mode()` 切换，界面统一按 `theme.X` 读取颜色，切主题后重建页面即可生效（静态 `from theme import X` 会把导入时的值钉死）。

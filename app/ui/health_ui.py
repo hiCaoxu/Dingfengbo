@@ -14,7 +14,7 @@ from ..db.session import session_scope
 from ..icons import ACTIONS, ico
 from ..services.charts import bar_chart, line_chart
 from ..services.health import bmi
-from ..theme import ACCENT, DIVIDER, PRIMARY, TEXT, TEXT_MUTED
+from .. import theme as th
 from .async_utils import background_section
 from .forms import open_diet_dialog, open_exercise_dialog, open_sleep_dialog, open_weight_dialog
 from .state import state
@@ -36,7 +36,7 @@ _TABS = {
 
 def _chart_placeholder() -> ft.Control:
     return ft.Container(
-        content=ft.Text("加载中…", size=11, color=TEXT_MUTED),
+        content=ft.Text("加载中…", size=11, color=th.TEXT_MUTED),
         alignment=ft.Alignment.CENTER,
         expand=True,
     )
@@ -84,14 +84,14 @@ def _row(item, tab: str, page, refresh) -> ft.Control:
     return ft.Container(
         content=ft.Row(
             [
-                ft.Column([ft.Text(primary, size=12, color=TEXT, weight="bold"),
-                           ft.Text(secondary, size=10, color=TEXT_MUTED)], spacing=3, expand=True),
+                ft.Column([ft.Text(primary, size=12, color=th.TEXT, weight="bold"),
+                           ft.Text(secondary, size=10, color=th.TEXT_MUTED)], spacing=3, expand=True),
                 icon_button(ACTIONS["edit"], lambda e, i=item: _TABS[tab][1](page, i, refresh), "编辑"),
                 icon_button(ACTIONS["delete"], lambda e, i=item.id: _delete(_TABS[tab][0], i, page, refresh), "删除"),
             ],
             spacing=8,
         ),
-        border=ft.Border.all(1, DIVIDER),
+        border=ft.Border.all(1, th.DIVIDER),
         border_radius=10,
         padding=ft.Padding.symmetric(vertical=9, horizontal=12),
     )
@@ -199,8 +199,8 @@ def _summary_card(title: str, value: str, subtitle: str, accent: bool = False) -
     return card(
         ft.Column(
             [
-                ft.Text(value, size=21, color=ACCENT if accent else TEXT, weight="bold"),
-                ft.Text(subtitle, size=10, color=TEXT_MUTED),
+                ft.Text(value, size=21, color=th.ACCENT if accent else th.TEXT, weight="bold"),
+                ft.Text(subtitle, size=10, color=th.TEXT_MUTED),
             ],
             spacing=4,
         ),
@@ -214,7 +214,7 @@ def _quick_record_row(page: ft.Page, refresh) -> ft.Control:
     """汇总页的分类快捷记录：不必先进二级页再选分类。"""
     return ft.Row(
         [
-            ft.Text("快捷记录", size=11, color=TEXT_MUTED),
+            ft.Text("快捷记录", size=11, color=th.TEXT_MUTED),
             *[
                 ft.TextButton(
                     f"+ {name}",
@@ -266,7 +266,7 @@ def _chart_grid(page: ft.Page, data: dict) -> ft.Control:
         weight_slot.content = ft.Image(
             src=line_chart(
                 labels_of(weights),
-                [{"name": "体重 kg", "values": [w.kg for w in weights[-14:]], "color": PRIMARY, "fill": True}],
+                [{"name": "体重 kg", "values": [w.kg for w in weights[-14:]], "color": th.PRIMARY, "fill": True}],
                 "体重趋势",
                 cache_key=_key(weights),
                 y_range=(50, 70),
@@ -279,18 +279,18 @@ def _chart_grid(page: ft.Page, data: dict) -> ft.Control:
                 sleep_labels,
                 sleep_hours,
                 "睡眠时长",
-                ACCENT,
+                th.ACCENT,
                 cache_key=_key(sleeps),
                 y_range=(5, 12),
             ),
             width=width, height=height, fit=ft.BoxFit.CONTAIN,
         )
         exercise_slot.content = ft.Image(
-            src=bar_chart(exercise_labels, exercise_minutes, "锻炼分钟", PRIMARY, cache_key=_key(exercises)),
+            src=bar_chart(exercise_labels, exercise_minutes, "锻炼分钟", th.PRIMARY, cache_key=_key(exercises)),
             width=width, height=height, fit=ft.BoxFit.CONTAIN,
         )
         diet_slot.content = ft.Image(
-            src=bar_chart(diet_labels, diet_calories, "饮食热量", ACCENT, cache_key=_key(diets)),
+            src=bar_chart(diet_labels, diet_calories, "饮食热量", th.ACCENT, cache_key=_key(diets)),
             width=width, height=height, fit=ft.BoxFit.CONTAIN,
         )
         try:
@@ -432,7 +432,7 @@ def _render_records(page: ft.Page, refresh, data: dict) -> ft.Control:
                 ),
             ),
             tab_row,
-            ft.Text(_records_summary(tab, items), size=11, color=TEXT_MUTED),
+            ft.Text(_records_summary(tab, items), size=11, color=th.TEXT_MUTED),
             card(
                 ft.Column(
                     [_row(item, tab, page, refresh) for item in items],

@@ -15,7 +15,7 @@ from ..db.session import session_scope
 from ..services.notify import notify
 from ..services.reminders import collect_due
 from ..services.sync import sync_client
-from ..theme import ACCENT
+from .. import theme as th
 from .widgets import snack
 
 logger = logging.getLogger(__name__)
@@ -111,7 +111,7 @@ def _show_reminder_snack(count: int) -> None:
 
     async def apply() -> None:
         try:
-            snack(_page, f"有 {count} 条待办到点提醒", ACCENT)
+            snack(_page, f"有 {count} 条待办到点提醒", th.ACCENT)
         except Exception:
             logger.debug("提醒提示失败，页面可能已销毁", exc_info=True)
 

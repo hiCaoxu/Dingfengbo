@@ -14,7 +14,7 @@ from ..db.repo import update
 from ..db.session import session_scope
 from ..services.notify import notify
 from ..services.sync import mark_pending_write
-from ..theme import ACCENT, PRIMARY, TEXT_MUTED
+from .. import theme as th
 from .widgets import dismiss, dropdown, modal, primary_button, snack
 
 logger = logging.getLogger(__name__)
@@ -86,11 +86,11 @@ def _run_timer(
                         f"完成 {minutes} 分钟专注" + (f"：{title}" if title else ""),
                     )
                     status_text.value = f"已完成 {minutes} 分钟，休息一下"
-                    status_text.color = ACCENT
+                    status_text.color = th.ACCENT
                     remain_text.value = _fmt(minutes * 60)
                 else:
                     status_text.value = "已停止"
-                    status_text.color = TEXT_MUTED
+                    status_text.color = th.TEXT_MUTED
                 start_btn.disabled = False
                 stop_btn.disabled = True
                 page.update()
@@ -109,7 +109,7 @@ def _run_timer(
 
 def open_pomodoro_dialog(page: ft.Page, refresh=None):
     if _session["active"]:
-        snack(page, "番茄钟正在运行，请先停止当前计时", ACCENT)
+        snack(page, "番茄钟正在运行，请先停止当前计时", th.ACCENT)
         return None
 
     with session_scope() as session:
@@ -129,8 +129,8 @@ def open_pomodoro_dialog(page: ft.Page, refresh=None):
     todo_select.width = 380
 
     duration = dropdown("专注时长", ["25 分钟", "45 分钟", "60 分钟"], "25 分钟", width=150)
-    remain_text = ft.Text("25:00", size=44, color=PRIMARY, weight="bold")
-    status_text = ft.Text("选择待办与时长后点开始", size=11, color=TEXT_MUTED)
+    remain_text = ft.Text("25:00", size=44, color=th.PRIMARY, weight="bold")
+    status_text = ft.Text("选择待办与时长后点开始", size=11, color=th.TEXT_MUTED)
 
     def stop(_=None):
         _session["active"] = False
@@ -151,7 +151,7 @@ def open_pomodoro_dialog(page: ft.Page, refresh=None):
         _session.update(active=True, remaining=minutes * 60, total=minutes * 60)
         remain_text.value = _fmt(minutes * 60)
         status_text.value = "专注中：" + (title or "自由专注")
-        status_text.color = PRIMARY
+        status_text.color = th.PRIMARY
         start_btn.disabled = True
         stop_btn.disabled = False
         page.update()

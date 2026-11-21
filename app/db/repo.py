@@ -9,7 +9,16 @@ from sqlalchemy import delete, func, literal, select, union_all, update as sql_u
 from sqlalchemy.orm import Session
 
 from ..services.clock import get_clock_offset
-from .models import MODEL_BY_TABLE, Base, Diary, SyncIssue, SyncMixin, utcnow
+from .models import (
+    MODEL_BY_TABLE,
+    Base,
+    Diary,
+    SyncConflict,
+    SyncIssue,
+    SyncMixin,
+    table_label,
+    utcnow,
+)
 
 
 def _jsonable(value: Any) -> Any:
@@ -189,6 +198,94 @@ def retry_rejected(session: Session, owner_id: str = "local") -> int:
     return restored
 
 
+def retry_issue(
+    session: Session, table_name: str, record_id: str, owner_id: str = "local"
+) -> bool:
+    """单条被拒记录放回待同步队列（同步明细页用）。"""
+    model = MODEL_BY_TABLE.get(table_name)
+    if model is None:
+        return False
+    result = session.execute(
+        sql_update(model)
+        .where(
+            model.id == str(record_id),
+            model.owner_id == owner_id,
+            model.sync_status == "error",
+        )
+        .values(sync_status="pending")
+        .execution_options(synchronize_session=False)
+    )
+    session.execute(
+        delete(SyncIssue).where(
+            SyncIssue.table_name == table_name, SyncIssue.record_id == str(record_id)
+        )
+    )
+    return bool(result.rowcount)
+
+
+def ignore_issue(
+    session: Session, table_name: str, record_id: str, owner_id: str = "local"
+) -> bool:
+    """忽略单条被拒记录：标记为 clean 并删除明细，不再重推。"""
+    model = MODEL_BY_TABLE.get(table_name)
+    if model is None:
+        return False
+    result = session.execute(
+        sql_update(model)
+        .where(
+            model.id == str(record_id),
+            model.owner_id == owner_id,
+            model.sync_status == "error",
+        )
+        .values(sync_status="clean")
+        .execution_options(synchronize_session=False)
+    )
+    session.execute(
+        delete(SyncIssue).where(
+            SyncIssue.table_name == table_name, SyncIssue.record_id == str(record_id)
+        )
+    )
+    return bool(result.rowcount)
+
+
+def list_error_records(session: Session, owner_id: str = "local", limit: int = 100) -> list[dict]:
+    """列出同步失败（error）记录：表名、ID、标题与最近拒收原因。
+
+    标题尽量取业务字段，让「同步明细」页能直接看懂是哪一条，而不是一串 UUID。
+    """
+    issues = {
+        (issue.table_name, issue.record_id): issue
+        for issue in session.scalars(select(SyncIssue))
+    }
+    rows: list[dict] = []
+    for model in MODEL_BY_TABLE.values():
+        table = model.__tablename__
+        for obj in session.scalars(
+            select(model)
+            .where(model.owner_id == owner_id, model.sync_status == "error")
+            .limit(limit)
+        ):
+            title = ""
+            for field in ("title", "name", "food", "kind"):
+                if hasattr(obj, field):
+                    title = str(getattr(obj, field) or "")
+                    if title:
+                        break
+            issue = issues.get((table, obj.id))
+            rows.append(
+                {
+                    "table": table,
+                    "table_label": table_label(table),
+                    "id": obj.id,
+                    "title": title or obj.id[:8],
+                    "reason": issue.reason if issue else "",
+                    "created_at": issue.created_at if issue else obj.updated_at,
+                }
+            )
+    rows.sort(key=lambda row: row["created_at"] or datetime.min, reverse=True)
+    return rows
+
+
 def sync_queue_stats(session: Session, owner_id: str = "local") -> dict[str, int]:
     """统计各同步状态的记录数（待同步/被拒/已同步）。
 
@@ -279,6 +376,9 @@ def apply_remote(
         if obj.updated_at and obj.updated_at >= remote_time:
             if obj.updated_at == remote_time and _same_version(obj, model, data):
                 applied.append({"table": table, "data": data, "changed": False})
+            elif obj.updated_at > remote_time:
+                # 远端版本更旧：本地获胜，但留下冲突记录供用户核对。
+                _record_conflict(session, str(table), record_id, obj.updated_at, remote_time)
             continue
         for column in model.__table__.columns:
             # 按 (owner,date) 合并出的本地行保留本地主键，避免被远端 id 改写行身份。
@@ -290,6 +390,62 @@ def apply_remote(
         applied.append({"table": table, "data": data, "changed": True})
     session.flush()
     return applied
+
+
+def _record_conflict(
+    session: Session,
+    table_name: str,
+    record_id: str,
+    local_time: datetime | None,
+    remote_time: datetime | None,
+) -> None:
+    row = session.scalar(
+        select(SyncConflict).where(
+            SyncConflict.table_name == table_name, SyncConflict.record_id == record_id
+        )
+    )
+    if row is None:
+        row = SyncConflict(table_name=table_name, record_id=record_id)
+        session.add(row)
+    row.local_updated_at = local_time
+    row.remote_updated_at = remote_time
+    row.created_at = utcnow()
+
+
+def list_conflicts(session: Session, limit: int = 50) -> list[dict]:
+    """最近的同步冲突（本地获胜的记录，新→旧）。"""
+    rows = session.scalars(
+        select(SyncConflict).order_by(SyncConflict.created_at.desc()).limit(limit)
+    )
+    result: list[dict] = []
+    for row in rows:
+        title = ""
+        model = MODEL_BY_TABLE.get(row.table_name)
+        if model is not None:
+            obj = session.get(model, row.record_id)
+            if obj is not None:
+                for field in ("title", "name", "food", "kind"):
+                    if hasattr(obj, field):
+                        title = str(getattr(obj, field) or "")
+                        if title:
+                            break
+        result.append(
+            {
+                "table": row.table_name,
+                "table_label": table_label(row.table_name),
+                "id": row.record_id,
+                "title": title or row.record_id[:8],
+                "local": row.local_updated_at,
+                "remote": row.remote_updated_at,
+                "created_at": row.created_at,
+            }
+        )
+    return result
+
+
+def clear_conflicts(session: Session) -> int:
+    result = session.execute(delete(SyncConflict))
+    return int(result.rowcount or 0)
 
 
 def max_updated_at(session: Session, owner_id: str = "local") -> str | None:

@@ -11,7 +11,7 @@ from ..db.session import session_scope
 from ..icons import ACTIONS, ico
 from ..services.covers import prefetch, resolve_cover
 from ..services.sync import mark_pending_write
-from ..theme import DIVIDER, PRIMARY_LIGHT, TEXT, TEXT_MUTED
+from .. import theme as th
 from .async_utils import background_section
 from .forms import ENTERTAINMENT_KINDS, open_entertainment_dialog
 from .state import state
@@ -38,8 +38,8 @@ def delete(item_id: str, page, refresh) -> None:
 
 def _placeholder_cover() -> ft.Control:
     return ft.Container(
-        content=ft.Icon(ico("IMAGE_OUTLINED"), size=24, color=TEXT_MUTED),
-        width=64, height=84, bgcolor=PRIMARY_LIGHT, border_radius=6,
+        content=ft.Icon(ico("IMAGE_OUTLINED"), size=24, color=th.TEXT_MUTED),
+        width=64, height=84, bgcolor=th.PRIMARY_LIGHT, border_radius=6,
         alignment=ft.Alignment.CENTER,
     )
 
@@ -70,18 +70,18 @@ def _item_card(item: Entertainment, cover_src: str, page, refresh) -> ft.Control
                         _cover(cover_src, item.cover or ""),
                         ft.Column(
                             [
-                                ft.Text(item.title, size=12, color=TEXT, weight="bold",
+                                ft.Text(item.title, size=12, color=th.TEXT, weight="bold",
                                         max_lines=2, overflow=ft.TextOverflow.ELLIPSIS),
-                                ft.Text(item.kind, size=10, color=TEXT_MUTED),
+                                ft.Text(item.kind, size=10, color=th.TEXT_MUTED),
                                 ft.Text(f"评分 {item.rating}" if item.rating else "未评分",
-                                        size=10, color=TEXT_MUTED),
+                                        size=10, color=th.TEXT_MUTED),
                             ],
                             spacing=4, expand=True,
                         ),
                     ],
                     spacing=10,
                 ),
-                ft.Text(item.note or "", size=10, color=TEXT_MUTED, max_lines=2,
+                ft.Text(item.note or "", size=10, color=th.TEXT_MUTED, max_lines=2,
                         overflow=ft.TextOverflow.ELLIPSIS),
                 divider(),
                 ft.Row(
@@ -97,7 +97,7 @@ def _item_card(item: Entertainment, cover_src: str, page, refresh) -> ft.Control
             spacing=8,
         ),
         bgcolor="#FFFFFF",
-        border=ft.Border.all(1, DIVIDER),
+        border=ft.Border.all(1, th.DIVIDER),
         border_radius=10,
         padding=10,
         on_click=lambda e, i=item: open_entertainment_dialog(page, i, refresh),
@@ -138,9 +138,9 @@ def _render(page: ft.Page, refresh, records) -> ft.Control:
             ft.Container(
                 content=ft.Column(
                     [
-                        ft.Row([ft.Text(status, size=13, color=TEXT, weight="bold"),
+                        ft.Row([ft.Text(status, size=13, color=th.TEXT, weight="bold"),
                                 ft.Container(expand=True),
-                                ft.Text(f"{len(filtered)} 项", size=11, color=TEXT_MUTED)]),
+                                ft.Text(f"{len(filtered)} 项", size=11, color=th.TEXT_MUTED)]),
                         divider(),
                         ft.Column(
                             [
@@ -156,7 +156,7 @@ def _render(page: ft.Page, refresh, records) -> ft.Control:
                     expand=True,
                 ),
                 bgcolor="#F7F4EF",
-                border=ft.Border.all(1, DIVIDER),
+                border=ft.Border.all(1, th.DIVIDER),
                 border_radius=12,
                 padding=12,
                 expand=1,

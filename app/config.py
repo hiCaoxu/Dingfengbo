@@ -71,6 +71,23 @@ _DEFAULT_SETTINGS: dict[str, Any] = {
     "ai_data_notice_ack": False,
     # 最近一次成功备份的日期（YYYY-MM-DD），用于「每天最多备份一次」
     "last_backup_date": "",
+    # 备份中心：自定义目录（空=默认 DATA_DIR/backups）与保留份数
+    "backup_dir": "",
+    "backup_keep": 7,
+    # 界面：light / dark；首页默认聚焦视图；导航模块排序与隐藏
+    "theme_mode": "light",
+    "home_view": "focus",
+    "module_order": [
+        "home", "todo", "diary", "notes", "health", "fun", "finance", "habits", "reports", "timeline", "ai",
+    ],
+    "hidden_modules": [],
+    # 系统集成：开机自启、关闭窗口最小化（有 pystray 时收入托盘）
+    "autostart": False,
+    "close_to_tray": False,
+    # 同步：选择性同步（空列表=全部模块都同步）
+    "sync_tables": [],
+    # 数据导入导出：最近一次导出目录
+    "last_export_dir": "",
 }
 
 # settings.json 会被同步线程（游标落盘）与设置界面并发读写，统一串行化避免互相覆盖。

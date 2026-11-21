@@ -2,30 +2,40 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 from datetime import date, datetime
 
 import flet as ft
 
-from .config import DATA_DIR, LOGS_DIR, load_settings
+from . import theme as th
+from .config import DATA_DIR, LOGS_DIR, load_settings, save_settings
 from .db.backup import maybe_daily_backup
-from .services.holidays import ensure_sample_file
 from .db.session import init_db, session_scope
-from .logging_setup import setup_logging
 from .icons import ACTIONS, NAV, ico
+from .logging_setup import setup_logging
+from .services import budget as budget_service
+from .services import system_integration
 from .services.dates import weekday_cn
 from .services.diary import ensure_diary
+from .services.holidays import ensure_sample_file
 from .services.sync import mark_pending_write, queue_counts, sync_client
-from .theme import ACCENT, BG, CARD, DIVIDER, NAV_WIDTH, PRIMARY, PRIMARY_LIGHT, TEXT, TEXT_MUTED
 from .ui import ai_assistant, diary as diary_ui
-from .ui import entertainment, finance_ui, health_ui, home, notes, todo
+from .ui import entertainment, finance_ui, habits as habits_ui, health_ui, home, notes
+from .ui import reports as reports_ui
+from .ui import timeline as timeline_ui
+from .ui import todo
+from .ui.command_palette import open_command_palette
 from .ui.forms import open_settings_dialog
 from .ui.scheduler import bind as bind_sync
-from .ui.widgets import icon_button, primary_button
+from .ui.sync_detail import open_sync_detail
+from .ui import theme_switch
+from .ui.widgets import icon_button
 
 logger = logging.getLogger(__name__)
 
+# 全部可用模块；实际顺序与显隐由设置里的 module_order / hidden_modules 决定。
 MODULES = [
     ("home", "首页"),
     ("todo", "待办"),
@@ -34,8 +44,31 @@ MODULES = [
     ("health", "健康"),
     ("fun", "娱乐"),
     ("finance", "记账"),
+    ("habits", "习惯"),
+    ("reports", "回顾"),
+    ("timeline", "时间轴"),
     ("ai", "AI 助手"),
 ]
+
+MODULE_LABELS = dict(MODULES)
+
+
+def _module_list() -> list[tuple[str, str]]:
+    settings = load_settings()
+    hidden = {str(key) for key in (settings.get("hidden_modules") or [])}
+    order = [str(key) for key in (settings.get("module_order") or [])]
+    ordered: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for key in order:
+        if key in MODULE_LABELS and key not in hidden and key not in seen:
+            ordered.append((key, MODULE_LABELS[key]))
+            seen.add(key)
+    # 新版本新增的模块不在旧设置里：自动追加到末尾，避免升级后入口消失。
+    for key, label in MODULES:
+        if key not in seen and key not in hidden:
+            ordered.append((key, label))
+    # 全部被隐藏时只保留首页，避免导航区变空白后无法回到其他模块。
+    return ordered or [("home", "首页")]
 
 
 def _greeting() -> str:
@@ -51,6 +84,16 @@ def _greeting() -> str:
     return "晚上好"
 
 
+def _generate_recurring() -> None:
+    """启动时补齐到期的周期记账（失败只记日志，不影响启动）。"""
+    try:
+        created = budget_service.generate_due()
+        if created:
+            logger.info("已自动生成 %d 条周期交易", created)
+    except Exception:
+        logger.exception("生成周期交易失败")
+
+
 def main(page: ft.Page) -> None:
     setup_logging(LOGS_DIR)
     init_db()
@@ -61,9 +104,14 @@ def main(page: ft.Page) -> None:
     ensure_sample_file()
     # 每日自动备份放后台线程：SQLite 在线快照不影响启动速度，失败只记日志。
     threading.Thread(target=maybe_daily_backup, daemon=True).start()
+    # 固定支出/订阅：到期自动生成交易（幂等，重复启动不会重复记账）。
+    threading.Thread(target=_generate_recurring, daemon=True).start()
+
+    settings = load_settings()
+    th.set_mode(settings.get("theme_mode", "light"))
 
     page.title = "定风波 · 个人工作台"
-    page.bgcolor = BG
+    page.bgcolor = th.BG
     page.padding = 0
     page.spacing = 0
     page.window.width = 1280
@@ -73,19 +121,19 @@ def main(page: ft.Page) -> None:
     page.window.resizable = True
     page.window.maximizable = True
     page.window.minimizable = True
-    page.window.bgcolor = BG
+    page.window.bgcolor = th.BG
     # 隐藏系统标题栏，改用自定义标题栏（可拖动 + 最小化/最大化/关闭按钮）
     page.window.title_bar_hidden = True
     page.theme = ft.Theme(
-        color_scheme_seed="#4A7C59",
+        color_scheme_seed=th.PRIMARY,
         font_family="Microsoft YaHei",
         visual_density=ft.VisualDensity.COMPACT,
     )
 
-    state = {"current": "home", "preview_note": None}
-    sync_text = ft.Text(sync_client.status, size=11, color=TEXT_MUTED)
-    queue_text = ft.Text("", size=11, color=TEXT_MUTED)
-    # 有失败记录时整块可点击，直接打开设置页看明细并重试。
+    state = {"current": "home", "preview_note": None, "palette": False}
+    sync_text = ft.Text(sync_client.status, size=11, color=th.TEXT_MUTED)
+    queue_text = ft.Text("", size=11, color=th.TEXT_MUTED)
+    # 有失败记录时整块可点击，直接打开同步明细看重试/忽略。
     queue_box = ft.Container(
         content=queue_text,
         padding=ft.Padding.symmetric(horizontal=4, vertical=2),
@@ -95,8 +143,12 @@ def main(page: ft.Page) -> None:
     body = ft.Container(expand=True, padding=ft.Padding.all(16))
     date_text = ft.Text(
         f"{date.today().year}年{date.today().month}月{date.today().day}日 {weekday_cn(date.today())}",
-        size=12, color=TEXT_MUTED,
+        size=12, color=th.TEXT_MUTED,
     )
+    greeting_text = ft.Text(f"{_greeting()}，欢迎回来", size=18, color=th.TEXT, weight="bold")
+    slogan_text = ft.Text("刻意练习  要事第一  持续精进", size=18, color=th.PRIMARY, weight="bold")
+    dot = ft.Container(width=7, height=7, bgcolor=th.PRIMARY, border_radius=4)
+
     def window_buttons() -> ft.Row:
         def minimize(_):
             page.window.minimized = True
@@ -107,69 +159,100 @@ def main(page: ft.Page) -> None:
             page.update()
 
         def close(_):
-            page.run_task(page.window.close)
+            request_close()
 
         return ft.Row(
             [
-                ft.IconButton(icon=ico("MINIMIZE"), icon_size=16, icon_color=TEXT_MUTED,
+                ft.IconButton(icon=ico("MINIMIZE"), icon_size=16, icon_color=th.TEXT_MUTED,
                               tooltip="最小化", on_click=minimize),
-                ft.IconButton(icon=ico("CROP_SQUARE"), icon_size=15, icon_color=TEXT_MUTED,
+                ft.IconButton(icon=ico("CROP_SQUARE"), icon_size=15, icon_color=th.TEXT_MUTED,
                               tooltip="最大化/还原", on_click=toggle_maximize),
-                ft.IconButton(icon=ico("CLOSE"), icon_size=16, icon_color=TEXT_MUTED,
+                ft.IconButton(icon=ico("CLOSE"), icon_size=16, icon_color=th.TEXT_MUTED,
                               tooltip="关闭", on_click=close),
             ],
             spacing=0,
         )
 
-    header = ft.WindowDragArea(
-        content=ft.Container(
-            content=ft.Row(
-                [
-                    ft.Column(
-                        [
-                            ft.Row(
-                                [
-                                    ft.Text(f"{_greeting()}，欢迎回来", size=18, color=TEXT, weight="bold"),
-                                    ft.Text("·", size=16, color=DIVIDER),
-                                    ft.Text(
-                                        "刻意练习  要事第一  持续精进",
-                                        size=18, color=PRIMARY, weight="bold",
-                                    ),
-                                ],
-                                spacing=10,
-                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                            ),
-                            date_text,
-                        ],
-                        spacing=4,
-                    ),
-                    ft.Container(expand=True),
-                    ft.Row(
-                        [
-                            ft.Container(width=7, height=7, bgcolor=PRIMARY, border_radius=4),
-                            sync_text,
-                            queue_box,
-                            ft.TextButton("立即同步", on_click=lambda e: _manual_sync()),
-                            icon_button(ACTIONS["settings"], lambda e: open_settings_dialog(page, refresh, refresh_status), "设置"),
-                        ],
-                        spacing=4,
-                    ),
-                    ft.Container(width=1, height=20, bgcolor=DIVIDER, margin=ft.Margin.symmetric(horizontal=6)),
-                    window_buttons(),
-                ],
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+    def toggle_theme(_=None) -> None:
+        apply_theme("light" if th.is_dark() else "dark")
+
+    header_row = ft.Row(spacing=4)
+
+    def build_header_row() -> None:
+        header_row.controls = [
+            dot,
+            sync_text,
+            queue_box,
+            ft.TextButton("立即同步", on_click=lambda e: _manual_sync()),
+            icon_button(ACTIONS["search"], lambda e: open_search(), "搜索与命令 (Ctrl+K)"),
+            icon_button(
+                "DARK_MODE_OUTLINED" if not th.is_dark() else "LIGHT_MODE_OUTLINED",
+                toggle_theme,
+                "切换暗色/亮色主题 (Ctrl+T)",
             ),
-            bgcolor=BG,
-            padding=ft.Padding.symmetric(vertical=12, horizontal=24),
+            icon_button(ACTIONS["settings"],
+                        lambda e: open_settings_dialog(page, refresh, refresh_status), "设置"),
+        ]
+
+    header_box = ft.Container(
+        content=ft.Row(
+            [
+                ft.Column(
+                    [
+                        ft.Row(
+                            [greeting_text, ft.Text("·", size=16, color=th.DIVIDER), slogan_text],
+                            spacing=10,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        date_text,
+                    ],
+                    spacing=4,
+                ),
+                ft.Container(expand=True),
+                header_row,
+                ft.Container(width=1, height=20, bgcolor=th.DIVIDER,
+                             margin=ft.Margin.symmetric(horizontal=6)),
+                window_buttons(),
+            ],
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
         ),
-        maximizable=True,
+        bgcolor=th.BG,
+        padding=ft.Padding.symmetric(vertical=12, horizontal=24),
     )
+    build_header_row()
+
+    header = ft.WindowDragArea(content=header_box, maximizable=True)
 
     nav_column = ft.Column(spacing=2, expand=True)
+    nav_box = ft.Container(
+        content=nav_column, width=th.NAV_WIDTH, bgcolor=th.CARD,
+        border=ft.Border.only(right=ft.BorderSide(1, th.DIVIDER)),
+    )
+
+    def apply_theme(mode: str) -> None:
+        th.set_mode(mode)
+        save_settings({"theme_mode": th.current_mode()})
+        page.bgcolor = th.BG
+        page.window.bgcolor = th.BG
+        page.theme = ft.Theme(
+            color_scheme_seed=th.PRIMARY,
+            font_family="Microsoft YaHei",
+            visual_density=ft.VisualDensity.COMPACT,
+        )
+        header_box.bgcolor = th.BG
+        greeting_text.color = th.TEXT
+        slogan_text.color = th.PRIMARY
+        date_text.color = th.TEXT_MUTED
+        dot.bgcolor = th.PRIMARY
+        nav_box.bgcolor = th.CARD
+        nav_box.border = ft.Border.only(right=ft.BorderSide(1, th.DIVIDER))
+        build_header_row()
+        _render_nav()
+        refresh()
 
     def refresh_status() -> None:
         sync_text.value = sync_client.status
-        sync_text.color = TEXT_MUTED if "已同步" in sync_client.status else "#C97B63"
+        sync_text.color = th.TEXT_MUTED if "已同步" in sync_client.status else th.ACCENT
         # 队列可见性：单条聚合查询，告诉用户「还有多少没传上去 / 有多少被拒」。
         pending, failed = queue_counts()
         parts = []
@@ -178,12 +261,12 @@ def main(page: ft.Page) -> None:
         if failed:
             parts.append(f"失败 {failed}")
         queue_text.value = " · ".join(parts)
-        queue_text.color = ACCENT if failed else TEXT_MUTED
+        queue_text.color = th.ACCENT if failed else th.TEXT_MUTED
         queue_box.visible = bool(parts)
         queue_box.on_click = (
-            (lambda e: open_settings_dialog(page, refresh, refresh_status)) if failed else None
+            (lambda e: open_sync_detail(page, refresh_status)) if parts else None
         )
-        queue_box.tooltip = "点击查看被拒明细并重试" if failed else None
+        queue_box.tooltip = "点击查看同步明细（失败原因 / 重试 / 忽略）" if failed else "点击查看同步明细"
 
     syncing = {"value": False}
 
@@ -193,7 +276,7 @@ def main(page: ft.Page) -> None:
             return
         syncing["value"] = True
         sync_text.value = "正在同步…"
-        sync_text.color = TEXT_MUTED
+        sync_text.color = th.TEXT_MUTED
         page.update()
 
         def worker() -> None:
@@ -227,26 +310,27 @@ def main(page: ft.Page) -> None:
         controls = [
             ft.Container(
                 content=ft.Row(
-                    [ft.Icon(ico("WINDSOCK_OUTLINED"), size=22, color=PRIMARY),
-                     ft.Text("定风波", size=16, color=TEXT, weight="bold")],
+                    [ft.Icon(ico("WINDSOCK_OUTLINED"), size=22, color=th.PRIMARY),
+                     ft.Text("定风波", size=16, color=th.TEXT, weight="bold")],
                     spacing=10,
                 ),
                 padding=ft.Padding.symmetric(vertical=22, horizontal=18),
             )
         ]
-        for key, label in MODULES:
+        for key, label in _module_list():
             active = state["current"] == key or (state["current"] == "note_preview" and key == "notes")
             controls.append(
                 ft.Container(
                     content=ft.Row(
                         [
-                            ft.Icon(ico(NAV[key]), size=20, color=PRIMARY if active else TEXT_MUTED),
-                            ft.Text(label, size=13, color=PRIMARY if active else TEXT_MUTED,
+                            ft.Icon(ico(NAV.get(key, "CIRCLE_OUTLINED")), size=20,
+                                    color=th.PRIMARY if active else th.TEXT_MUTED),
+                            ft.Text(label, size=13, color=th.PRIMARY if active else th.TEXT_MUTED,
                                     weight="bold" if active else "normal"),
                         ],
                         spacing=12,
                     ),
-                    bgcolor=PRIMARY_LIGHT if active else None,
+                    bgcolor=th.PRIMARY_LIGHT if active else None,
                     border_radius=8,
                     padding=ft.Padding.symmetric(vertical=10, horizontal=14),
                     margin=ft.Margin.symmetric(horizontal=10),
@@ -258,13 +342,14 @@ def main(page: ft.Page) -> None:
             ft.Container(
                 content=ft.Column(
                     [
-                        ft.Row([ft.Container(width=7, height=7, bgcolor=PRIMARY, border_radius=4),
-                                ft.Text("本地优先 · 离线可用", size=10, color=TEXT_MUTED)], spacing=6),
-                        ft.Text(f"数据目录 {DATA_DIR}", size=9, color=TEXT_MUTED),
+                        ft.Row([ft.Container(width=7, height=7, bgcolor=th.PRIMARY, border_radius=4),
+                                ft.Text("本地优先 · 离线可用", size=10, color=th.TEXT_MUTED)], spacing=6),
+                        ft.Text(f"数据目录 {DATA_DIR}", size=9, color=th.TEXT_MUTED),
+                        ft.Text("Ctrl+K 搜索", size=9, color=th.TEXT_MUTED),
                     ],
                     spacing=4,
                 ),
-                border=ft.Border.only(top=ft.BorderSide(1, DIVIDER)),
+                border=ft.Border.only(top=ft.BorderSide(1, th.DIVIDER)),
                 padding=ft.Padding.all(16),
             )
         )
@@ -278,6 +363,24 @@ def main(page: ft.Page) -> None:
         state["preview_note"] = note
         navigate("note_preview")
 
+    def open_search() -> None:
+        if state["palette"]:
+            return
+        state["palette"] = True
+
+        def closed(_=None) -> None:
+            state["palette"] = False
+
+        dialog = open_command_palette(
+            page,
+            navigate,
+            refresh,
+            on_open_note=open_note_preview,
+            on_open_diary=open_diary_day,
+            on_sync=_manual_sync,
+        )
+        dialog.on_dismiss = closed
+
     def refresh(force: bool = True) -> None:
         current = state["current"]
         if not force and current == "note_preview":
@@ -285,7 +388,7 @@ def main(page: ft.Page) -> None:
             page.update()
             return
         if current == "home":
-            body.content = home.build(page, refresh, open_diary_day, open_note_preview)
+            body.content = home.build(page, refresh, open_diary_day, open_note_preview, navigate)
         elif current == "todo":
             body.content = todo.build(page, refresh)
         elif current == "diary":
@@ -304,24 +407,74 @@ def main(page: ft.Page) -> None:
             body.content = entertainment.build(page, refresh)
         elif current == "finance":
             body.content = finance_ui.build(page, refresh)
+        elif current == "habits":
+            body.content = habits_ui.build(page, refresh)
+        elif current == "reports":
+            body.content = reports_ui.build(page, refresh)
+        elif current == "timeline":
+            body.content = timeline_ui.build(
+                page, refresh, navigate, open_note_preview, open_diary_day
+            )
         elif current == "ai":
             body.content = ai_assistant.build(page, refresh)
         page.update()
 
+    def on_keyboard(e: ft.KeyboardEvent) -> None:
+        key = (e.key or "").lower()
+        if e.ctrl and key == "k":
+            open_search()
+            return
+        if e.ctrl and key == "t":
+            toggle_theme()
+            return
+        if e.ctrl and key in {str(index) for index in range(1, 10)}:
+            modules = [key for key, _label in _module_list()]
+            index = int(key) - 1
+            if 0 <= index < len(modules):
+                navigate(modules[index])
+            return
+
+    def request_close(_=None) -> None:
+        """关闭窗口：开了「关闭到托盘」就先隐藏；没有托盘依赖时最小化到任务栏。"""
+        if not load_settings().get("close_to_tray"):
+            page.run_task(page.window.close)
+            return
+        if system_integration.tray_available():
+            try:
+                system_integration.start_tray(page, on_quit=lambda: page.window.close())
+                if system_integration.tray_running():
+                    page.window.skip_task_bar = True
+                    page.window.visible = False
+                    page.update()
+                    return
+            except Exception:
+                logger.exception("收入托盘失败")
+        # 没有 pystray：降级为最小化，避免用户以为「关到托盘」却直接退出。
+        try:
+            page.window.minimized = True
+            page.update()
+        except Exception:
+            logger.debug("最小化窗口失败", exc_info=True)
+
+    theme_switch.bind(apply_theme)
     _render_nav()
-    page.add(
-        ft.Row(
-            [
-                ft.Container(content=nav_column, width=NAV_WIDTH, bgcolor=CARD,
-                             border=ft.Border.only(right=ft.BorderSide(1, DIVIDER))),
-                ft.Column([header, body], expand=True),
-            ],
-            expand=True,
-            spacing=0,
-        )
-    )
+    page.add(ft.Row([nav_box, ft.Column([header, body], expand=True)], expand=True, spacing=0))
     refresh()
     bind_sync(page, refresh_status, lambda: refresh(force=False))
+    page.on_keyboard_event = on_keyboard
+
+    async def _bind_loop() -> None:
+        try:
+            system_integration.bind_loop(asyncio.get_running_loop())
+            if load_settings().get("close_to_tray") and system_integration.tray_available():
+                system_integration.start_tray(page, on_quit=lambda: page.window.close())
+        except Exception:
+            logger.debug("托盘/事件循环初始化失败", exc_info=True)
+
+    try:
+        page.run_task(_bind_loop)
+    except Exception:
+        logger.debug("绑定事件循环失败", exc_info=True)
 
 
 def run() -> None:

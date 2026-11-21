@@ -168,6 +168,70 @@ class Transaction(SyncMixin, Base):
     note: Mapped[str] = mapped_column(Text, default="")
 
 
+class Budget(SyncMixin, Base):
+    """预算：``category`` 为空表示月度总预算，否则为分类预算。"""
+
+    __tablename__ = "budgets"
+
+    month: Mapped[str] = mapped_column(String(7), default="", index=True)  # YYYY-MM
+    category: Mapped[str] = mapped_column(String(40), default="")
+    amount: Mapped[float] = mapped_column(Float, default=0)
+    note: Mapped[str] = mapped_column(Text, default="")
+
+
+class RecurringRule(SyncMixin, Base):
+    """周期记账规则：固定支出/订阅，到期自动生成交易草稿。"""
+
+    __tablename__ = "recurring_rules"
+
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), default="expense")  # income/expense
+    amount: Mapped[float] = mapped_column(Float, default=0)
+    category: Mapped[str] = mapped_column(String(40), default="")
+    account_id: Mapped[str] = mapped_column(String(36), default="")
+    period: Mapped[str] = mapped_column(String(8), default="month")  # month/week
+    day: Mapped[int] = mapped_column(Integer, default=1)  # 月内日号（1-31）或周内（1=周一）
+    next_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    last_generated: Mapped[date | None] = mapped_column(Date, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+
+
+class Habit(SyncMixin, Base):
+    """习惯定义：每周目标次数 + 单次目标分钟数。"""
+
+    __tablename__ = "habits"
+
+    name: Mapped[str] = mapped_column(String(60), nullable=False)
+    target_per_week: Mapped[int] = mapped_column(Integer, default=7)
+    target_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    note: Mapped[str] = mapped_column(Text, default="")
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class HabitLog(SyncMixin, Base):
+    """习惯打卡记录：同一天同一习惯只保留一条（由服务层 upsert 保证）。"""
+
+    __tablename__ = "habit_logs"
+
+    habit_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    done: Mapped[bool] = mapped_column(Boolean, default=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+
+
+class RecordLink(SyncMixin, Base):
+    """跨模块关联：把一条记录指向另一条记录（如笔记关联待办）。"""
+
+    __tablename__ = "record_links"
+
+    from_table: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    from_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    to_table: Mapped[str] = mapped_column(String(32), nullable=False)
+    to_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    label: Mapped[str] = mapped_column(String(60), default="")
+
+
 class SyncIssue(Base):
     """被服务端拒收的同步记录（本地辅助表，不参与同步）。
 
@@ -180,6 +244,23 @@ class SyncIssue(Base):
     table_name: Mapped[str] = mapped_column(String(32), primary_key=True)
     record_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     reason: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+
+class SyncConflict(Base):
+    """同步冲突记录（本地辅助表，不参与同步）。
+
+    LWW 合并时远端版本更旧、本次拉取被丢弃，就记一条，供「同步明细 → 冲突」
+    展示与人工核对；同一记录只保留最近一次，避免长期使用时无限膨胀。
+    """
+
+    __tablename__ = "sync_conflicts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    table_name: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    record_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    local_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    remote_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
 
 
@@ -208,6 +289,11 @@ SYNC_MODELS = (
     Entertainment,
     Account,
     Transaction,
+    Budget,
+    RecurringRule,
+    Habit,
+    HabitLog,
+    RecordLink,
 )
 
 MODEL_BY_TABLE = {m.__tablename__: m for m in SYNC_MODELS}
@@ -224,6 +310,11 @@ TABLE_LABELS = {
     "entertainments": "娱乐",
     "accounts": "账户",
     "transactions": "收支",
+    "budgets": "预算",
+    "recurring_rules": "固定支出",
+    "habits": "习惯",
+    "habit_logs": "打卡",
+    "record_links": "关联",
 }
 
 

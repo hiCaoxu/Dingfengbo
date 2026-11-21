@@ -15,7 +15,7 @@ from ..icons import ACTIONS, ico
 from ..services.dates import diary_title, iso_week, month_grid, shift_month
 from ..services.diary import ensure_diary
 from ..services.sync import mark_pending_write
-from ..theme import ACCENT, DIVIDER, PRIMARY, PRIMARY_LIGHT, TEXT, TEXT_MUTED, card_border
+from .. import theme as th
 from .async_utils import background_section
 from .state import state
 from .widgets import card, divider, empty, icon_button, primary_button, section_header
@@ -59,8 +59,8 @@ def _editor(data: dict, refresh) -> ft.Control:
         border=ft.InputBorder.NONE,
         border_width=0,
         filled=False,
-        color=TEXT,
-        text_style=ft.TextStyle(size=13, color=TEXT, height=1.6),
+        color=th.TEXT,
+        text_style=ft.TextStyle(size=13, color=th.TEXT, height=1.6),
         on_blur=lambda e: save_content(diary_id, e.control.value),
     )
     return card(
@@ -68,13 +68,13 @@ def _editor(data: dict, refresh) -> ft.Control:
             [
                 ft.Row(
                     [
-                        ft.Text(title, size=14, color=TEXT, weight="bold"),
-                        ft.Container(width=7, height=7, bgcolor=PRIMARY if has_diary else DIVIDER, border_radius=4),
-                        ft.Text("有日记" if has_diary else "暂无日记", size=11, color=PRIMARY if has_diary else TEXT_MUTED),
+                        ft.Text(title, size=14, color=th.TEXT, weight="bold"),
+                        ft.Container(width=7, height=7, bgcolor=th.PRIMARY if has_diary else th.DIVIDER, border_radius=4),
+                        ft.Text("有日记" if has_diary else "暂无日记", size=11, color=th.PRIMARY if has_diary else th.TEXT_MUTED),
                     ],
                     spacing=6,
                 ),
-                ft.Text("光标离开正文即自动保存", size=10, color=TEXT_MUTED),
+                ft.Text("光标离开正文即自动保存", size=10, color=th.TEXT_MUTED),
                 divider(),
                 field,
             ],
@@ -121,7 +121,7 @@ def _month_view(refresh, data) -> ft.Control:
     for week in grid:
         cells.append(
             ft.Container(
-                content=ft.Text(f"{iso_week(week[0])}周", size=10, color=TEXT_MUTED),
+                content=ft.Text(f"{iso_week(week[0])}周", size=10, color=th.TEXT_MUTED),
                 width=38,
                 alignment=ft.Alignment.CENTER,
             )
@@ -132,10 +132,10 @@ def _month_view(refresh, data) -> ft.Control:
             selected = day == _state["selected"]
             body = ft.Column(
                 [
-                    ft.Text(str(day.day), size=11, color=TEXT if in_month else TEXT_MUTED,
+                    ft.Text(str(day.day), size=11, color=th.TEXT if in_month else th.TEXT_MUTED,
                             weight="bold" if selected else "normal"),
                     ft.Container(
-                        width=5, height=5, bgcolor=PRIMARY, border_radius=3,
+                        width=5, height=5, bgcolor=th.PRIMARY, border_radius=3,
                         visible=has_diary,
                     ),
                 ],
@@ -145,8 +145,8 @@ def _month_view(refresh, data) -> ft.Control:
             cells.append(
                 ft.Container(
                     content=body,
-                    bgcolor=PRIMARY_LIGHT if selected else ("#FFFFFF" if in_month else "#F7F4EF"),
-                    border=ft.Border.all(1, DIVIDER),
+                    bgcolor=th.PRIMARY_LIGHT if selected else ("#FFFFFF" if in_month else "#F7F4EF"),
+                    border=ft.Border.all(1, th.DIVIDER),
                     border_radius=4,
                     padding=3,
                     width=36,
@@ -159,7 +159,7 @@ def _month_view(refresh, data) -> ft.Control:
             )
     history_section = ft.Column(
         [
-            ft.Text("历史上的今天", size=11, color=TEXT_MUTED, weight="bold"),
+            ft.Text("历史上的今天", size=11, color=th.TEXT_MUTED, weight="bold"),
             *(
                 [
                     ft.TextButton(
@@ -169,7 +169,7 @@ def _month_view(refresh, data) -> ft.Control:
                     for day in history
                 ]
                 if history
-                else [ft.Text("暂无", size=10, color=TEXT_MUTED)]
+                else [ft.Text("暂无", size=10, color=th.TEXT_MUTED)]
             ),
         ],
         spacing=2,
@@ -180,7 +180,7 @@ def _month_view(refresh, data) -> ft.Control:
                 ft.Row(
                     [
                         icon_button(ACTIONS["chevron_left"], lambda e: _shift_month(-1, refresh), "上一月"),
-                        ft.Text(f"{year}年{month}月", size=13, color=TEXT, weight="bold"),
+                        ft.Text(f"{year}年{month}月", size=13, color=th.TEXT, weight="bold"),
                         icon_button(ACTIONS["chevron_right"], lambda e: _shift_month(1, refresh), "下一月"),
                         ft.TextButton("今天", on_click=lambda e: _goto_today(refresh)),
                     ],
@@ -239,8 +239,8 @@ def _list_view(refresh, data) -> ft.Control:
         label="按日期检索 YYYY-MM-DD",
         value=query,
         width=240,
-        border_color=DIVIDER,
-        focused_border_color=PRIMARY,
+        border_color=th.DIVIDER,
+        focused_border_color=th.PRIMARY,
         on_change=lambda e: (_state.__setitem__("query", e.control.value or ""), refresh()),
     )
     return card(
@@ -251,10 +251,10 @@ def _list_view(refresh, data) -> ft.Control:
                 ft.Column(
                     [
                         ft.ListTile(
-                            title=ft.Text(title, size=12, color=TEXT),
+                            title=ft.Text(title, size=12, color=th.TEXT),
                             subtitle=ft.Text(
                                 (snippet or "").replace("\n", " ")[:60],
-                                size=10, color=TEXT_MUTED,
+                                size=10, color=th.TEXT_MUTED,
                             ),
                             on_click=lambda e, day=day: (
                                 _state.__setitem__("selected", day), refresh()

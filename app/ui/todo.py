@@ -16,7 +16,7 @@ from ..services.reminders import describe as describe_reminders
 from ..services.sync import mark_pending_write
 from ..services.todo_rules import describe as describe_rule
 from ..services.todo_rules import next_occurrence
-from ..theme import DANGER, DIVIDER, PRIMARY_LIGHT, TEXT, TEXT_MUTED
+from .. import theme as th
 from .async_utils import background_section
 from .forms import open_todo_dialog, tags_text
 from .pomodoro import open_pomodoro_dialog
@@ -134,16 +134,16 @@ def _render(page: ft.Page, refresh, items) -> ft.Control:
                         [
                             ft.Row(
                                 [
-                                    ft.Text(item.title, size=13, color=DANGER if overdue else (TEXT_MUTED if item.completed else TEXT),
+                                    ft.Text(item.title, size=13, color=th.DANGER if overdue else (th.TEXT_MUTED if item.completed else th.TEXT),
                                             weight="bold"),
-                                    ft.Text("循环模板", size=9, color=TEXT_MUTED,
+                                    ft.Text("循环模板", size=9, color=th.TEXT_MUTED,
                                             visible=item.is_template),
                                 ],
                                 spacing=8,
                             ),
                             ft.Text(
                                 f"{label}{due}" + (" · " + " · ".join(extras) if extras else ""),
-                                size=11, color=DANGER if overdue else TEXT_MUTED,
+                                size=11, color=th.DANGER if overdue else th.TEXT_MUTED,
                             ),
                         ],
                         spacing=4, expand=True,
@@ -154,7 +154,7 @@ def _render(page: ft.Page, refresh, items) -> ft.Control:
                 spacing=10,
             ),
             bgcolor="#FFFFFF" if not overdue else "#FDECEA",
-            border=ft.Border.all(1, DIVIDER),
+            border=ft.Border.all(1, th.DIVIDER),
             border_radius=10,
             padding=ft.Padding.symmetric(vertical=10, horizontal=12),
         )

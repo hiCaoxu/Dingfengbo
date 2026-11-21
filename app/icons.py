@@ -24,6 +24,9 @@ NAV = {
     "health": "FAVORITE_OUTLINED",
     "fun": "MOVIE_OUTLINED",
     "finance": "ACCOUNT_BALANCE_WALLET_OUTLINED",
+    "habits": "TRACK_CHANGES_OUTLINED",
+    "reports": "INSIGHTS_OUTLINED",
+    "timeline": "TIMELINE_OUTLINED",
     "ai": "AUTO_AWESOME_OUTLINED",
 }
 
@@ -55,4 +58,9 @@ ACTIONS = {
     "timer": "TIMER_OUTLINED",
     "play": "PLAY_ARROW_OUTLINED",
     "stop": "STOP_CIRCLE_OUTLINED",
+    "save": "SAVE_OUTLINED",
+    "download": "DOWNLOAD_OUTLINED",
+    "upload": "UPLOAD_OUTLINED",
+    "link": "LINK_OUTLINED",
+    "backup": "BACKUP_OUTLINED",
 }

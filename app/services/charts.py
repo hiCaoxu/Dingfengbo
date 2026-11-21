@@ -13,7 +13,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
 
-from ..theme import ACCENT, DIVIDER, PRIMARY, TEXT, TEXT_MUTED
+from .. import theme as th
 
 _FONT_CANDIDATES = ["Microsoft YaHei", "SimHei", "Noto Sans CJK SC", "PingFang SC", "Arial Unicode MS"]
 _available = {f.name for f in font_manager.fontManager.ttflist}
@@ -77,12 +77,12 @@ def _resolve_ylim(
 
 def _style(ax: plt.Axes) -> None:
     ax.set_facecolor("white")
-    ax.grid(axis="y", color=DIVIDER, linewidth=0.8, alpha=0.9)
+    ax.grid(axis="y", color=th.DIVIDER, linewidth=0.8, alpha=0.9)
     ax.set_axisbelow(True)
     for spine in ("top", "right", "left"):
         ax.spines[spine].set_visible(False)
-    ax.spines["bottom"].set_color(DIVIDER)
-    ax.tick_params(colors=TEXT_MUTED, labelsize=9)
+    ax.spines["bottom"].set_color(th.DIVIDER)
+    ax.tick_params(colors=th.TEXT_MUTED, labelsize=9)
 
 
 def line_chart(
@@ -105,7 +105,7 @@ def line_chart(
         (
             str(item.get("name", "")),
             tuple(float(value) for value in item["values"]),
-            str(item.get("color", PRIMARY)),
+            str(item.get("color", th.PRIMARY)),
             bool(item.get("fill", False)),
         )
         for item in series
@@ -135,9 +135,9 @@ def line_chart(
         if ylim is not None:
             ax.set_ylim(*ylim)
         if title:
-            ax.set_title(title, color=TEXT, fontsize=11, loc="left", pad=8)
+            ax.set_title(title, color=th.TEXT, fontsize=11, loc="left", pad=8)
         if len(series) > 1:
-            ax.legend(frameon=False, fontsize=9, labelcolor=TEXT_MUTED)
+            ax.legend(frameon=False, fontsize=9, labelcolor=th.TEXT_MUTED)
         fig.tight_layout()
         data = _encode(fig, tight=False)
     _cache_put(key, data)
@@ -148,7 +148,7 @@ def bar_chart(
     labels: list[str],
     values: list[float],
     title: str = "",
-    color: str = PRIMARY,
+    color: str = th.PRIMARY,
     cache_key: Any = None,
     y_range: tuple[float, float] | None = None,
 ) -> bytes:
@@ -181,7 +181,7 @@ def bar_chart(
         if len(labels) > 7:
             ax.tick_params(axis="x", labelrotation=45, labelsize=8)
         if title:
-            ax.set_title(title, color=TEXT, fontsize=11, loc="left", pad=8)
+            ax.set_title(title, color=th.TEXT, fontsize=11, loc="left", pad=8)
         fig.tight_layout()
         data = _encode(fig, tight=False)
     _cache_put(key, data)
@@ -199,7 +199,7 @@ def pie_chart(items: dict[str, float], title: str = "", cache_key: Any = None) -
     with _RENDER_LOCK:
         fig, ax = plt.subplots(figsize=(4.2, 3.0))
         if key_items:
-            colors = [PRIMARY, ACCENT, "#8FB69A", "#D9B98A", "#7E9BB5", "#C9C2B6"]
+            colors = [th.PRIMARY, th.ACCENT, "#8FB69A", "#D9B98A", "#7E9BB5", "#C9C2B6"]
             labels = [key for key, _ in key_items]
             values = [value for _, value in key_items]
             ax.pie(
@@ -208,14 +208,14 @@ def pie_chart(items: dict[str, float], title: str = "", cache_key: Any = None) -
                 autopct="%1.1f%%",
                 startangle=90,
                 colors=[colors[i % len(colors)] for i in range(len(key_items))],
-                textprops={"color": TEXT, "fontsize": 9},
+                textprops={"color": th.TEXT, "fontsize": 9},
                 wedgeprops={"width": 0.55, "edgecolor": "white"},
             )
         else:
-            ax.text(0.5, 0.5, "暂无数据", ha="center", va="center", color=TEXT_MUTED, transform=ax.transAxes)
+            ax.text(0.5, 0.5, "暂无数据", ha="center", va="center", color=th.TEXT_MUTED, transform=ax.transAxes)
         ax.axis("equal")
         if title:
-            ax.set_title(title, color=TEXT, fontsize=11, loc="left")
+            ax.set_title(title, color=th.TEXT, fontsize=11, loc="left")
         fig.tight_layout()
         data = _encode(fig)
     _cache_put(key, data)

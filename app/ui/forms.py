@@ -79,7 +79,7 @@ from ..services.health import (
     latest_weight_kg,
 )
 from ..services.sync import mark_pending_write, probe
-from ..theme import ACCENT, DIVIDER, PRIMARY, TEXT, TEXT_MUTED
+from .. import theme as th
 from .widgets import (
     close_modal,
     dropdown,
@@ -490,7 +490,7 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
                 custom_panel,
                 ft.Column(
                     [
-                        ft.Text("提前提醒（可多选）", size=11, color=TEXT_MUTED),
+                        ft.Text("提前提醒（可多选）", size=11, color=th.TEXT_MUTED),
                         remind_chip_row,
                         remind_time,
                     ],
@@ -763,7 +763,7 @@ def open_diet_dialog(page: ft.Page, item: Diet | None = None, on_done: Callable 
     dialog = modal(
         page, "记录饮食" if not item else "编辑饮食",
         ft.Column([ft.Row([meal, food], spacing=12), ft.Row([grams, calories], spacing=12), day, note,
-                   ft.Text("热量按《中国食物成分表（第 6 版）》每 100g 可食部自动计算，可手动覆盖。", size=11, color=TEXT_MUTED)],
+                   ft.Text("热量按《中国食物成分表（第 6 版）》每 100g 可食部自动计算，可手动覆盖。", size=11, color=th.TEXT_MUTED)],
                   spacing=10, tight=True),
         [ft.TextButton("取消", on_click=lambda e: _close_and_refresh(page, dialog, None)),
          ft.TextButton("重算热量", on_click=recalc), primary_button("保存", save)],
@@ -900,6 +900,62 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
     gender = dropdown("性别", ["男", "女"], settings.get("gender", "男"))
     enabled = ft.Checkbox(label="启用自动同步", value=bool(settings.get("sync_enabled", True)))
 
+    # ---- 外观与系统集成
+    theme_dd = dropdown("主题", ["亮色", "暗色"],
+                        "暗色" if settings.get("theme_mode") == "dark" else "亮色", width=140)
+    autostart = ft.Checkbox(label="开机自启（Windows）",
+                            value=bool(settings.get("autostart", False)))
+    close_to_tray = ft.Checkbox(
+        label="关闭窗口时收到托盘（需安装 pystray，否则最小化到任务栏）",
+        value=bool(settings.get("close_to_tray", False)),
+    )
+
+    # 模块显示与排序：上移/下移即时生效，保存后写入设置
+    from ..main import MODULES  # 延迟导入避免循环依赖
+
+    order_state = {"value": [key for key in (settings.get("module_order") or [])]}
+    if not order_state["value"]:
+        order_state["value"] = [key for key, _label in MODULES]
+    labels = dict(MODULES)
+    for key, _label in MODULES:
+        if key not in order_state["value"]:
+            order_state["value"].append(key)
+    hidden = {str(key) for key in (settings.get("hidden_modules") or [])}
+    order_box = ft.Column(spacing=2)
+
+    def render_order() -> None:
+        def move(index: int, delta: int) -> None:
+            target = index + delta
+            if 0 <= target < len(order_state["value"]):
+                order_state["value"][index], order_state["value"][target] = (
+                    order_state["value"][target],
+                    order_state["value"][index],
+                )
+                render_order()
+                page.update()
+
+        def toggle_visible(key: str, checked: bool) -> None:
+            if checked:
+                hidden.discard(key)
+            else:
+                hidden.add(key)
+
+        order_box.controls = [
+            ft.Row(
+                [
+                    ft.Checkbox(value=key not in hidden,
+                                on_change=lambda e, k=key: toggle_visible(k, bool(e.control.value))),
+                    ft.Text(labels.get(key, key), size=12, color=th.TEXT, width=90),
+                    ft.TextButton("↑", on_click=lambda e, i=index: move(i, -1)),
+                    ft.TextButton("↓", on_click=lambda e, i=index: move(i, 1)),
+                ],
+                spacing=4,
+            )
+            for index, key in enumerate(order_state["value"])
+        ]
+
+    render_order()
+
     # AI 助手配置
     provider_names = [meta["name"] for meta in AI_PROVIDERS.values()]
     current_provider = settings.get("ai_provider", "custom")
@@ -926,12 +982,12 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
     ai_provider_dd.on_select = on_provider_change
 
     # 未保存配置的连通性自检：后台线程发请求，回到 UI 线程更新提示。
-    sync_probe_text = ft.Text("", size=11, color=TEXT_MUTED)
-    ai_probe_text = ft.Text("", size=11, color=TEXT_MUTED)
+    sync_probe_text = ft.Text("", size=11, color=th.TEXT_MUTED)
+    ai_probe_text = ft.Text("", size=11, color=th.TEXT_MUTED)
 
     def _run_probe(target: ft.Text, work: Callable[[], str]) -> None:
         target.value = "正在测试连接…"
-        target.color = TEXT_MUTED
+        target.color = th.TEXT_MUTED
         target.update()
 
         def worker() -> None:
@@ -939,7 +995,7 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
 
             async def apply() -> None:
                 target.value = message
-                target.color = PRIMARY if "成功" in message else ACCENT
+                target.color = th.PRIMARY if "成功" in message else th.ACCENT
                 page.update()
 
             try:
@@ -989,7 +1045,7 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
             else ""
         ),
         size=11,
-        color=ACCENT if stats.get("error") else TEXT_MUTED,
+        color=th.ACCENT if stats.get("error") else th.TEXT_MUTED,
     )
 
     def retry_all(_):
@@ -1000,7 +1056,7 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
         snack(
             page,
             f"已重新排队 {restored} 条记录" if restored else "没有被拒记录需要重试",
-            PRIMARY if restored else TEXT_MUTED,
+            th.PRIMARY if restored else th.TEXT_MUTED,
         )
         if refresh_status:
             refresh_status()
@@ -1009,10 +1065,10 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
     issue_section: list[ft.Control] = []
     if stats.get("error"):
         issue_section = [
-            ft.Container(height=1, bgcolor=DIVIDER),
+            ft.Container(height=1, bgcolor=th.DIVIDER),
             ft.Row(
                 [
-                    ft.Text(f"被拒明细（最近 {len(issues)} 条）", size=12, color=TEXT, weight="bold"),
+                    ft.Text(f"被拒明细（最近 {len(issues)} 条）", size=12, color=th.TEXT, weight="bold"),
                     ft.Container(expand=True),
                     ft.TextButton("全部重试", on_click=retry_all),
                 ]
@@ -1020,13 +1076,13 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
             *[
                 ft.Row(
                     [
-                        ft.Text(table_label(issue.table_name), size=11, color=TEXT, width=48),
+                        ft.Text(table_label(issue.table_name), size=11, color=th.TEXT, width=48),
                         ft.Text(
                             issue.reason or "未提供原因",
-                            size=11, color=TEXT_MUTED, expand=True,
+                            size=11, color=th.TEXT_MUTED, expand=True,
                             max_lines=2, overflow=ft.TextOverflow.ELLIPSIS,
                         ),
-                        ft.Text(issue.record_id[:8], size=10, color=TEXT_MUTED),
+                        ft.Text(issue.record_id[:8], size=10, color=th.TEXT_MUTED),
                     ],
                     spacing=8,
                 )
@@ -1035,34 +1091,49 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
             ft.Text(
                 "被拒记录已退出待同步队列，不会反复上传；修改该记录会自动重试，"
                 "若载荷本身不合法则重试后仍会被拒。",
-                size=10, color=TEXT_MUTED,
+                size=10, color=th.TEXT_MUTED,
             ),
         ]
 
     # 本地备份：自动每日一次，也可手动触发与打开目录
     last_backup = settings.get("last_backup_date") or "从未备份"
-    backup_text = ft.Text(f"最近备份：{last_backup}", size=11, color=TEXT_MUTED)
+    backup_text = ft.Text(f"最近备份：{last_backup}", size=11, color=th.TEXT_MUTED)
 
     def backup_now(_):
         try:
             path = backup_database(label="manual")
         except Exception:
             logger.exception("手动备份失败")
-            snack(page, "备份失败，详见日志", ACCENT)
+            snack(page, "备份失败，详见日志", th.ACCENT)
             return
         today_text = date.today().isoformat()
         save_settings({"last_backup_date": today_text})
         backup_text.value = f"最近备份：{today_text}（{path.name}）"
         # 下面 snack 会触发整页 update，无需单独刷新这个 Text。
-        snack(page, f"已备份：{path.name}", PRIMARY)
+        snack(page, f"已备份：{path.name}", th.PRIMARY)
 
     def open_backups(_):
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
         opener = getattr(os, "startfile", None)
         if opener is None:
-            snack(page, f"备份目录：{BACKUP_DIR}", TEXT_MUTED)
+            snack(page, f"备份目录：{BACKUP_DIR}", th.TEXT_MUTED)
             return
         opener(BACKUP_DIR)
+
+    def _open_backup_center() -> None:
+        from .backup_center import open_backup_center
+
+        open_backup_center(page, on_done)
+
+    def _open_data_io() -> None:
+        from .data_io_dialog import open_data_io_dialog
+
+        open_data_io_dialog(page, on_done)
+
+    def _open_sync_detail() -> None:
+        from .sync_detail import open_sync_detail
+
+        open_sync_detail(page, refresh_status)
 
     def save(_):
         try:
@@ -1076,10 +1147,29 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
             ai_base_url=ai_base_url.value or "",
             ai_api_key=ai_key.value or "",
             ai_model=ai_model.value or "",
+            theme_mode="dark" if theme_dd.value == "暗色" else "light",
+            autostart=bool(autostart.value),
+            close_to_tray=bool(close_to_tray.value),
+            module_order=list(order_state["value"]),
+            hidden_modules=sorted(hidden),
         ))
+        # 开机自启写注册表（失败只提示，不影响其他设置保存）
+        from ..services import system_integration
+
+        previous_autostart = bool(settings.get("autostart", False))
+        if bool(autostart.value) != previous_autostart:
+            ok, message = system_integration.set_autostart(bool(autostart.value))
+            if not ok:
+                snack(page, message, th.ACCENT)
         if refresh_status:
             refresh_status()
         _close_and_refresh(page, dialog, on_done)
+        from . import theme_switch
+
+        if theme_dd.value == "暗色" and not th.is_dark():
+            theme_switch.apply("dark")
+        elif theme_dd.value == "亮色" and th.is_dark():
+            theme_switch.apply("light")
 
     dialog = modal(
         page, "设置",
@@ -1090,8 +1180,8 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
                 queue_note,
                 *issue_section,
                 ft.Row([height, gender], spacing=12), enabled,
-                ft.Container(height=1, bgcolor=DIVIDER),
-                ft.Text("AI 助手（国产大模型）", size=12, color=TEXT, weight="bold"),
+                ft.Container(height=1, bgcolor=th.DIVIDER),
+                ft.Text("AI 助手（国产大模型）", size=12, color=th.TEXT, weight="bold"),
                 ai_provider_dd,
                 ft.Row([ai_base_url, ai_model], spacing=12),
                 ai_key,
@@ -1100,9 +1190,9 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
                     "隐私提示：使用 AI 助手时，被「@引用」的数据（待办、日记、笔记、收支等）"
                     "会通过网络发送至你所配置的大模型服务商；请勿在引用范围内填写密码等敏感信息。"
                     "首次发送前还会再次确认。",
-                    size=11, color=TEXT_MUTED,
+                    size=11, color=th.TEXT_MUTED,
                 ),
-                ft.Container(height=1, bgcolor=DIVIDER),
+                ft.Container(height=1, bgcolor=th.DIVIDER),
                 ft.Row(
                     [
                         ft.TextButton("立即备份", on_click=backup_now),
@@ -1112,13 +1202,41 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
                     spacing=10,
                     wrap=True,
                 ),
-                ft.Text(
-                    "每天首次启动会自动备份一次，默认保留最近 7 份（backups 目录）。",
-                    size=10, color=TEXT_MUTED,
+                ft.Row(
+                    [
+                        ft.TextButton(
+                            "备份恢复中心",
+                            on_click=lambda e: (_close_and_refresh(page, dialog, None),
+                                                _open_backup_center()),
+                        ),
+                        ft.TextButton(
+                            "数据导入导出",
+                            on_click=lambda e: (_close_and_refresh(page, dialog, None),
+                                                _open_data_io()),
+                        ),
+                        ft.TextButton(
+                            "同步明细",
+                            on_click=lambda e: (_close_and_refresh(page, dialog, None),
+                                                _open_sync_detail()),
+                        ),
+                    ],
+                    spacing=10,
+                    wrap=True,
                 ),
-                ft.Text(f"数据目录：{DATA_DIR}", size=11, color=TEXT_MUTED),
+                ft.Text(
+                    "每天首次启动会自动备份一次，默认保留最近 7 份（可在备份恢复中心改目录/份数）。",
+                    size=10, color=th.TEXT_MUTED,
+                ),
+                ft.Container(height=1, bgcolor=th.DIVIDER),
+                ft.Text("外观与系统集成", size=12, color=th.TEXT, weight="bold"),
+                ft.Row([theme_dd], spacing=12),
+                autostart,
+                close_to_tray,
+                ft.Text("导航模块（取消勾选即隐藏，↑↓ 调整顺序）", size=11, color=th.TEXT_MUTED),
+                order_box,
+                ft.Text(f"数据目录：{DATA_DIR}", size=11, color=th.TEXT_MUTED),
             ],
-            spacing=10, tight=True,
+            spacing=10, tight=True, scroll=ft.ScrollMode.AUTO, height=520,
         ),
         [ft.TextButton("取消", on_click=lambda e: _close_and_refresh(page, dialog, None)), primary_button("保存", save)],
         width=600,

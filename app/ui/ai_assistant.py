@@ -10,8 +10,12 @@ from ..config import AI_PROVIDERS, load_settings, save_settings
 from ..icons import ico
 from ..services.ai.client import AIConfigError, ai_configured, chat
 from ..services.ai.context import CONTEXT_LIMIT, TABLES, get_label, parse_refs, read_context
+from ..services.ai.drafts import extract as extract_drafts
+from ..services.ai.drafts import strip_json_blocks
 from ..services.ai.provider import AIError
-from ..theme import ACCENT, CARD, DIVIDER, PRIMARY, PRIMARY_LIGHT, TEXT, TEXT_MUTED, card_border
+from ..services.ai.tasks import TASKS
+from .. import theme as th
+from .ai_tasks_ui import open_draft_dialog, run_task_dialog
 from .forms import open_settings_dialog
 from .state import state
 from .widgets import dismiss, open_dialog, primary_button, snack
@@ -34,7 +38,7 @@ def _user_bubble(text: str) -> ft.Control:
             ft.Container(expand=True),
             ft.Container(
                 ft.Text(text, size=13, color="#FFFFFF"),
-                bgcolor=PRIMARY,
+                bgcolor=th.PRIMARY,
                 border_radius=12,
                 padding=ft.Padding.symmetric(vertical=10, horizontal=14),
                 width=460,
@@ -44,25 +48,33 @@ def _user_bubble(text: str) -> ft.Control:
     )
 
 
-def _ai_bubble(text: str, on_quote, on_undo) -> ft.Control:
+def _ai_bubble(text: str, on_quote, on_undo, on_save_drafts=None) -> ft.Control:
+    actions = [ft.TextButton("引用", on_click=on_quote), ft.TextButton("撤销", on_click=on_undo)]
+    if on_save_drafts is not None:
+        actions.append(
+            ft.Button(
+                content=ft.Row([ft.Icon(ico("SAVE_OUTLINED"), size=14),
+                                ft.Text("保存为记录", size=11)], spacing=4, tight=True),
+                bgcolor=th.PRIMARY_LIGHT,
+                color=th.PRIMARY,
+                elevation=0,
+                on_click=on_save_drafts,
+                style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=8),
+                                     padding=ft.Padding.symmetric(vertical=6, horizontal=10)),
+            )
+        )
     return ft.Row(
         [
             ft.Container(
                 ft.Column(
                     [
-                        ft.Text(text, size=13, color=TEXT, selectable=True),
-                        ft.Row(
-                            [
-                                ft.TextButton("引用", on_click=on_quote),
-                                ft.TextButton("撤销", on_click=on_undo),
-                            ],
-                            spacing=0,
-                        ),
+                        ft.Text(text, size=13, color=th.TEXT, selectable=True),
+                        ft.Row(actions, spacing=4),
                     ],
                     spacing=4,
                 ),
-                bgcolor=CARD,
-                border=card_border(),
+                bgcolor=th.CARD,
+                border=th.card_border(),
                 border_radius=12,
                 padding=ft.Padding.all(14),
                 width=620,
@@ -77,9 +89,9 @@ def _thinking_bubble() -> ft.Control:
     return ft.Row(
         [
             ft.Container(
-                ft.Text("正在思考…", size=12, color=TEXT_MUTED, italic=True),
-                bgcolor=CARD,
-                border=card_border(),
+                ft.Text("正在思考…", size=12, color=th.TEXT_MUTED, italic=True),
+                bgcolor=th.CARD,
+                border=th.card_border(),
                 border_radius=12,
                 padding=ft.Padding.all(12),
             ),
@@ -95,17 +107,17 @@ def _welcome() -> ft.Control:
             ft.Container(
                 ft.Column(
                     [
-                        ft.Text("你好，我是 AI 助手", size=13, color=TEXT, weight="bold"),
+                        ft.Text("你好，我是 AI 助手", size=13, color=th.TEXT, weight="bold"),
                         ft.Text(
                             "点击输入框上方的快捷指令可引用对应数据表（如「@待办」），再输入你的具体要求，"
                             "我会结合引用数据为你分析、整理或给出建议。",
-                            size=12, color=TEXT_MUTED,
+                            size=12, color=th.TEXT_MUTED,
                         ),
                     ],
                     spacing=6,
                 ),
-                bgcolor=CARD,
-                border=card_border(),
+                bgcolor=th.CARD,
+                border=th.card_border(),
                 border_radius=12,
                 padding=ft.Padding.all(14),
                 width=620,
@@ -129,7 +141,17 @@ def build(page: ft.Page, refresh) -> ft.Control:
             if m["role"] == "user":
                 controls.append(_user_bubble(m["text"]))
             else:
-                controls.append(_ai_bubble(m["text"], lambda e, i=index: quote(i), lambda e, i=index: undo(i)))
+                drafts = m.get("drafts") or []
+                controls.append(
+                    _ai_bubble(
+                        m["text"],
+                        lambda e, i=index: quote(i),
+                        lambda e, i=index: undo(i),
+                        (lambda e, d=drafts: open_draft_dialog(page, d, refresh))
+                        if any(draft.valid for draft in drafts)
+                        else None,
+                    )
+                )
         if state.ai.busy:
             controls.append(_thinking_bubble())
         if not controls:
@@ -140,8 +162,11 @@ def build(page: ft.Page, refresh) -> ft.Control:
         fill()
         page.update()
 
-    def append(role: str, text: str) -> None:
-        state.ai.messages.append({"role": role, "text": text})
+    def append(role: str, text: str, drafts: list | None = None) -> None:
+        message = {"role": role, "text": text}
+        if drafts:
+            message["drafts"] = drafts
+        state.ai.messages.append(message)
         overflow = len(state.ai.messages) - _MAX_MESSAGES
         if overflow > 0:
             del state.ai.messages[:overflow]
@@ -153,7 +178,7 @@ def build(page: ft.Page, refresh) -> ft.Control:
             current = input_field.value or ""
             input_field.value = (current + "\n" + result).strip() if current else result
             input_field.update()
-            input_field.focus()
+            page.run_task(input_field.focus)
 
     def undo(index: int) -> None:
         if not (0 <= index < len(state.ai.messages)):
@@ -180,9 +205,16 @@ def build(page: ft.Page, refresh) -> ft.Control:
                 logger.exception("AI 调用异常")
                 text = f"⚠️ 出错了：{exc}"
 
+            drafts = [] if text.startswith("⚠️") else extract_drafts(text)
+
             async def apply() -> None:
                 state.ai.busy = False
-                append("assistant", text)
+                # 有可保存草稿时，正文只展示 JSON 前的说明部分，避免一大段原始 JSON。
+                display = text
+                if drafts:
+                    display = strip_json_blocks(text) or text
+                    display += f"\n\n（已解析出 {len(drafts)} 条草稿，可点「保存为记录」）"
+                append("assistant", display, drafts)
 
             page.run_task(apply)
 
@@ -224,13 +256,13 @@ def build(page: ft.Page, refresh) -> ft.Control:
             on_agree()
 
         dialog = ft.AlertDialog(
-            title=ft.Text("数据将发送至第三方大模型", size=14, color=TEXT, weight="bold"),
+            title=ft.Text("数据将发送至第三方大模型", size=14, color=th.TEXT, weight="bold"),
             content=ft.Text(
                 f"本次提问引用了 {tables}，其最近 {CONTEXT_LIMIT} 条记录会通过网络发送至 "
                 f"{provider}（{model}）。若不希望这些数据离开本机，请取消并移除 @引用。"
                 "该提示仅出现一次，之后可在设置页查看隐私说明。",
                 size=12,
-                color=TEXT_MUTED,
+                color=th.TEXT_MUTED,
             ),
             actions=[
                 ft.TextButton("取消", on_click=close),
@@ -256,7 +288,7 @@ def build(page: ft.Page, refresh) -> ft.Control:
         if token not in current:
             input_field.value = (current + " " + token).strip()
         input_field.update()
-        input_field.focus()
+        page.run_task(input_field.focus)
 
     input_field = ft.TextField(
         hint_text="输入你的要求，或点击上方表格快捷指令插入 @引用…",
@@ -264,20 +296,54 @@ def build(page: ft.Page, refresh) -> ft.Control:
         min_lines=2,
         max_lines=4,
         shift_enter=True,
-        border_color=DIVIDER,
-        focused_border_color=PRIMARY,
-        color=TEXT,
-        text_style=ft.TextStyle(size=13, color=TEXT),
+        border_color=th.DIVIDER,
+        focused_border_color=th.PRIMARY,
+        color=th.TEXT,
+        text_style=ft.TextStyle(size=13, color=th.TEXT),
         expand=True,
     )
     input_field.on_submit = send
 
     send_btn = primary_button("发送", send, "SEND")
+
+    def run_task(key: str, needs_input: bool) -> None:
+        extra = (input_field.value or "").strip() if needs_input else ""
+        if needs_input and not extra:
+            snack(page, "先在输入框写下要处理的内容，再点这个任务", th.ACCENT)
+            return
+        if needs_input:
+            input_field.value = ""
+            input_field.update()
+        run_task_dialog(page, key, extra, refresh, refresh)
+
+    task_chips = ft.Row(
+        [
+            ft.Container(
+                ft.Row(
+                    [
+                        ft.Icon(ico("BOLT_OUTLINED"), size=12, color=th.PRIMARY),
+                        ft.Text(task.label, size=11, color=th.TEXT),
+                    ],
+                    spacing=4,
+                    tight=True,
+                ),
+                border=th.card_border(),
+                border_radius=14,
+                padding=ft.Padding.symmetric(vertical=5, horizontal=10),
+                tooltip=task.hint or None,
+                on_click=lambda e, k=task.key, n=bool(task.hint): run_task(k, n),
+            )
+            for task in TASKS
+        ],
+        spacing=6,
+        wrap=True,
+    )
+
     quick_chips = ft.Row(
         [
             ft.Container(
-                ft.Text(f"@{label}", size=11, color=PRIMARY),
-                bgcolor=PRIMARY_LIGHT,
+                ft.Text(f"@{label}", size=11, color=th.PRIMARY),
+                bgcolor=th.PRIMARY_LIGHT,
                 border_radius=14,
                 padding=ft.Padding.symmetric(vertical=6, horizontal=12),
                 on_click=lambda e, lb=label: insert_ref(lb),
@@ -290,13 +356,13 @@ def build(page: ft.Page, refresh) -> ft.Control:
 
     status_row = ft.Row(
         [
-            ft.Icon(ico("AUTO_AWESOME_OUTLINED"), size=20, color=PRIMARY),
-            ft.Text("AI 助手", size=15, color=TEXT, weight="bold"),
+            ft.Icon(ico("AUTO_AWESOME_OUTLINED"), size=20, color=th.PRIMARY),
+            ft.Text("AI 助手", size=15, color=th.TEXT, weight="bold"),
             ft.Container(width=6),
-            ft.Text(f"模型：{model_name}" if model_name else "未配置模型", size=11, color=TEXT_MUTED),
+            ft.Text(f"模型：{model_name}" if model_name else "未配置模型", size=11, color=th.TEXT_MUTED),
             ft.Container(expand=True),
             ft.Text("已连接" if configured else "未配置 API Key", size=11,
-                    color=PRIMARY if configured else ACCENT),
+                    color=th.PRIMARY if configured else th.ACCENT),
             ft.TextButton("去设置", on_click=lambda e: open_settings_dialog(page, refresh, refresh),
                           visible=not configured),
         ],
@@ -306,7 +372,7 @@ def build(page: ft.Page, refresh) -> ft.Control:
     header = ft.Column(
         [
             status_row,
-            ft.Container(height=1, bgcolor=DIVIDER),
+            ft.Container(height=1, bgcolor=th.DIVIDER),
         ],
         spacing=8,
     )
@@ -320,9 +386,17 @@ def build(page: ft.Page, refresh) -> ft.Control:
                 messages_column,
                 expand=True,
                 bgcolor="#FBFAF7",
-                border=card_border(),
+                border=th.card_border(),
                 border_radius=12,
                 padding=ft.Padding.all(14),
+            ),
+            ft.Column(
+                [
+                    ft.Text("快捷任务（带数据的一键提问，草稿类任务可保存回本地）",
+                            size=10, color=th.TEXT_MUTED),
+                    task_chips,
+                ],
+                spacing=4,
             ),
             quick_chips,
             ft.Row([input_field, send_btn], spacing=8),

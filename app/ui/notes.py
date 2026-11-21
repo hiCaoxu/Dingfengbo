@@ -15,7 +15,7 @@ from ..db.session import session_scope
 from ..icons import ACTIONS, ico
 from ..services.markdown import highlight_lines, inline_spans, parse
 from ..services.sync import mark_pending_write
-from ..theme import DIVIDER, PRIMARY, PRIMARY_LIGHT, TEXT, TEXT_MUTED
+from .. import theme as th
 from .async_utils import background_section
 from .forms import tags_text
 from .state import state
@@ -83,7 +83,7 @@ def _code_block(code: str, lang: str) -> ft.Control:
             ft.Row(
                 [
                     ft.Container(
-                        content=ft.Text(str(index), size=11, color=TEXT_MUTED, font_family="Consolas"),
+                        content=ft.Text(str(index), size=11, color=th.TEXT_MUTED, font_family="Consolas"),
                         width=30,
                         alignment=ft.Alignment.CENTER_RIGHT,
                     ),
@@ -95,7 +95,7 @@ def _code_block(code: str, lang: str) -> ft.Control:
     return ft.Container(
         content=ft.Column(rows, spacing=0, scroll=ft.ScrollMode.AUTO),
         bgcolor="#F7F8F6",
-        border=ft.Border.all(1, DIVIDER),
+        border=ft.Border.all(1, th.DIVIDER),
         border_radius=8,
         padding=ft.Padding.symmetric(vertical=8, horizontal=10),
     )
@@ -103,12 +103,12 @@ def _code_block(code: str, lang: str) -> ft.Control:
 
 def _table(header: list[str], rows: list[list[str]]) -> ft.Control:
     table = ft.DataTable(
-        columns=[ft.DataColumn(ft.Text(h, size=12, weight="bold", color=TEXT)) for h in header],
+        columns=[ft.DataColumn(ft.Text(h, size=12, weight="bold", color=th.TEXT)) for h in header],
         rows=[
-            ft.DataRow(cells=[ft.DataCell(ft.Text(c, size=12, color=TEXT)) for c in row])
+            ft.DataRow(cells=[ft.DataCell(ft.Text(c, size=12, color=th.TEXT)) for c in row])
             for row in rows
         ],
-        border=ft.Border.all(1, DIVIDER),
+        border=ft.Border.all(1, th.DIVIDER),
         border_radius=8,
         heading_row_color="#F4F6F3",
     )
@@ -122,7 +122,7 @@ def render_blocks(blocks: list[dict]) -> ft.Control:
         kind = block["type"]
         if kind == "heading":
             size = {1: 20, 2: 17, 3: 15}.get(block["level"], 13)
-            controls.append(ft.Text(block["text"], size=size, color=TEXT, weight="bold"))
+            controls.append(ft.Text(block["text"], size=size, color=th.TEXT, weight="bold"))
         elif kind == "code":
             controls.append(_code_block(block["code"], block["lang"]))
         elif kind == "hr":
@@ -130,15 +130,15 @@ def render_blocks(blocks: list[dict]) -> ft.Control:
         elif kind == "quote":
             controls.append(
                 ft.Container(
-                    content=ft.Text(block["text"], size=12, color=TEXT_MUTED, italic=True),
-                    border=ft.Border.only(left=ft.BorderSide(3, PRIMARY)),
+                    content=ft.Text(block["text"], size=12, color=th.TEXT_MUTED, italic=True),
+                    border=ft.Border.only(left=ft.BorderSide(3, th.PRIMARY)),
                     padding=ft.Padding.only(left=10),
                 )
             )
         elif kind == "list":
             controls.append(
                 ft.Column(
-                    [ft.Row([ft.Text("•", size=12, color=PRIMARY), ft.Text(spans=inline_spans(t))], spacing=6) for t in block["items"]],
+                    [ft.Row([ft.Text("•", size=12, color=th.PRIMARY), ft.Text(spans=inline_spans(t))], spacing=6) for t in block["items"]],
                     spacing=4,
                 )
             )
@@ -242,8 +242,8 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
         border=ft.InputBorder.NONE,
         border_width=0,
         filled=False,
-        color=TEXT,
-        text_style=ft.TextStyle(size=16, color=TEXT, weight="bold"),
+        color=th.TEXT,
+        text_style=ft.TextStyle(size=16, color=th.TEXT, weight="bold"),
         on_change=lambda e: _schedule_save(),
         on_blur=lambda e: save_title(note_id, e.control.value or ""),
     )
@@ -257,8 +257,8 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
         border=ft.InputBorder.NONE,
         border_width=0,
         filled=False,
-        color=TEXT_MUTED,
-        text_style=ft.TextStyle(size=11, color=TEXT_MUTED),
+        color=th.TEXT_MUTED,
+        text_style=ft.TextStyle(size=11, color=th.TEXT_MUTED),
         hint_text="标签（逗号分隔，路径用 /）",
         on_change=lambda e: (
             _schedule_save(),
@@ -308,8 +308,8 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
         border=ft.InputBorder.NONE,
         border_width=0,
         filled=False,
-        color=TEXT,
-        text_style=ft.TextStyle(size=12, color=TEXT, font_family="Consolas", height=1.5),
+        color=th.TEXT,
+        text_style=ft.TextStyle(size=12, color=th.TEXT, font_family="Consolas", height=1.5),
         hint_text="输入 Markdown，右侧实时预览；代码块使用 ```python 语法",
         on_change=lambda e: (
             _schedule_save(),
@@ -451,19 +451,19 @@ def _render(page: ft.Page, refresh, on_open, records) -> ft.Control:
                         [
                             ft.Container(width=depth * 14),
                             ft.Container(
-                                content=ft.Text("▾" if expanded else "▸", size=11, color=TEXT_MUTED),
+                                content=ft.Text("▾" if expanded else "▸", size=11, color=th.TEXT_MUTED),
                                 width=18,
                                 alignment=ft.Alignment.CENTER,
                                 on_click=lambda e, p=path: toggle_expand(p),
                                 visible=has_children,
                             ),
-                            ft.Text(name, size=12, color=PRIMARY if active else TEXT,
+                            ft.Text(name, size=12, color=th.PRIMARY if active else th.TEXT,
                                     weight="bold" if active else "normal"),
                         ],
                         spacing=2,
                     ),
                     padding=ft.Padding.symmetric(vertical=4, horizontal=6),
-                    bgcolor=PRIMARY_LIGHT if active else None,
+                    bgcolor=th.PRIMARY_LIGHT if active else None,
                     border_radius=6,
                     on_click=lambda e, p=path: select_path(p),
                 )
@@ -476,12 +476,12 @@ def _render(page: ft.Page, refresh, on_open, records) -> ft.Control:
     tag_controls = [
         ft.Container(
             content=ft.Row(
-                [ft.Text("全部", size=12, color=PRIMARY if all_active else TEXT,
+                [ft.Text("全部", size=12, color=th.PRIMARY if all_active else th.TEXT,
                          weight="bold" if all_active else "normal")],
                 spacing=2,
             ),
             padding=ft.Padding.symmetric(vertical=4, horizontal=6),
-            bgcolor=PRIMARY_LIGHT if all_active else None,
+            bgcolor=th.PRIMARY_LIGHT if all_active else None,
             border_radius=6,
             on_click=lambda e: select_path("全部"),
         ),
@@ -498,10 +498,10 @@ def _render(page: ft.Page, refresh, on_open, records) -> ft.Control:
 
     rows = [
         ft.ListTile(
-            title=ft.Text(title, size=13, color=TEXT, weight="bold"),
+            title=ft.Text(title, size=13, color=th.TEXT, weight="bold"),
             subtitle=ft.Text(
                 (snippet or "").replace("\n", " ")[:60] or "（暂无正文）",
-                size=11, color=TEXT_MUTED, overflow=ft.TextOverflow.ELLIPSIS,
+                size=11, color=th.TEXT_MUTED, overflow=ft.TextOverflow.ELLIPSIS,
             ),
             trailing=icon_button(
                 ACTIONS["delete"], lambda e, i=note_id: delete_note(i), "删除"

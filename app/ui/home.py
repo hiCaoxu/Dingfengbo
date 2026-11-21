@@ -15,19 +15,7 @@ from ..services.dates import day_of_year, iso_week, local_date_from_utc, lunar_t
 from ..services.diary import ensure_diary
 from ..services.finance import money, month_summary, total_assets
 from ..services.sync import mark_pending_write
-from ..theme import (
-    ACCENT,
-    CARD,
-    CARD_RADIUS,
-    DANGER,
-    DIVIDER,
-    HEATMAP_LEVELS,
-    PRIMARY,
-    PRIMARY_LIGHT,
-    TEXT,
-    TEXT_MUTED,
-    card_border,
-)
+from .. import theme as th
 from ..db.repo import create
 from .forms import open_quick_action
 from .widgets import card, empty, section_header, tag_chip
@@ -59,9 +47,9 @@ def _calendar_card(selected: date, set_date, width: int | None = None, height: i
             ],
             alignment=ft.MainAxisAlignment.CENTER,
         ),
-        bgcolor=PRIMARY,
+        bgcolor=th.PRIMARY,
         border_radius=ft.BorderRadius(
-            top_left=CARD_RADIUS, top_right=CARD_RADIUS, bottom_left=0, bottom_right=0
+            top_left=th.CARD_RADIUS, top_right=th.CARD_RADIUS, bottom_left=0, bottom_right=0
         ),
         padding=ft.Padding.symmetric(vertical=8, horizontal=10),
     )
@@ -69,19 +57,19 @@ def _calendar_card(selected: date, set_date, width: int | None = None, height: i
     body = ft.Column(
         [
             ft.Container(expand=True),
-            ft.Text(str(selected.day), size=86, color=TEXT, weight="bold", text_align=ft.TextAlign.CENTER),
+            ft.Text(str(selected.day), size=86, color=th.TEXT, weight="bold", text_align=ft.TextAlign.CENTER),
             ft.Text(
                 f"第{day_of_year(selected)}天 · 第{iso_week(selected)}周",
-                size=13, color=TEXT_MUTED, text_align=ft.TextAlign.CENTER,
+                size=13, color=th.TEXT_MUTED, text_align=ft.TextAlign.CENTER,
             ),
             ft.Text(
                 f"{lunar_text(selected).split(' ')[0]} {weekday_cn(selected)}",
-                size=18, color=TEXT, text_align=ft.TextAlign.CENTER,
+                size=18, color=th.TEXT, text_align=ft.TextAlign.CENTER,
             ),
             ft.Container(expand=True),
             ft.Text(
                 f"距今年结束还有 {days_left} 天",
-                size=11, color=TEXT_MUTED, text_align=ft.TextAlign.CENTER,
+                size=11, color=th.TEXT_MUTED, text_align=ft.TextAlign.CENTER,
             ),
         ],
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -96,9 +84,9 @@ def _calendar_card(selected: date, set_date, width: int | None = None, height: i
             expand=True,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         ),
-        bgcolor=CARD,
-        border=card_border(),
-        border_radius=CARD_RADIUS,
+        bgcolor=th.CARD,
+        border=th.card_border(),
+        border_radius=th.CARD_RADIUS,
         clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
         width=width,
         height=height,
@@ -107,7 +95,7 @@ def _calendar_card(selected: date, set_date, width: int | None = None, height: i
 
 def _stat_card(title: str, value: str, accent: bool = False, width: int | None = None, height: int | None = None) -> ft.Container:
     return card(
-        ft.Text(value, size=20, color=ACCENT if accent else TEXT, weight="bold"),
+        ft.Text(value, size=20, color=th.ACCENT if accent else th.TEXT, weight="bold"),
         title=title,
         expand=1,
         width=width,
@@ -149,7 +137,7 @@ def _heatmap_cell(day: date, count: int, on_open) -> ft.Container:
     return ft.Container(
         width=_HEAT_CELL_W,
         height=_HEAT_CELL_H,
-        bgcolor=HEATMAP_LEVELS[level],
+        bgcolor=th.HEATMAP_LEVELS[level],
         border_radius=3,
         tooltip=f"{day.isoformat()} · {count} 条",
         on_click=lambda e, d=day: on_open(d),
@@ -176,7 +164,7 @@ def _heatmap_card(year: int, on_open, set_year, height: int | None = None) -> ft
     rows = []
     for weekday in range(7):
         label = ft.Container(
-            content=ft.Text(_WEEKDAY_LABELS[weekday], size=10, color=TEXT_MUTED),
+            content=ft.Text(_WEEKDAY_LABELS[weekday], size=10, color=th.TEXT_MUTED),
             width=_HEAT_LABEL_W,
             height=_HEAT_CELL_H,
             alignment=ft.Alignment.CENTER_RIGHT,
@@ -194,7 +182,7 @@ def _heatmap_card(year: int, on_open, set_year, height: int | None = None) -> ft
                     ft.Container(width=_HEAT_LABEL_W + 4, height=10),
                     *[
                         ft.Container(
-                            content=ft.Text(f"{w[0].month}月", size=9, color=TEXT_MUTED)
+                            content=ft.Text(f"{w[0].month}月", size=9, color=th.TEXT_MUTED)
                             if w[0].day <= 7
                             else None,
                             width=_HEAT_CELL_W,
@@ -210,12 +198,12 @@ def _heatmap_card(year: int, on_open, set_year, height: int | None = None) -> ft
     )
     legend = ft.Row(
         [
-            ft.Text("少", size=9, color=TEXT_MUTED),
+            ft.Text("少", size=9, color=th.TEXT_MUTED),
             *[
-                ft.Container(width=10, height=10, bgcolor=HEATMAP_LEVELS[i], border_radius=3)
+                ft.Container(width=10, height=10, bgcolor=th.HEATMAP_LEVELS[i], border_radius=3)
                 for i in range(6)
             ],
-            ft.Text("多", size=9, color=TEXT_MUTED),
+            ft.Text("多", size=9, color=th.TEXT_MUTED),
         ],
         spacing=3,
         alignment=ft.MainAxisAlignment.END,
@@ -233,7 +221,7 @@ def _heatmap_card(year: int, on_open, set_year, height: int | None = None) -> ft
         trailing=ft.Row(
             [
                 ft.TextButton(f"{year - 1}", on_click=lambda e: set_year(year - 1)),
-                ft.Text(str(year), size=12, color=PRIMARY, weight="bold"),
+                ft.Text(str(year), size=12, color=th.PRIMARY, weight="bold"),
                 # 不展示未来年份：当年时直接不渲染「下一年」入口。
                 ft.TextButton(
                     f"{year + 1}",
@@ -246,22 +234,101 @@ def _heatmap_card(year: int, on_open, set_year, height: int | None = None) -> ft
     )
 
 
-def build(page: ft.Page, refresh, on_open_diary, on_open_note) -> ft.Control:
+def _view_switch(refresh) -> ft.Row:
+    """聚焦 / 概览切换：首页默认是行动页，需要时再回看仪表盘。"""
+    def set_view(view: str) -> None:
+        _HOME_STATE["view"] = view
+        refresh()
+
+    return ft.Row(
+        [
+            ft.Button(
+                "今日聚焦",
+                bgcolor=th.PRIMARY if _HOME_STATE["view"] == "focus" else th.PRIMARY_LIGHT,
+                color="#FFFFFF" if _HOME_STATE["view"] == "focus" else th.TEXT_MUTED,
+                elevation=0,
+                on_click=lambda e: set_view("focus"),
+                style=ft.ButtonStyle(
+                    shape=ft.RoundedRectangleBorder(radius=8),
+                    padding=ft.Padding.symmetric(vertical=6, horizontal=14),
+                ),
+            ),
+            ft.Button(
+                "数据概览",
+                bgcolor=th.PRIMARY if _HOME_STATE["view"] == "overview" else th.PRIMARY_LIGHT,
+                color="#FFFFFF" if _HOME_STATE["view"] == "overview" else th.TEXT_MUTED,
+                elevation=0,
+                on_click=lambda e: set_view("overview"),
+                style=ft.ButtonStyle(
+                    shape=ft.RoundedRectangleBorder(radius=8),
+                    padding=ft.Padding.symmetric(vertical=6, horizontal=14),
+                ),
+            ),
+        ],
+        spacing=6,
+    )
+
+
+def _focus_page(page, refresh, data, on_open_diary, on_open_note, navigate) -> ft.Control:
+    from . import focus as focus_ui
+
+    return ft.Column(
+        [
+            ft.Row(
+                [
+                    ft.Text("今日聚焦", size=15, color=th.TEXT, weight="bold"),
+                    ft.Text(
+                        f"{data['today'].isoformat()} {weekday_cn(data['today'])}"
+                        + (f" · {data['weekday_festival']}" if data["weekday_festival"] else ""),
+                        size=11, color=th.TEXT_MUTED,
+                    ),
+                    ft.Container(expand=True),
+                    _view_switch(refresh),
+                ],
+                spacing=10,
+            ),
+            ft.Container(
+                focus_ui.render(page, refresh, data, on_open_diary, on_open_note, navigate),
+                expand=True,
+            ),
+        ],
+        spacing=8,
+        expand=True,
+    )
+
+
+def build(page: ft.Page, refresh, on_open_diary, on_open_note, navigate=None) -> ft.Control:
     """首页：查询后台化，避免数据量大时阻塞 UI 线程。"""
     today = date.today()
+    if navigate is None:
+        navigate = lambda key: None
     # 历史状态可能残留未来年份（旧版本允许切换），进来先纠正。
     if _HOME_STATE["year"] > today.year:
         _HOME_STATE["year"] = today.year
     holder = ft.Container(
         content=ft.Container(
-            content=ft.Text("加载中…", size=12, color=TEXT_MUTED),
+            content=ft.Text("加载中…", size=12, color=th.TEXT_MUTED),
             alignment=ft.Alignment.CENTER,
             expand=True,
         ),
         expand=True,
     )
+    view = _HOME_STATE["view"]
 
     def load() -> None:
+        if view == "focus":
+            from ..services.focus import today_focus
+
+            data = today_focus(today)
+
+            async def show_focus() -> None:
+                holder.content = _focus_page(
+                    page, refresh, data, on_open_diary, on_open_note, navigate
+                )
+                page.update()
+
+            page.run_task(show_focus)
+            return
         with session_scope() as session:
             summary = month_summary(session, today.year, today.month)
             assets = total_assets(session)
@@ -320,11 +387,11 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
             [
                 ft.Row(
                     [
-                        ft.Icon(ico("RADIO_BUTTON_UNCHECKED_OUTLINED"), size=16, color=TEXT_MUTED),
+                        ft.Icon(ico("RADIO_BUTTON_UNCHECKED_OUTLINED"), size=16, color=th.TEXT_MUTED),
                         ft.Text(
                             item.title,
                             size=12,
-                            color=DANGER if (item.due_date and item.due_date < today) else TEXT,
+                            color=th.DANGER if (item.due_date and item.due_date < today) else th.TEXT,
                             expand=True,
                             overflow=ft.TextOverflow.ELLIPSIS,
                         ),
@@ -333,7 +400,7 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
                             + (item.due_date.isoformat() if item.due_date else "")
                             + (f" {item.due_time}" if item.due_date and item.due_time else ""),
                             size=10,
-                            color=DANGER if (item.due_date and item.due_date < today) else TEXT_MUTED,
+                            color=th.DANGER if (item.due_date and item.due_date < today) else th.TEXT_MUTED,
                         ),
                     ],
                     spacing=8,
@@ -346,8 +413,8 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
     note_body = (
         ft.Column(
             [
-                ft.Text(note.title, size=13, color=TEXT, weight="bold"),
-                ft.Text((note.content or "").replace("\n", " ")[:100] or "（暂无正文）", size=11, color=TEXT_MUTED),
+                ft.Text(note.title, size=13, color=th.TEXT, weight="bold"),
+                ft.Text((note.content or "").replace("\n", " ")[:100] or "（暂无正文）", size=11, color=th.TEXT_MUTED),
             ],
             spacing=6,
         )
@@ -378,11 +445,11 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
                 content=ft.Column(
                     [
                         ft.Container(
-                            content=ft.Icon(ico(QUICK[key]), size=22, color=PRIMARY),
-                            width=36, height=36, bgcolor=PRIMARY_LIGHT, border_radius=10,
+                            content=ft.Icon(ico(QUICK[key]), size=22, color=th.PRIMARY),
+                            width=36, height=36, bgcolor=th.PRIMARY_LIGHT, border_radius=10,
                             alignment=ft.Alignment.CENTER,
                         ),
-                        ft.Text(label, size=10, color=TEXT_MUTED, text_align=ft.TextAlign.CENTER),
+                        ft.Text(label, size=10, color=th.TEXT_MUTED, text_align=ft.TextAlign.CENTER),
                     ],
                     horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                     spacing=6,
@@ -398,6 +465,14 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
 
     return ft.Column(
         [
+            ft.Row(
+                [
+                    ft.Text("数据概览", size=15, color=th.TEXT, weight="bold"),
+                    ft.Container(expand=True),
+                    _view_switch(refresh),
+                ],
+                spacing=10,
+            ),
             ft.Row(
                 [
                     ft.Column(

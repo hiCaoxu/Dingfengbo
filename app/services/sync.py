@@ -33,6 +33,7 @@ class SyncClient:
         self.last_error = ""
         self.clock_offset = 0.0  # 服务端时间 - 本地时间，秒
         self.rejected_count = 0  # 最近一次 push 被服务端永久拒收的条数
+        self.pending_upload = 0  # 最近一次 push 上传条数（同步明细页展示）
         self._lock = threading.Lock()
 
     def _endpoint(self, path: str) -> str:
@@ -84,8 +85,44 @@ class SyncClient:
             self.status = "本机时钟异常，请校准系统时间"
             logger.warning("时钟偏移 %.0f 秒，超过阈值", self.clock_offset)
 
+    @staticmethod
+    def selected_tables(settings: dict[str, Any]) -> set[str]:
+        """选择性同步：设置里勾选的表；空列表表示全部。"""
+        raw = settings.get("sync_tables") or []
+        tables = {str(item) for item in raw if str(item)} if isinstance(raw, list) else set()
+        return tables
+
+    def _remember_device(self, settings: dict[str, Any]) -> None:
+        """记录本机同步过的服务端（设备列表是本地记录，不上传）。"""
+        latest = load_settings()
+        devices = latest.get("sync_devices", {})
+        devices = dict(devices) if isinstance(devices, dict) else {}
+        key = self._cursor_key(settings)
+        entry = dict(devices.get(key) or {})
+        entry.update(
+            {
+                "server": str(settings.get("server_url", "")),
+                "last_sync": datetime.now().isoformat(timespec="seconds"),
+                "host": _hostname(),
+            }
+        )
+        entry.setdefault("first_seen", entry["last_sync"])
+        devices[key] = entry
+        save_settings({"sync_devices": devices})
+
+    def _remember_history(self, status: str) -> None:
+        latest = load_settings()
+        history = latest.get("sync_history", [])
+        history = list(history) if isinstance(history, list) else []
+        history.insert(
+            0,
+            {"time": datetime.now().isoformat(timespec="seconds"), "status": status},
+        )
+        save_settings({"sync_history": history[:30]})
+
     def _pull(self, client: httpx.Client, settings: dict[str, Any]) -> None:
         cursors = self._load_cursors(settings)
+        selected = self.selected_tables(settings)
         while True:
             response = client.post(
                 self._endpoint("/api/sync/pull"),
@@ -95,21 +132,37 @@ class SyncClient:
             response.raise_for_status()
             payload = response.json()
             self._observe_server_time(payload)
-            remote_changes = payload.get("changes", [])
+            raw_changes = payload.get("changes", [])
+            remote_changes = raw_changes
+            if selected:
+                remote_changes = [
+                    change for change in raw_changes
+                    if str(change.get("table")) in selected
+                ]
             with session_scope() as session:
                 apply_remote(session, remote_changes, owner_id="local")
             updates = payload.get("cursors", {})
             if isinstance(updates, dict):
+                # 选择性同步时不要推进未选表的游标，否则以后勾选回来会漏拉历史。
+                if selected:
+                    updates = {
+                        table: cursor for table, cursor in updates.items() if table in selected
+                    }
                 cursors.update(updates)
             self._save_cursors(settings, cursors)
             if not payload.get("has_more", False):
                 break
-            if not remote_changes:
+            # 选择性同步的过滤不应被误判成「分页无进展」：判定要看服务端原始返回。
+            if not raw_changes:
                 raise RuntimeError("同步服务返回了无效的分页状态")
 
     def _push(self, client: httpx.Client) -> None:
+        selected = self.selected_tables(load_settings())
         with session_scope() as session:
             changes = pending_changes(session)
+        if selected:
+            changes = [change for change in changes if str(change.get("table")) in selected]
+        self.pending_upload = len(changes)
         if not changes:
             return
         response = client.post(
@@ -154,6 +207,8 @@ class SyncClient:
                 self.status = (
                     "已同步 · 时钟异常" if abs(self.clock_offset) > 120 else f"已同步 {now:%H:%M}"
                 )
+                self._remember_device(settings)
+                self._remember_history(self.status)
                 logger.info("同步成功")
             except httpx.HTTPStatusError as exc:
                 self.last_error = str(exc)[:120]
@@ -164,14 +219,17 @@ class SyncClient:
                     self.status = "服务异常"
                 else:
                     self.status = f"同步失败({code})"
+                self._remember_history(self.status)
                 logger.warning("同步请求被拒：%s", self.status)
             except httpx.RequestError as exc:  # 网络错误：断网不影响本地使用
                 self.last_error = str(exc)[:120]
                 self.status = "离线可用"
+                self._remember_history(self.status)
                 logger.info("网络不可达：%s", self.last_error)
             except Exception as exc:
                 self.last_error = str(exc)[:120]
                 self.status = "同步失败"
+                self._remember_history(self.status)
                 logger.exception("同步异常")
             return self.status
         finally:
@@ -182,6 +240,43 @@ class SyncClient:
             response = client.get(self._endpoint("/api/sync/check"), headers=self._headers())
             response.raise_for_status()
             return response.json()
+
+
+def _hostname() -> str:
+    import socket
+
+    try:
+        return socket.gethostname()
+    except Exception:
+        return "unknown"
+
+
+def sync_history() -> list[dict[str, Any]]:
+    """最近的同步历史（新→旧），供同步明细页展示。"""
+    history = load_settings().get("sync_history", [])
+    return list(history) if isinstance(history, list) else []
+
+
+def sync_devices() -> list[dict[str, Any]]:
+    """本机记录过的服务端设备（本地记录，不上传）。"""
+    devices = load_settings().get("sync_devices", {})
+    if not isinstance(devices, dict):
+        return []
+    rows = []
+    for key, entry in devices.items():
+        if not isinstance(entry, dict):
+            continue
+        rows.append(
+            {
+                "key": key[:8],
+                "server": entry.get("server", ""),
+                "host": entry.get("host", ""),
+                "last_sync": entry.get("last_sync", ""),
+                "first_seen": entry.get("first_seen", ""),
+            }
+        )
+    rows.sort(key=lambda row: str(row["last_sync"]), reverse=True)
+    return rows
 
 
 def queue_counts() -> tuple[int, int]:
