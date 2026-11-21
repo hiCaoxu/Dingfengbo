@@ -213,6 +213,32 @@ class DiaryLayoutTests(unittest.TestCase):
         texts = [c.value for c in walk(dialog.content) if isinstance(c, ft.Text)]
         self.assertIn("日期格式应为 YYYY-MM-DD，例如 2026-11-21", texts)
 
+    def test_life_row_gives_title_the_leftover_width(self) -> None:
+        title = "带父母去旅行"
+        events = [{"id": "e1", "title": title, "target_date": date(2026, 5, 1)}]
+        _, _, life_panel = self._row(events).controls
+
+        holders = [
+            c
+            for c in walk(life_panel)
+            if isinstance(c, ft.Column)
+            and any(isinstance(i, ft.Text) and i.value == title for i in c.controls)
+        ]
+        self.assertEqual(len(holders), 1)
+        self.assertTrue(holders[0].expand)
+        # 日期不再是固定宽度的独立列（会把标题挤成一字一行），而是排在标题下方
+        self.assertEqual(
+            [c for c in walk(life_panel) if isinstance(c, ft.Container) and c.width == 74], []
+        )
+        # 行内操作按钮改为紧凑尺寸，少占宽度
+        small = [
+            b
+            for b in walk(life_panel)
+            if isinstance(b, ft.IconButton) and b.tooltip in ("编辑", "删除")
+        ]
+        self.assertEqual(len(small), 2)
+        self.assertTrue(all(b.icon_size == 14 for b in small))
+
     def test_life_panel_empty_state(self) -> None:
         _, _, life_panel = self._row().controls
         texts = [c.value for c in walk(life_panel) if isinstance(c, ft.Text)]

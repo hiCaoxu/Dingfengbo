@@ -74,7 +74,18 @@ def ghost_button(text: str, on_click: Callable, icon: str | None = None) -> ft.T
     return ft.TextButton(content=ft.Row(controls, spacing=5, tight=True), on_click=on_click)
 
 
-def icon_button(icon: str, on_click: Callable, tooltip: str = "") -> ft.IconButton:
+def icon_button(icon: str, on_click: Callable, tooltip: str = "", compact: bool = False) -> ft.IconButton:
+    """图标按钮；``compact=True`` 时把点击区压到 24px 左右，用于窄面板里的行内操作。"""
+    if compact:
+        return ft.IconButton(
+            icon=ico(icon),
+            icon_size=14,
+            icon_color=th.TEXT_MUTED,
+            tooltip=tooltip,
+            on_click=on_click,
+            padding=2,
+            visual_density=ft.VisualDensity.COMPACT,
+        )
     return ft.IconButton(
         icon=ico(icon), icon_size=18, icon_color=th.TEXT_MUTED, tooltip=tooltip, on_click=on_click
     )

@@ -193,24 +193,30 @@ def _life_panel(page: ft.Page, refresh, events: list[dict]) -> ft.Control:
         target = event.get("target_date")
         return ft.Row(
             [
-                ft.Container(
-                    content=ft.Text(
-                        target.isoformat() if target else "未定",
-                        size=10,
-                        color=th.TEXT_MUTED,
-                    ),
-                    width=74,
+                # 标题在上、日期在下并排成两行：面板只有一百多像素宽，日期再单占一列
+                # 会把标题挤成一字一行，这里把整行剩余宽度都给标题
+                ft.Column(
+                    [
+                        ft.Text(event["title"], size=12, color=th.TEXT),
+                        ft.Text(
+                            target.isoformat() if target else "未定",
+                            size=9,
+                            color=th.TEXT_MUTED,
+                        ),
+                    ],
+                    spacing=1,
+                    expand=True,
+                    tight=True,
                 ),
-                # 不设 max_lines / overflow：标题完整换行显示，不出现省略号
-                ft.Text(event["title"], size=12, color=th.TEXT, expand=True),
-                icon_button(ACTIONS["edit"], lambda e, ev=event: form_dialog(ev), "编辑"),
+                icon_button(ACTIONS["edit"], lambda e, ev=event: form_dialog(ev), "编辑", compact=True),
                 icon_button(
                     ACTIONS["delete"],
                     lambda e, i=event["id"]: (life.delete_event(i), refresh()),
                     "删除",
+                    compact=True,
                 ),
             ],
-            spacing=2,
+            spacing=0,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
 
