@@ -69,6 +69,12 @@ def line_chart(
     height: float = 2.6,
     cache_key: Any = None,
 ) -> bytes:
+    """折线图 PNG bytes。
+
+    ``cache_key`` 约定：一旦提供就**完全替代**内容比对（命中即直接返回旧图），
+    所以它必须包含「数据一变就变」的单调量，例如 ``(行数, max(updated_at))``。
+    传不严谨的 key（如只传固定字符串）会拿到陈旧图表且没有任何告警。
+    """
     key_series = tuple(
         (
             str(item.get("name", "")),
@@ -107,6 +113,7 @@ def bar_chart(
     color: str = PRIMARY,
     cache_key: Any = None,
 ) -> bytes:
+    """柱状图 PNG bytes；``cache_key`` 契约同 :func:`line_chart`。"""
     key_values = tuple(float(value) for value in values)
     key = (cache_key, title, color) if cache_key is not None else (tuple(labels), key_values, title, color)
     cached = _cache_get(key)
@@ -126,6 +133,7 @@ def bar_chart(
 
 
 def pie_chart(items: dict[str, float], title: str = "", cache_key: Any = None) -> bytes:
+    """饼图 PNG bytes；``cache_key`` 契约同 :func:`line_chart`。"""
     key_items = tuple((key, float(value)) for key, value in items.items())
     key = (cache_key, title) if cache_key is not None else (key_items, title)
     cached = _cache_get(key)

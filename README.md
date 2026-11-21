@@ -18,6 +18,15 @@ python run_server.py
 
 桌面端「设置」中填写服务地址与令牌即可启用自动同步，并可点「测试同步连接」/「测试 AI 连接」验证配置。断网时七个数据模块均可正常使用，联网后按时间戳增量补传。
 
+## 开发与测试
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m pytest -q          # 或：python -m unittest discover -s tests -t .
+```
+
+测试依赖锁在 `requirements-dev.txt`：**不要装 `pytest-timeout` 2.7 以下版本**，它在 pytest 8 的 `addini` 类型校验下会让 pytest 在收集阶段直接崩溃，本项目也不需要超时插件。
+
 ## 数据目录
 
 - 应用数据：统一在 `D:\Data\Dingfengbo\`（`dingfengbo.db`、`settings.json`、`logs\`），与 exe 所在目录分离，替换升级不丢数据。
@@ -71,7 +80,13 @@ $env:DOMAIN = "sync.example.com"
 docker compose --profile tls up -d
 ```
 
-随后把桌面端服务地址改成 `https://sync.example.com`，停止直连时把 8000 端口从安全组移除。容器数据卷由宿主目录挂载，若出现写入权限问题，先 `chown -R 10001:10001 /opt/dingfengbo-sync/data`。
+收口顺序（先验证再关闭，避免把自己锁在门外）：
+
+1. 启动 `tls` profile，用 `https://sync.example.com/api/health` 验证证书与反代；
+2. 桌面端「设置」把服务地址改成 `https://sync.example.com`，点「测试同步连接」确认；
+3. 确认可用后，再删除 `docker-compose.yml` 里 8000 的端口映射（或从云安全组移除 8000）。
+
+容器数据卷由宿主目录挂载，若出现写入权限问题，先 `chown -R 10001:10001 /opt/dingfengbo-sync/data`。
 
 ## 关键实现
 

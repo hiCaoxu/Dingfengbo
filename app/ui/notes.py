@@ -30,6 +30,15 @@ _preview: ft.Container | None = None
 _PREVIEW_DEBOUNCE_MS = 400
 _PREVIEW_PLAINTEXT_THRESHOLD = 50_000
 _preview_timer: threading.Timer | None = None
+# 每次打开笔记自增；在途的旧渲染（timer 已触发、协程已入队）据此作废。
+_preview_generation = 0
+
+
+def _cancel_preview_timer() -> None:
+    global _preview_timer
+    if _preview_timer is not None:
+        _preview_timer.cancel()
+        _preview_timer = None
 
 
 def _code_block(code: str, lang: str) -> ft.Control:
@@ -172,7 +181,11 @@ def _matches_path(note_tags: list[str], path: str) -> bool:
 
 
 def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
-    global _preview
+    global _preview, _preview_generation
+    _preview_generation += 1
+    generation = _preview_generation
+    # 切换笔记时立即作废上一篇的在途渲染，否则旧正文会被写进新笔记的预览区。
+    _cancel_preview_timer()
     title_field = ft.TextField(
         value=note.title,
         border=ft.InputBorder.NONE,
@@ -245,7 +258,7 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
         on_blur=lambda e: save_content(note.id, e.control.value or ""),
     )
 
-    def _render_preview(value: str) -> None:
+    def _render_preview(value: str, generation: int) -> None:
         text = value or ""
         try:
             if len(text) > _PREVIEW_PLAINTEXT_THRESHOLD:
@@ -261,6 +274,9 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
 
         async def apply() -> None:
             try:
+                # 已经切换到别的笔记：丢弃过期结果，不覆盖当前预览。
+                if generation != _preview_generation:
+                    return
                 if _preview is not None:
                     _preview.content = render_blocks(blocks)
                     page.update()
@@ -275,10 +291,9 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
 
     def _update_preview(value: str) -> None:
         global _preview_timer
-        if _preview_timer is not None:
-            _preview_timer.cancel()
+        _cancel_preview_timer()
         _preview_timer = threading.Timer(
-            _PREVIEW_DEBOUNCE_MS / 1000, lambda: _render_preview(value)
+            _PREVIEW_DEBOUNCE_MS / 1000, lambda: _render_preview(value, generation)
         )
         _preview_timer.daemon = True
         _preview_timer.start()

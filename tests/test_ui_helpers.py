@@ -15,6 +15,16 @@ from app.ui.async_utils import background_section
 from app.ui.widgets import close_modal, confirm, modal
 
 
+def _walk(control):
+    """遍历控件树（含 content 与 controls），用于断言错误占位的内容。"""
+    yield control
+    for child in getattr(control, "controls", None) or []:
+        yield from _walk(child)
+    content = getattr(control, "content", None)
+    if content is not None and not isinstance(content, str):
+        yield from _walk(content)
+
+
 class FakePage:
     def __init__(self) -> None:
         self.overlay: list = []
@@ -90,6 +100,26 @@ class BackgroundSectionTests(unittest.TestCase):
 
         holder = background_section(page, boom, lambda data: ft.Text("不该出现"), placeholder="加载中…")
         self.assertNotEqual(getattr(holder.content, "value", None), "不该出现")
+
+    def test_failure_shows_retry_and_retry_recovers(self) -> None:
+        page = FakePage()
+        attempts = {"count": 0}
+
+        def loader():
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise RuntimeError("数据库忙")
+            return [1, 2]
+
+        holder = background_section(page, loader, lambda data: ft.Text(str(sum(data))))
+        texts = [c.value for c in _walk(holder) if isinstance(c, ft.Text)]
+        self.assertIn("加载失败（可能是数据库忙或磁盘异常）", texts)
+
+        retry = next(c for c in _walk(holder) if isinstance(c, ft.TextButton))
+        retry.on_click(None)
+        self.assertEqual(attempts["count"], 2)
+        self.assertIsInstance(holder.content, ft.Text)
+        self.assertEqual(holder.content.value, "3")
 
     def test_renderer_exception_is_swallowed(self) -> None:
         page = FakePage()

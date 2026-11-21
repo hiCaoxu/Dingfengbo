@@ -1,0 +1,5 @@
+# 开发/测试依赖（运行依赖见 requirements.txt）
+#
+# 注意：不要引入 pytest-timeout < 2.7。它在 pytest 8 的 addini 类型校验下会让 pytest
+# 在收集阶段直接崩溃（AssertionError: type in (...)），本项目也不需要超时插件。
+pytest>=8.0,<9

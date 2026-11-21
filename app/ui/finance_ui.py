@@ -86,22 +86,40 @@ def _back(page, refresh) -> ft.Control:
     return ft.TextButton("← 返回", on_click=lambda e: _go(page, refresh, "overview"))
 
 
-def _build_overview(page: ft.Page, refresh) -> ft.Control:
+def _overview_query() -> dict:
+    """概览数据（后台线程执行）：汇总、总资产、六个月趋势与最新 5 条。"""
     today = date.today()
     with session_scope() as session:
-        summary = month_summary(session, today.year, today.month)
-        assets = total_assets(session)
-        trend = six_month_trend(session, today)
-        recent_txs = list(
-            session.scalars(
-                select(Transaction).where(Transaction.is_deleted.is_(False))
-                .order_by(Transaction.date.desc(), Transaction.id.desc())
-                .limit(5)
-            )
-        )
-        tx_max_updated = session.scalar(
-            select(func.max(Transaction.updated_at)).where(Transaction.is_deleted.is_(False))
-        )
+        return {
+            "summary": month_summary(session, today.year, today.month),
+            "assets": total_assets(session),
+            "trend": six_month_trend(session, today),
+            "recent_txs": list(
+                session.scalars(
+                    select(Transaction).where(Transaction.is_deleted.is_(False))
+                    .order_by(Transaction.date.desc(), Transaction.id.desc())
+                    .limit(5)
+                )
+            ),
+            "tx_max_updated": session.scalar(
+                select(func.max(Transaction.updated_at)).where(Transaction.is_deleted.is_(False))
+            ),
+        }
+
+
+def _build_overview(page: ft.Page, refresh) -> ft.Control:
+    # 汇总查询在后台线程；图表仍由 _render_overview 内部异步渲染。
+    return background_section(
+        page, _overview_query, lambda data: _render_overview(page, refresh, data)
+    )
+
+
+def _render_overview(page: ft.Page, refresh, data) -> ft.Control:
+    summary = data["summary"]
+    assets = data["assets"]
+    trend = data["trend"]
+    recent_txs = data["recent_txs"]
+    tx_max_updated = data["tx_max_updated"]
 
     summary_cards = ft.Row(
         [
@@ -302,11 +320,22 @@ def _render_records(page: ft.Page, refresh, data) -> ft.Control:
     )
 
 
-def _build_accounts(page: ft.Page, refresh) -> ft.Control:
+def _accounts_query() -> tuple[list, dict[str, float]]:
     with session_scope() as session:
-        accounts = list(session.scalars(select(Account).where(Account.is_deleted.is_(False))))
-        balances = account_balances(session)
+        return (
+            list(session.scalars(select(Account).where(Account.is_deleted.is_(False)))),
+            account_balances(session),
+        )
 
+
+def _build_accounts(page: ft.Page, refresh) -> ft.Control:
+    return background_section(
+        page, _accounts_query, lambda data: _render_accounts(page, refresh, data)
+    )
+
+
+def _render_accounts(page: ft.Page, refresh, data) -> ft.Control:
+    accounts, balances = data
     account_cards = []
     for account in accounts:
         balance = balances.get(account.id, 0)

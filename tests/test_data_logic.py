@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db.migrations import initialize_schema
-from app.db.models import Account, Note, Transaction
+from app.db.models import Account, Note, Todo, Transaction
 from app.db.repo import (
     apply_remote,
     create,
@@ -122,6 +122,19 @@ class DataLogicTests(unittest.TestCase):
         self.assertEqual(trend[2]["expense"], 50)
 
         self.assertEqual(account_balances(self.session)[account.id], 250)
+
+    def test_sync_queue_stats_splits_by_status_across_tables(self) -> None:
+        note = create(self.session, Note, title="已同步", content="", tags="[]")
+        todo = create(self.session, Todo, title="被拒")
+        create(self.session, Todo, title="待同步")
+
+        mark_clean(self.session, [serialize(note)])
+        mark_rejected(self.session, [{"table": "todos", "id": todo.id}])
+        stats = sync_queue_stats(self.session)
+
+        self.assertEqual(stats["clean"], 1)
+        self.assertEqual(stats["error"], 1)
+        self.assertEqual(stats["pending"], 1)
 
     def test_rejected_record_leaves_pending_queue_until_edited(self) -> None:
         note = create(self.session, Note, title="坏记录", content="", tags="[]")

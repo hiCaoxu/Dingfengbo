@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from datetime import date
 
 import flet as ft
@@ -20,6 +21,7 @@ from .state import state
 from .widgets import card, divider, empty, icon_button, primary_button, section_header
 
 _state = state.diary
+_EDITOR_LOCK = threading.Lock()
 
 
 def set_selected(day: date) -> None:
@@ -34,10 +36,20 @@ def save_content(diary_id: str, value: str) -> None:
     mark_pending_write()
 
 
-def _editor(day: date, refresh) -> ft.Control:
-    with session_scope() as session:
-        diary = ensure_diary(session, day)
-        diary_id, title, content = diary.id, diary.title, diary.content
+def _editor_data(day: date) -> dict:
+    """取（必要时创建）当天日记，后台线程执行，避免写库卡住 UI。
+
+    ``ensure_diary`` 是「先查后建」，挪到后台后两次刷新可能并发；用模块级锁把
+    建库路径串行化，避免同一天插入两次触发 (owner_id, date) 唯一约束。
+    """
+    with _EDITOR_LOCK:
+        with session_scope() as session:
+            diary = ensure_diary(session, day)
+            return {"id": diary.id, "title": diary.title, "content": diary.content}
+
+
+def _editor(data: dict, refresh) -> ft.Control:
+    diary_id, title, content = data["id"], data["title"], data["content"]
     has_diary = bool((content or "").strip())
     field = ft.TextField(
         value=content,
@@ -263,28 +275,43 @@ def _list_view(refresh, data) -> ft.Control:
     )
 
 
+def _load_page() -> dict:
+    """日记页一次性取齐：当前视图数据 + 当前选中日期的编辑内容。"""
+    view = _state["view"]
+    return {
+        "view": view,
+        "main": _month_query() if view == "月历" else _list_query(),
+        "editor": _editor_data(_state["selected"]),
+    }
+
+
 def build(page: ft.Page, refresh) -> ft.Control:
+    # 整页数据（含当天日记的按需创建）统一在后台线程完成。
+    return background_section(
+        page, _load_page, lambda payload: _render(page, refresh, payload)
+    )
+
+
+def _render(page: ft.Page, refresh, payload) -> ft.Control:
+    view = payload["view"]
+    main = (
+        _month_view(refresh, payload["main"])
+        if view == "月历"
+        else _list_view(refresh, payload["main"])
+    )
     tabs = ft.Row(
         [
-            ft.TextButton("月历视图" if _state["view"] != "月历" else "● 月历视图",
+            ft.TextButton("月历视图" if view != "月历" else "● 月历视图",
                           on_click=lambda e: (_state.__setitem__("view", "月历"), refresh())),
-            ft.TextButton("列表视图" if _state["view"] != "列表" else "● 列表视图",
+            ft.TextButton("列表视图" if view != "列表" else "● 列表视图",
                           on_click=lambda e: (_state.__setitem__("view", "列表"), refresh())),
         ],
         spacing=6,
     )
-    if _state["view"] == "月历":
-        main = background_section(
-            page, _month_query, lambda data: _month_view(refresh, data)
-        )
-    else:
-        main = background_section(
-            page, _list_query, lambda data: _list_view(refresh, data)
-        )
     return ft.Column(
         [
             section_header("日记", tabs),
-            ft.Row([main, _editor(_state["selected"], refresh)], spacing=14, expand=True),
+            ft.Row([main, _editor(payload["editor"], refresh)], spacing=14, expand=True),
         ],
         spacing=12,
         expand=True,

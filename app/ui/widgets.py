@@ -61,8 +61,9 @@ def card(
     )
 
 
-def primary_button(text: str, on_click: Callable, icon: str | None = None, **kwargs) -> ft.ElevatedButton:
-    return ft.ElevatedButton(
+def primary_button(text: str, on_click: Callable, icon: str | None = None, **kwargs) -> ft.Button:
+    # Flet 0.80 起 ElevatedButton 已弃用（1.0 移除），Button 参数完全兼容。
+    return ft.Button(
         content=ft.Row(
             [ft.Icon(ico(icon), size=16), ft.Text(text, size=12)] if icon else [ft.Text(text, size=12)],
             spacing=6,

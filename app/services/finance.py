@@ -21,10 +21,6 @@ def money(value: float) -> str:
     return f"¥{value:,.2f}"
 
 
-def account_balance(session: Session, account: Account) -> float:
-    return account_balances(session).get(account.id, 0.0)
-
-
 def account_balances(session: Session) -> dict[str, float]:
     """一次性聚合全部账户余额：一条按 (账户, 类型) 分组的 SUM，加一条转入 SUM。"""
     accounts = session.scalars(select(Account).where(Account.is_deleted.is_(False)))
