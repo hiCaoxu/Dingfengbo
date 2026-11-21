@@ -1,5 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller 单文件打包配置：生成 定风波.exe（隐藏控制台）。"""
+"""PyInstaller 打包配置：onedir 模式，产出 dist\\Dingfengbo\\（隐藏控制台）。
+
+onedir 与 onefile 的区别只有一个：依赖和资源不解压到临时目录，而是常驻在
+exe 旁边的 ``_internal\\`` 里。18MB 霞鹜文楷字体因此不必每次启动解压，冷启动
+快得多；代价是发布物从单个 exe 变成文件夹，必须整包分发（见 build.ps1）。
+"""
 
 import os
 import subprocess
@@ -20,11 +25,11 @@ for package in ("flet", "flet_desktop", "matplotlib", "zhdate"):
     datas += collect_data_files(package)
 
 # Flet 0.86 的 flet_desktop 运行时会从包内 app/ 目录解压客户端；
-# 内置压缩包后 exe 首次启动无需联网下载。
+# 内置压缩包后首次启动无需联网下载（onedir 下落进 _internal/flet_desktop/app/）。
 datas.append((os.path.join(SPEC_DIR, "flet-windows.zip"), "flet_desktop/app"))
 
-# 霞鹜文楷字体（assets/fonts）：app/main.py 按 __file__ 推导 assets 目录，
-# 打包后同样落在 _MEIPASS/assets，路径一致。
+# 霞鹜文楷字体（assets/fonts）：app/main.py 按 __file__ 推导 assets 目录。
+# onedir 下模块仍在 _internal 里，推导结果与 onefile 的 _MEIPASS 一致。
 datas.append((os.path.join(ROOT, "assets"), "assets"))
 
 hiddenimports = []
@@ -49,16 +54,13 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=None)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,  # onedir：二进制与数据交给下面的 COLLECT
     name="Dingfengbo",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False,
-    upx_exclude=[],
-    runtime_tmpdir=None,
+    upx=False,  # UPX 压缩易触发杀软误报，且解压反而更慢
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -67,4 +69,14 @@ exe = EXE(
     entitlements_file=None,
     icon=os.path.join(SPEC_DIR, "icon.ico"),
     version=os.path.join(SPEC_DIR, "version_info.txt"),
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name="Dingfengbo",
 )

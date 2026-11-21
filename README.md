@@ -53,7 +53,7 @@ python -m pytest -q          # 或：python -m unittest discover -s tests -t .
 - 数据导入导出（设置 → 数据导入导出 / 命令面板）：导出 JSON（全量，可回灌合并）、Markdown（待办/收支表格，日记/笔记按篇落文件）、CSV（按表）；导入 JSON 按 LWW 合并，导入 CSV 按列名匹配、单行失败不影响其他行。
 - 敏感字段：`settings.json` 中的同步令牌与 AI Key 以 Windows DPAPI 按当前用户加密（`dpapi:` 前缀），拷到别的机器或别的 Windows 账户无法解开；旧版 `b64:` 值仍可读，下次保存自动升级。
 
-## 打包（绿色单文件）
+## 打包（绿色免安装·文件夹模式）
 
 ```powershell
 .\packaging\build.ps1
@@ -61,16 +61,17 @@ python -m pytest -q          # 或：python -m unittest discover -s tests -t .
 
 产物（`dist\`）：
 
-- `定风波.exe` / `Dingfengbo.exe`：PyInstaller 单文件，双击即用，无需安装。
-- `定风波-v{版本号}.zip`：exe + 使用说明，版本号读自 `app/__init__.py` 的 `__version__`。
+- `Dingfengbo\`：PyInstaller **onedir** 产物，内含 `定风波.exe` / `Dingfengbo.exe`、`_internal\`（Python 运行时、Flet 客户端、字体）与 `使用说明.txt`，整个文件夹才是完整程序。
+- `定风波-v{版本号}.zip`：上面的整个文件夹，版本号读自 `app/__init__.py` 的 `__version__`。
 
 分发方式：
 
-- 把 exe 复制到任意目录运行（可放桌面或自建程序文件夹），**没有安装目录、开始菜单项与卸载入口的概念**，删除 exe 即完成卸载。
-- 升级 = 用新版本 exe 覆盖旧 exe；数据始终在 `D:\Data\Dingfengbo\`，不受影响。
-- 需要开机自启时，把 exe 快捷方式放入 `shell:startup` 目录（Win+R 输入 `shell:startup`）。
-- 单文件模式首次启动需解压到临时目录，冷启动较慢；exe 带版本资源，右键属性可查看版本号。
-- 体积代价：exe 约 40MB 里有 18.42MB 是整包霞鹜文楷字体（每次启动都要解压），冷启动主要花在这里。可选优化留作后续决策——`fonttools` 子集化（只保留常用汉字 + Latin，需维护字符集）或改 `onedir` 模式（首启快、产物是文件夹），两者都会改变发布物形态，暂不改。
+- 解压后双击 `定风波.exe` 运行，**没有安装目录、开始菜单项与卸载入口的概念**，删除整个文件夹即完成卸载。
+- `_internal\` 是程序本体的一部分，必须和 exe 待在同一目录：只把 exe 单独拷到桌面会启动失败。
+- 升级 = 用新版文件夹替换旧文件夹；数据始终在 `D:\Data\Dingfengbo\`，不受影响。
+- 需要开机自启时，把 `定风波.exe` 的快捷方式放入 `shell:startup` 目录（Win+R 输入 `shell:startup`）。
+- 用 onedir 而非 onefile：onefile 每次启动都要把约 40MB 内容（含 18.42MB 霞鹜文楷字体）解压到临时目录，冷启动主要耗在这里；onedir 直接读磁盘，首启快、杀软扫描也少。代价是发布物从单个 exe 变成文件夹。字体仍整包分发，如需进一步瘦身可再做 `fonttools` 子集化（常用汉字 + Latin，需维护字符集）。
+- exe 带版本资源，右键属性可查看版本号。
 
 ## 同步机制
 
