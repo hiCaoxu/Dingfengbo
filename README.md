@@ -1,143 +1,185 @@
 # 定风波 · 个人工作台
 
-单机优先、可多端同步的桌面个人工作台，覆盖首页（今日聚焦/数据概览）、任务（待办 + 习惯）、日记、笔记、健康、娱乐、记账、回顾、时间轴、AI 助手十个模块。
+单机优先、可多端同步的 Windows 桌面个人工作台。数据落本机 SQLite，断网照常用；联网后按时间戳增量同步到自建服务端。绿色免安装，删除文件夹即卸载。
 
-## 快捷键与入口
-
-| 快捷键 | 作用 |
+| 项目 | 说明 |
 |---|---|
-| `Ctrl+K` | 全局搜索 / 命令面板：跨待办、笔记、日记、收支、娱乐检索，并可直接新建待办、记一笔、同步、打开设置 |
-| `Ctrl+T` | 亮色 / 暗色主题切换 |
-| `Ctrl+1` ~ `Ctrl+9` | 按左侧导航顺序切换模块（`Ctrl+0` 对应第十个模块） |
+| 版本 | 1.2.0 |
+| 运行环境 | Windows 10/11；源码运行需 Python 3.11 |
+| 技术栈 | Flet（Flutter 渲染）+ SQLAlchemy 2.x + SQLite；同步服务端 FastAPI |
+| 数据目录 | `D:\Data\Dingfengbo\`（与程序目录分离，替换升级不丢数据） |
+| 数据规模 | 16 张业务表全部参与同步，另有 5 张本地同步/审计表 |
 
-命令面板支持自然语言过滤，例如 `待办 今天 高优先级`、`笔记 AI`、`日记 本月`。
+## 十个模块
 
-## 运行
+| 模块 | 一句话 | 主要能力 |
+|---|---|---|
+| 首页 | 今天该做什么 | 今日必做（可直接勾选）、日记提醒与连续天数、健康摘要、今日支出与预算进度、习惯打卡、随机回顾、AI 今日建议；可切回「数据概览」 |
+| 任务 | 待办 + 习惯同屏 | 左侧月历 + 四象限、中间任务列表、右侧习惯打卡；到期时间精确到 `HH:MM`；自定义循环（天/周/月/年）与法定节假日跳过；番茄钟 |
+| 日记 | 每天一篇 | 月历选择、三栏编辑、配图、写作连续天数、「人生大事」条目 |
+| 笔记 | 带高亮的富文本 | Pygments 语法高亮、行号与代码逐行对齐滚动、标签 |
+| 健康 | 身体数据 | 锻炼、睡眠、体重、饮食四类记录与趋势图 |
+| 娱乐 | 待看清单 | 想看/在看/已看、评分、封面（网络图下载到本地缓存） |
+| 记账 | 收支与预算 | 多账户、分类收支、月度总预算与分类预算、超支提示、固定支出/订阅自动生成（幂等，最多补 12 期）、一句话记账 |
+| 回顾 | 周/月/年报告 | 待办完成率、日记笔记数、健康、财务与预算、娱乐、习惯统计；AI 生成叙述；导出 Markdown |
+| 时间轴 | 生活流 | 跨模块标签聚合、按模块/标签/时间段筛选、记录间双向关联 |
+| AI 助手 | 会干活的那种 | 对话、`@引用` 业务数据、任务卡（周报/拆解/润色/消费分析等）、草稿写回需用户确认 |
+
+## 快速开始
+
+**绿色版**：解压 `定风波-v1.2.0.zip`，双击 `定风波.exe`。`_internal\` 必须与 exe 同目录，只拷 exe 会启动失败。
+
+**源码运行**：
 
 ```powershell
 python -m pip install -r requirements.txt
 python main.py
 ```
 
-同步服务端（部署在腾讯云轻量服务器）：
+首次启动会在 `D:\Data\Dingfengbo\` 建库并写入示例数据；同步与 AI 都在「设置」里配置，可先不配，全部功能离线可用。
 
-```powershell
-python run_server.py
-# 默认监听 0.0.0.0:8000，可用 DINGFENGBO_HOST / DINGFENGBO_PORT 覆盖
-```
+## 快捷键
 
-桌面端「设置」中填写服务地址与令牌即可启用自动同步，并可点「测试同步连接」/「测试 AI 连接」验证配置。断网时七个数据模块均可正常使用，联网后按时间戳增量补传。
+| 快捷键 | 作用 |
+|---|---|
+| `Ctrl+K` | 全局搜索 / 命令面板：跨待办、笔记、日记、收支、娱乐检索，并可新建待办、记一笔、同步、打开设置 |
+| `Ctrl+T` | 亮色 / 暗色主题切换 |
+| `Ctrl+1` ~ `Ctrl+9`、`Ctrl+0` | 按左侧导航顺序跳到第 1~10 个模块 |
+| `F1` | 帮助与上手（按当前模块显示说明） |
+| 双击顶栏 | 窗口最大化 / 还原 |
 
-## 开发与测试
+命令面板支持自然语言过滤，例如 `待办 今天 高优先级`、`笔记 AI`、`日记 本月`。
+
+## 任务提醒与循环
+
+- **到期时间**：待办可填 `HH:MM`，列表与首页显示日期 + 时间，排序按（日期, 时间）。
+- **自定义循环**：
+  - 天：每 N 天，可「跳过双休日」「跳过法定节假日」；
+  - 周：每 N 周 + 多选星期；
+  - 月：按日期（1–31 日或「最后一天」）、按星期（第几个 + 星期几）、按工作日；
+  - 年：按日期或按星期。
+  - 旧数据（「每周 N 次」「每月最后一个工作日」等）自动转成新结构；旧「不定期」按「自定义但未配置」处理，不推进下一次。
+- **法定节假日与调休**：内置 2026 年（国办发明电〔2025〕7 号）与 2027 年（国办发明电〔2026〕10 号）安排；调休上班的周末按工作日处理，不会被「跳过双休日」误跳。后续年份在数据目录 `holidays.txt` 补充：每行 `YYYY-MM-DD` 为放假，行首 `!` 为调休上班日（如 `!2028-01-02`），`#` 后为注释；也可直接改 `app/services/holiday_data.py`。
+- **提前提醒**：可多选「当天 / 提前 1 / 3 / 7 天」，每个时间点各提醒一次；不选即不提醒；时间留空依次退回到期时间、`09:00`。
+- **系统通知**：运行期间每分钟检查一次，到点弹 Windows 通知（PowerShell WinRT toast，无额外依赖；失败退回提示音并在应用内提示）。`todo_reminders` 表按（待办, 提醒时刻）去重；应用关闭超过 12 小时的提醒不补发，避免刷屏。
+- **番茄钟**：可选关联任务与 25/45/60 分钟，结束后通知并给任务累加 `pomodoro_count`（随同步传播）。
+
+## 同步与多端
+
+- **本地优先**：写操作先落 SQLite 再进待同步队列，界面不等网络。
+- **触发**：启动一次、每 5 分钟、本地写入后 10 秒，以及顶栏「立即同步」。
+- **接口**：`POST /api/sync/pull`、`POST /api/sync/push`、`GET /api/sync/check`、`GET /api/health`、`POST /api/upload`；Bearer token 鉴权，服务端按 `owner_id` 隔离数据。
+- **冲突**：按 `updated_at` 最后写入获胜（LWW）；删除为软删除，同步完成后再物理清理。被丢弃的远端旧版本记入 `sync_conflicts`（不参与同步），在「同步明细 → 冲突」核对。
+- **序列**：服务端用全局单调递增的 `sync_seq` 发号，客户端以 `sync_seq > cursor` 增量拉取。升级已有数据的服务端库时会把计数器锚定到存量最大值；自检可跑 `python scripts/check_sync_sequence.py <cloud.db 路径>`。
+- **队列可见性**：顶栏在有待同步/失败记录时显示「待同步 N · 失败 M」（单条 `UNION ALL` 聚合，不额外往返）。点击打开「同步明细」：单条重试/忽略、看冲突、同步历史、本机设备、按模块选择性同步（未勾选模块的游标不推进，重新勾选会补拉历史）。
+- **被拒记录**：push 校验失败由服务端回传 `table`/`id`/`reason`，本地标 `error` 退出队列不再无限重推；原因存 `sync_issues`，设置页列出「哪张表 / 哪条记录 / 为什么」，点「全部重试」放回队列；重新编辑该记录也会自动回到 `pending`。
+- **游标与换库**：`sync_cursors` 是「已同步到服务端某序列号」的进度，与库内容强绑定。恢复备份 / 手工换库后必须重置游标（恢复流程已内置），否则云端更旧的记录会被 `sync_seq > cursor` 永久跳过，表现为「同步一直成功但列表空」。自救入口：同步明细 → 「重新拉取云端全量」。
+
+## 数据与备份
+
+- **应用数据**：`D:\Data\Dingfengbo\`（`dingfengbo.db`、`settings.json`、`logs\`、`backups\`、`covers\`、`exports\`、`holidays.txt`）；可用环境变量 `DINGFENGBO_DATA_DIR` 覆盖。
+- **自动备份**：`backups\dingfengbo-时间戳-auto.db`，SQLite 官方 `backup` API 在线快照（WAL 模式下也一致），每天首次启动一次，默认保留最近 7 份。
+- **备份恢复中心**（设置 → 备份恢复中心）：查看备份时间/大小/来源、`PRAGMA quick_check` 校验、立即备份、从指定备份恢复（恢复前自动把当前库另存为 `pre-restore`）、自定义目录与保留份数、导出完整数据 zip（库快照 + `settings.json`）。
+- **导入导出**（设置 → 数据导入导出，或命令面板）：JSON（全量，可回灌合并）、Markdown（待办/收支表格，日记笔记逐篇落文件）、CSV（按表）；导入 JSON 按 LWW 合并，导入 CSV 按列名匹配、单行失败不影响其他行。
+- **敏感字段**：`settings.json` 里的同步令牌与 AI Key 用 Windows DPAPI 按当前用户加密（`dpapi:` 前缀），拷到别的机器或别的 Windows 账户解不开；旧 `b64:` 值仍可读，下次保存自动升级。
+- **娱乐封面**：网络地址由程序带 UA/Referer 下载到 `covers\` 后再渲染（`Image.network` 会被豆瓣等图床 403），缓存可随时删，下次进娱乐页重下。
+- **图片上传**：日记选图后本地压缩（长边 1600、JPEG q82）上传到同步服务端 `/api/upload`，落服务端 `files/`，链接随记录同步。
+
+## AI 助手
+
+- 通过 OpenAI 兼容协议对接国产大模型，设置页填服务地址 / Key / 模型。
+- 被 `@引用` 的数据会发给所配置的服务商，设置页有隐私说明，首次发送前另有确认。
+- **任务卡**（`app/services/ai/tasks.py`）：今日建议、写周报、任务拆解、日记润色、消费分析、笔记摘要、健康趋势、待看清单，一键带上对应数据提问。
+- **草稿写回**（`app/services/ai/drafts.py`）：模型只输出 JSON 草稿，应用解析校验后在预览弹窗等用户确认才走 `repo.create` 落库（自动进同步队列），保存后 SnackBar 提供「撤销」。模型始终不直接写库。
+
+## 开发
 
 ```powershell
 python -m pip install -r requirements-dev.txt
 python -m pytest -q          # 或：python -m unittest discover -s tests -t .
 ```
 
-测试依赖锁在 `requirements-dev.txt`：**不要装 `pytest-timeout` 2.7 以下版本**，它在 pytest 8 的 `addini` 类型校验下会让 pytest 在收集阶段直接崩溃，本项目也不需要超时插件。
+测试依赖锁在 `requirements-dev.txt`：**不要装 `pytest-timeout` 2.7 以下版本**，它在 pytest 8 的 `addini` 类型校验下会让 pytest 在收集阶段崩溃，本项目也不需要超时插件。
 
-已知技术债（暂不处理，出现实际问题再启动）：
+目录结构：
 
-- 金额仍用 `float` + 入库取两位小数，尚未迁移 `Decimal`；当前无分位误差故障报告。
-- `ft.TextButton` 之外的 Flet 控件已全部避开弃用项（`ElevatedButton` 已换 `ft.Button`），Flet 1.0 正式版发布时再统一升级验证。
-- Caddy TLS 仅在文档层面就绪，尚未在真实域名上做生产演练。
+```
+main.py              桌面端入口
+app/
+  main.py            固定左导航 + 右内容区
+  theme.py           色板常量 + 运行时 set_mode()
+  config.py          DATA_DIR / settings 读写（DPAPI）
+  db/                models / engine / session / repo / migrations / backup
+  services/          业务逻辑：sync、search、focus、reports、budget、habits、ai/…
+  ui/                各模块页面与弹窗
+server/main.py       同步服务端（FastAPI）
+docker/              Dockerfile、compose、Caddyfile、deploy.ps1
+packaging/           PyInstaller spec、build.ps1、字体子集化
+scripts/             运维脚本（同步序列自检等）
+tests/               31 个测试文件
+```
 
-## 数据目录
+约定：
 
-- 应用数据：统一在 `D:\Data\Dingfengbo\`（`dingfengbo.db`、`settings.json`、`logs\`、`backups\`、`covers\`），与 exe 所在目录分离，替换升级不丢数据。
-- 娱乐封面：本地路径直接用；网络地址由程序带 UA/Referer 下载到 `covers\` 缓存后再渲染（`Image.network` 会被豆瓣等图床以 403 拒绝），缓存文件可随时删除，下次进娱乐页自动重新下载。
-- 可通过环境变量 `DINGFENGBO_DATA_DIR` 覆盖本地数据目录。
-- 自动备份：`backups\dingfengbo-时间戳-auto.db` 是 SQLite 在线快照（官方 `backup` API，WAL 模式下同样一致），每天首次启动备份一次、默认保留最近 7 份。
-- 备份恢复中心（设置 → 备份恢复中心）：查看备份时间/大小/来源、`PRAGMA quick_check` 校验、立即备份、从指定备份恢复（恢复前自动再备份当前库为 `pre-restore`）、自定义备份目录与保留份数、导出完整数据 zip（数据库快照 + settings.json）。
-- 数据导入导出（设置 → 数据导入导出 / 命令面板）：导出 JSON（全量，可回灌合并）、Markdown（待办/收支表格，日记/笔记按篇落文件）、CSV（按表）；导入 JSON 按 LWW 合并，导入 CSV 按列名匹配、单行失败不影响其他行。
-- 敏感字段：`settings.json` 中的同步令牌与 AI Key 以 Windows DPAPI 按当前用户加密（`dpapi:` 前缀），拷到别的机器或别的 Windows 账户无法解开；旧版 `b64:` 值仍可读，下次保存自动升级。
+- 主题用模块级色板 + 运行时 `set_mode()`，界面统一按 `theme.X` 读色；静态 `from theme import X` 会把导入时的值钉死，切主题失效。
+- 界面文案新增生僻字会影响字体子集，改完跑 `python packaging\subset_font.py`（见下）。
+- 已知技术债：金额仍用 `float` + 入库取两位小数（未迁 `Decimal`，暂无分位误差故障）；Caddy TLS 仅文档就绪，未在真实域名生产演练。
 
-## 打包（绿色免安装·文件夹模式）
+## 打包发布
 
 ```powershell
 .\packaging\build.ps1
 ```
 
-产物（`dist\`）：
+产物在 `dist\`：
 
-- `Dingfengbo\`：PyInstaller **onedir** 产物，内含 `定风波.exe` / `Dingfengbo.exe`、`_internal\`（Python 运行时、Flet 客户端、字体）与 `使用说明.txt`，整个文件夹才是完整程序。
+- `Dingfengbo\`：PyInstaller **onedir** 产物，含 `定风波.exe` / `Dingfengbo.exe`、`_internal\`（Python 运行时、Flet 客户端、字体）与 `使用说明.txt`。
 - `定风波-v{版本号}.zip`：上面的整个文件夹，版本号读自 `app/__init__.py` 的 `__version__`。
 
-分发方式：
+分发要点：
 
-- 解压后双击 `定风波.exe` 运行，**没有安装目录、开始菜单项与卸载入口的概念**，删除整个文件夹即完成卸载。
-- `_internal\` 是程序本体的一部分，必须和 exe 待在同一目录：只把 exe 单独拷到桌面会启动失败。
-- 升级 = 用新版文件夹替换旧文件夹；数据始终在 `D:\Data\Dingfengbo\`，不受影响。
-- 需要开机自启时，把 `定风波.exe` 的快捷方式放入 `shell:startup` 目录（Win+R 输入 `shell:startup`）。
-- 用 onedir 而非 onefile：onefile 每次启动都要把全部内容解压到临时目录，冷启动主要耗在这里；onedir 直接读磁盘，首启快、杀软扫描也少。代价是发布物从单个 exe 变成文件夹。
-- exe 带版本资源，右键属性可查看版本号。
+- 解压即用，没有安装目录 / 开始菜单 / 卸载入口的概念，删文件夹即卸载。
+- `_internal\` 是程序本体，必须与 exe 同目录。
+- 升级 = 用新文件夹替换旧文件夹；数据始终在 `D:\Data\Dingfengbo\`。
+- 开机自启：把 exe 快捷方式放进 `shell:startup`（Win+R 输入 `shell:startup`）。
+- 用 onedir 而非 onefile：onefile 每次启动都要解压全部内容到临时目录，冷启动慢且易被杀软拦；代价是发布物变成文件夹。
+- exe 带版本资源，右键属性可见版本号。
 
 ### 字体子集化
 
-`assets\fonts` 里放的是裁过的霞鹜文楷（18.42MB → 3.46MB，7727 个字形），不是全量字体：
+`assets\fonts` 里是裁过的霞鹜文楷（18.42MB → 3.46MB，7727 个字形），不是全量字体：
 
-- 字符范围 = ASCII / Latin-1 / 通用与 CJK 标点 / 全角字符 + **GB2312 全集**（6763 汉字）+ 源码与 README 里实际出现的所有字符 + 脚本里 `EXTRA_CHARS` 手工补充的字。界面文案由此不会缺字。
-- 全量原字体保留在 `packaging\fonts\LXGWWenKai-Regular.ttf`（不进包，仅供重新子集化）。
-- 重新生成：`python packaging\subset_font.py`；只校验覆盖与体积：`python packaging\subset_font.py --check`。
-- 用户输入的 GB2312 之外生僻字（罕见人名等）不会被裁掉——它们由 Flutter 回退到系统字体渲染，字形与正文不同但不影响可读性。需要固定字形时，把字加进 `packaging\subset_font.py` 的 `EXTRA_CHARS` 再重跑脚本。
-- `tests\test_font_subset.py` 会反查 cmap，确保「代码里出现过的字」一个不缺。
-- 许可：霞鹜文楷为 SIL OFL 1.1，`assets\fonts\OFL.txt` 随 assets 一起打包分发；子集从原字体直接生成、未改动源码，字体内部的版权与许可字段也完整保留。
+- 范围 = ASCII / Latin-1 / 通用与 CJK 标点 / 全角 + **GB2312 全集**（6763 汉字）+ 源码与 README 实际出现的所有字符 + `EXTRA_CHARS` 手工补充字。
+- 全量原字体在 `packaging\fonts\`（不进包，仅供重新子集化）。
+- 重新生成：`python packaging\subset_font.py`；只校验缺字与体积上限：`--check`。
+- GB2312 之外的生僻字不会被裁掉，由 Flutter 回退系统字体渲染（字形不同但可读）；要固定成文楷就把字加进 `EXTRA_CHARS` 重跑脚本。
+- `tests\test_font_subset.py` 反查 cmap，确保代码里出现过的字一个不缺。
+- 许可：霞鹜文楷为 SIL OFL 1.1，`assets\fonts\OFL.txt` 随包分发；子集由原字体直接生成，字体内部的版权与许可字段完整保留。
 
-## 同步机制
+## 服务端部署
 
-- 本地优先：写操作先落 SQLite，再进入待同步队列。
-- 触发：启动一次、每 5 分钟一次、本地写入后 10 秒一次，以及「立即同步」按钮。
-- 接口：`POST /api/sync/pull`、`POST /api/sync/push`、`GET /api/sync/check`，Bearer token 鉴权并按用户隔离。
-- 冲突：按 `updated_at` 最后写入获胜；删除使用软删除，同步完成后物理清理。
-- 序列：服务端用全局单调递增的 `sync_seq` 分配号，客户端以 `sync_seq > cursor` 增量拉取；已有数据的服务端库升级时会把计数器锚定到存量最大值（启动日志会打印「同步序列当前值」）。需要自检时在服务端跑 `python scripts/check_sync_sequence.py <cloud.db 路径>`，输出计数器与各表 `MAX(sync_seq)` 的比对结论。
-- 被拒记录：push 校验失败的记录由服务端回传 `table`/`id`，客户端标记为 `error` 退出待同步队列，不再无限重推；重新编辑该记录后自动回到 `pending`。
-- 队列可见性：顶部状态栏在有待同步或失败记录时显示「待同步 N · 失败 M」，统计用一条 `UNION ALL` 聚合同步表，状态栏周期刷新不会带来额外往返；点击该区域打开「同步明细」，可单条重试/忽略、查看冲突、同步历史、本机设备记录，并按模块选择性同步（未勾选模块的游标不推进，重新勾选后会补拉历史）。
-- 冲突记录：LWW 合并时远端版本更旧会被丢弃，同时写入本地 `sync_conflicts` 表（不参与同步），在「同步明细 → 冲突」里可核对与清除。
-- 拒收明细：服务端回传的 `reason` 存在本地 `sync_issues` 表（不参与同步），设置页列出「哪张表 / 哪条记录 / 为什么」；点「全部重试」把所有 error 记录放回待同步队列并清空明细，若载荷本身非法则下次 push 会再次被拒并重新出现在明细里，不会静默循环。
+本地起服务：
 
-## 个人工作台能力（P0–P3 落地）
+```powershell
+python run_server.py
+# 默认 0.0.0.0:8000，可用 DINGFENGBO_HOST / DINGFENGBO_PORT 覆盖
+```
 
-- 全局搜索 / 命令面板（`app/services/search.py`、`app/ui/command_palette.py`）：跨模块关键字检索，结果按模块分组，支持自然语言过滤与快捷命令；`LIKE` 走 `autoescape`，用户输入里的 `%`/`_` 不会被当成通配符。
-- AI 行动化（`app/services/ai/tasks.py`、`app/ui/ai_tasks_ui.py`）：今日建议、写周报、任务拆解、日记润色、消费分析、笔记摘要、健康趋势、待看清单等任务卡，一键带上对应数据提问。
-- AI 草稿写回（`app/services/ai/drafts.py`）：模型只输出 JSON 草稿，应用解析校验后在预览弹窗里等用户确认，才走 `repo.create` 落库（自动进同步队列），保存后 SnackBar 提供「撤销」。模型始终不直接写库。
-- 今日聚焦（`app/services/focus.py`、`app/ui/focus.py`）：首页默认视图，含今日必做（可直接勾选）、日记提醒与写作连续天数、健康摘要、今日支出与预算进度、习惯打卡、随机回顾与 AI 今日建议；可切回原「数据概览」。
-- 回顾报告（`app/services/reports.py`、`app/ui/reports.py`）：周/月/年本地统计（待办完成率、日记笔记、健康、财务与预算、娱乐、习惯），可生成 AI 叙述并导出 Markdown 到 `exports\`。
-- 统一标签 / 时间轴 / 关联（`app/services/timeline.py`、`app/ui/timeline.py`）：跨模块标签聚合、按模块/标签/时间段筛选的生活时间线，记录之间可建立双向关联（`record_links`）。
-- 预算与周期记账（`app/services/budget.py`、`app/services/expense_rules.py`、`app/ui/budget_dialogs.py`）：月度总预算与分类预算、超支提示、固定支出/订阅到期自动生成交易（幂等，最多补 12 期）、规则版「一句话记账」（「今天午饭花了 32 元」）。
-- 任务模块（`app/ui/todo.py`、`app/services/todo_views.py`、`app/ui/habits.py`）：待办与习惯合并为一页，左侧「月历 + 四象限」、中间任务列表、右侧习惯打卡。四象限自动撑满左侧剩余高度并随窗口拉伸，支持点击筛选，规则为「高/中优先级 = 重要」「今明到期或逾期 = 紧急」，也可在任务编辑弹窗里手选象限（留空=自动）。月历按到期日显示未完成数量，点日期只看当天（再点取消）；任务列表与习惯面板用 `ListView` 各自滚动。
-- 习惯（`app/services/habits.py`、`app/ui/habits.py`）：每日打卡、连续/最长天数、周目标进度、12 周打卡日历，紧凑面板嵌在任务页右侧。
-- 系统体验：亮/暗主题（`app/theme.py` 运行时换色板）、`Ctrl+K`/`Ctrl+T`/`Ctrl+1..9`/`Ctrl+0` 快捷键、开机自启（注册表 Run 项）、关闭到系统托盘（`pystray` 可选，未安装时降级）、导航模块显隐与排序（设置页）。
-
-## 任务提醒与番茄钟
-
-- 到期时间：待办可填 `HH:MM`，列表与首页都显示日期 + 时间，排序按（日期, 时间）。
-- 自定义循环（对齐「到期重复」面板）：
-  - 天：每 N 天，可勾选「跳过双休日」「跳过法定节假日」；
-  - 周：每 N 周，多选星期（周一…周日）；
-  - 月：每 N 月，三种方式——按日期（多选 1–31 日或「最后一天」）、按星期（第一个/…/最后一个 + 星期几）、按工作日（第一个/最后一个工作日）；
-  - 年：每 N 年，按日期（几月几日）或按星期（几月的第几个星期几）；
-  - 兼容旧数据：「每周 N 次」「每月第一个/最后一个工作日」等旧配置自动转成新结构；旧「不定期」按「自定义但未配置」处理，不推进下一次。
-- 法定节假日与调休：内置 2026 年（国办发明电〔2025〕7 号）与 2027 年（国办发明电〔2026〕10 号）的放假与补班安排，勾选「跳过法定节假日」后生效；调休上班的周末按工作日处理，不会被「跳过双休日」误跳。以后年份可在数据目录 `holidays.txt` 补充：每行 `YYYY-MM-DD` 表示放假，行首加 `!` 表示调休上班日（如 `!2028-01-02`），`#` 之后为注释。内置数据在 `app/services/holiday_data.py`，新增年份按同一格式补充即可。
-- 提前提醒：可多选「到期当天 / 提前 1 天 / 提前 3 天 / 提前 7 天」，每个时间点各提醒一次（如同时选 1 天和 3 天，会在到期前 3 天和 1 天各弹一次）；不选即不提醒。提醒时间留空时依次退回到期时间、09:00。
-- 系统提醒：应用运行期间每分钟检查一次，到点弹 Windows 通知（PowerShell WinRT toast，无需额外依赖；失败退回系统提示音，并在应用内提示）。`todo_reminders` 表按（待办, 提醒时刻）去重，同一次只提醒一次；应用关闭超过 12 小时的提醒不补发，避免一次性刷屏。
-- 番茄钟：任务页「番茄钟」按钮，可选关联任务与 25/45/60 分钟时长，结束后系统通知并给该任务累加 `pomodoro_count`（随同步传播）。
-
-## Docker 部署同步服务
+线上用 Docker（服务器上只需 Docker 与 SSH）：
 
 ```powershell
 .\docker\deploy.ps1 -HostIp <服务器IP> -User root
 ```
 
-脚本仅创建远程目录 `/opt/dingfengbo-sync` 并启动容器 `dingfengbo-sync`，不改动主机已有环境。数据卷为 `/opt/dingfengbo-sync/data`，容器监听 `8000:8000`，并以非 root 用户运行。桌面端「设置」里的服务地址填 `http://<服务器IP>:8000`。
+脚本只在远端创建 `/opt/dingfengbo-sync` 并启动容器 `dingfengbo-sync`，不改动主机其他环境；数据卷 `/opt/dingfengbo-sync/data`，监听 `8000:8000`，容器内以非 root（uid 10001）运行。桌面端「设置」填 `http://<服务器IP>:8000`，点「测试同步连接」验证。
 
-若公网无法访问，需在云厂商安全组放行 TCP 8000（服务器内部 `ufw` 无需改动）；腾讯云轻量应用服务器可在「防火墙」中添加规则。
+公网访问需在云厂商安全组放行 TCP 8000（腾讯云轻量在「防火墙」加规则）。
 
-上传的图片落在数据卷的 `files/`，`/files/<摘要>.<后缀>` 直接静态访问（文件名即内容摘要，不可猜，无需鉴权），响应带 `Cache-Control: immutable` 长缓存。**`files/` 只增不删**：服务端无法判断某张图是否仍被记录引用，因此不做自动清理，需要定期看磁盘占用，必要时先备份数据卷再按修改时间人工清理旧图（旧图会 404，客户端重新上传即可）。
+`files/` 只增不删：服务端无法判断图片是否仍被引用，按修改时间人工清理，删掉的旧图客户端会重新上传。
 
-### 可选：Caddy 自动 HTTPS 反代
+### 可选：Caddy 自动 HTTPS
 
-token 即全部数据访问权，公网直连明文 HTTP 有被嗅探风险。需要 TLS 时用 compose 的 `tls` profile 启动 Caddy（自动申请证书）：
+token 即全部数据访问权，公网明文 HTTP 有被嗅探风险。需要 TLS 时启动 compose 的 `tls` profile（自动申请证书）：
 
 ```powershell
 # 在服务器上，docker/docker-compose.yml 同目录
@@ -148,16 +190,25 @@ docker compose --profile tls up -d
 收口顺序（先验证再关闭，避免把自己锁在门外）：
 
 1. 启动 `tls` profile，用 `https://sync.example.com/api/health` 验证证书与反代；
-2. 桌面端「设置」把服务地址改成 `https://sync.example.com`，点「测试同步连接」确认；
-3. 确认可用后，再删除 `docker-compose.yml` 里 8000 的端口映射（或从云安全组移除 8000）。
+2. 桌面端把服务地址改成 `https://sync.example.com`，点「测试同步连接」确认；
+3. 确认可用后再删除 compose 里 8000 的端口映射（或从安全组移除 8000）。
 
-容器数据卷由宿主目录挂载，若出现写入权限问题，先 `chown -R 10001:10001 /opt/dingfengbo-sync/data`。
+写入权限异常时先 `chown -R 10001:10001 /opt/dingfengbo-sync/data`。
 
-## 关键实现
+## 常见问题
 
-- Python 3.11 + Flet + SQLAlchemy 2.x + SQLite。
-- ISO 周数使用 `date.isocalendar()[1]`，年内天数使用 `timetuple().tm_yday`，农历使用 `zhdate`。
-- 笔记使用 Pygments 高亮，左侧行号与代码逐行对齐滚动；不支持公式与图表。
-- 图表由 matplotlib 生成，文字使用系统中文字体，配色遵循米白主题。
-- AI 助手通过 OpenAI 兼容协议对接国产大模型；被 `@引用` 的数据会发送至所配置的服务商，设置页有隐私说明，首次发送前另有一次确认。任务卡与草稿写回同样复用该协议，草稿必须经用户确认才落库。
-- 主题用模块级色板常量 + 运行时 `set_mode()` 切换，界面统一按 `theme.X` 读取颜色，切主题后重建页面即可生效（静态 `from theme import X` 会把导入时的值钉死）。
+**数据在哪个文件？换电脑怎么迁？** 全部在 `D:\Data\Dingfengbo\dingfengbo.db`。换机拷贝这个文件（连同 `settings.json` 则连配置一起带；但 token/Key 受 DPAPI 保护，换机需重填）。也可以只依赖同步：新机装好、填同一服务地址与令牌，等待首次全量拉取。
+
+**列表突然空了，但同步一直显示成功？** 大概率是游标与库不匹配（恢复过备份或手工换过库）。打开顶栏「同步明细」→「重新拉取云端全量」，10 秒内自动补齐。
+
+**只把 exe 拷到桌面，启动报错？** `_internal\` 必须与 exe 同目录，拷整个文件夹。
+
+**娱乐封面显示不出来？** 图床有防盗链，程序已带 UA/Referer 下载到 `covers\`；若仍失败多为网络问题，可换成图片直链。
+
+**提醒没弹出来？** 检查待办是否填了提醒节点、应用是否在运行；Windows 通知被系统「专注助手」/通知设置屏蔽时只会有提示音。
+
+## 许可与致谢
+
+- 界面字体：[霞鹜文楷](https://github.com/lxgw/LxgwWenKai)，SIL Open Font License 1.1，许可证见 `assets\fonts\OFL.txt`。
+- 代码字体：Consolas（系统自带）。
+- 农历换算：[zhdate](https://github.com/CutePandaSh/zhdate)。
