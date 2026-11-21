@@ -30,7 +30,7 @@ from ..theme import (
 )
 from ..db.repo import create
 from .forms import open_quick_action
-from .widgets import card, divider, empty, primary_button, section_header, tag_chip
+from .widgets import card, empty, section_header, tag_chip
 
 QUICK_ITEMS = [
     ("todo", "新增待办"),
@@ -107,14 +107,7 @@ def _calendar_card(selected: date, set_date, width: int | None = None, height: i
 
 def _stat_card(title: str, value: str, accent: bool = False, width: int | None = None, height: int | None = None) -> ft.Container:
     return card(
-        ft.Column(
-            [
-                ft.Text(value, size=20, color=ACCENT if accent else TEXT, weight="bold"),
-                divider(),
-                ft.Text("数据来自记账模块", size=10, color=TEXT_MUTED),
-            ],
-            spacing=8,
-        ),
+        ft.Text(value, size=20, color=ACCENT if accent else TEXT, weight="bold"),
         title=title,
         expand=1,
         width=width,
@@ -144,16 +137,18 @@ def _activity_counts(since: date | None = None) -> dict[date, int]:
 
 
 _WEEKDAY_LABELS = ["一", "二", "三", "四", "五", "六", "日"]
-_HEAT_CELL = 10
+# 宽度不变（避免 53 周撑破列宽），只增高格子，让 9 号字的星期标签能完整显示。
+_HEAT_CELL_W = 10
+_HEAT_CELL_H = 14
 _HEAT_GAP = 2
-_HEAT_LABEL_W = 18
+_HEAT_LABEL_W = 20
 
 
 def _heatmap_cell(day: date, count: int, on_open) -> ft.Container:
     level = 0 if count == 0 else min(5, max(1, (count + 1) // 2))
     return ft.Container(
-        width=_HEAT_CELL,
-        height=_HEAT_CELL,
+        width=_HEAT_CELL_W,
+        height=_HEAT_CELL_H,
         bgcolor=HEATMAP_LEVELS[level],
         border_radius=3,
         tooltip=f"{day.isoformat()} · {count} 条",
@@ -181,9 +176,9 @@ def _heatmap_card(year: int, on_open, set_year, height: int | None = None) -> ft
     rows = []
     for weekday in range(7):
         label = ft.Container(
-            content=ft.Text(_WEEKDAY_LABELS[weekday], size=9, color=TEXT_MUTED),
+            content=ft.Text(_WEEKDAY_LABELS[weekday], size=10, color=TEXT_MUTED),
             width=_HEAT_LABEL_W,
-            height=_HEAT_CELL,
+            height=_HEAT_CELL_H,
             alignment=ft.Alignment.CENTER_RIGHT,
         )
         cells = ft.Row(
@@ -196,13 +191,13 @@ def _heatmap_card(year: int, on_open, set_year, height: int | None = None) -> ft
         [
             ft.Row(
                 [
-                    ft.Container(width=_HEAT_LABEL_W + 4, height=8),
+                    ft.Container(width=_HEAT_LABEL_W + 4, height=10),
                     *[
                         ft.Container(
-                            content=ft.Text(f"{w[0].month}月", size=8, color=TEXT_MUTED)
+                            content=ft.Text(f"{w[0].month}月", size=9, color=TEXT_MUTED)
                             if w[0].day <= 7
                             else None,
-                            width=_HEAT_CELL,
+                            width=_HEAT_CELL_W,
                         )
                         for w in weeks
                     ],
@@ -406,12 +401,12 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
                 [
                     ft.Column(
                         [
-                            _heatmap_card(_HOME_STATE["year"], open_day, set_year, height=200),
+                            _heatmap_card(_HOME_STATE["year"], open_day, set_year, height=228),
                             ft.Row(
                                 [
-                                    _stat_card("本月收入", money(summary["income"]), height=120),
-                                    _stat_card("本月支出", money(summary["expense"]), accent=True, height=120),
-                                    _stat_card("总资产", money(assets), height=120),
+                                    _stat_card("本月收入", money(summary["income"]), height=96),
+                                    _stat_card("本月支出", money(summary["expense"]), accent=True, height=96),
+                                    _stat_card("总资产", money(assets), height=96),
                                 ],
                                 spacing=12,
                             ),
@@ -420,7 +415,7 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
                         expand=True,
                         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                     ),
-                    _calendar_card(_HOME_STATE["selected_date"], set_date, width=280, height=328),
+                    _calendar_card(_HOME_STATE["selected_date"], set_date, width=280, height=332),
                 ],
                 spacing=12,
             ),
