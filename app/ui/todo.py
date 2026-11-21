@@ -321,8 +321,18 @@ def _quadrant_card(page, refresh, items, today: date) -> ft.Control:
                         ft.Text("高/中优先级=重要 · 今明到期/逾期=紧急", size=8, color=th.TEXT_MUTED),
                     ]
                 ),
-                ft.Row([cell("q1"), cell("q2")], spacing=8, expand=True),
-                ft.Row([cell("q3"), cell("q4")], spacing=8, expand=True),
+                ft.Row(
+                    [cell("q1"), cell("q2")],
+                    spacing=8,
+                    expand=True,
+                    vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+                ),
+                ft.Row(
+                    [cell("q3"), cell("q4")],
+                    spacing=8,
+                    expand=True,
+                    vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+                ),
             ],
             spacing=8,
             expand=True,
