@@ -71,6 +71,7 @@ from ..services.todo_rules import (
     parse_config,
     serialize_config,
 )
+from ..services.covers import normalize as normalize_cover
 from ..services.health import (
     calorie_of,
     estimate_exercise_calories,
@@ -868,8 +869,12 @@ def open_entertainment_dialog(page: ft.Page, item: Entertainment | None = None, 
         if score is not None and not 0 <= score <= 10:
             snack(page, "评分需在 0-10 之间", "#C97B63")
             return
-        fields = dict(title=title.value.strip(), kind=kind.value, status=status.value,
-                      cover=cover.value or "", rating=score, note=note.value or "")
+        fields = dict(
+            title=title.value.strip(), kind=kind.value, status=status.value,
+            # 清洗「复制文件地址」带来的首尾引号、file:// 前缀等，否则渲染必然失败。
+            cover=normalize_cover(cover.value or ""),
+            rating=score, note=note.value or "",
+        )
         save_record(Entertainment, item.id if item else None, fields)
         mark_pending_write()
         _close_and_refresh(page, dialog, on_done)

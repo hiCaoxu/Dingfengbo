@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import flet as ft
 from sqlalchemy import select
 
@@ -11,6 +9,7 @@ from ..db.models import Entertainment
 from ..db.repo import update
 from ..db.session import session_scope
 from ..icons import ACTIONS, ico
+from ..services.covers import prefetch, resolve_cover
 from ..services.sync import mark_pending_write
 from ..theme import DIVIDER, PRIMARY_LIGHT, TEXT, TEXT_MUTED
 from .async_utils import background_section
@@ -45,25 +44,30 @@ def _placeholder_cover() -> ft.Control:
     )
 
 
-def _cover(item: Entertainment) -> ft.Control:
-    source = (item.cover or "").strip()
-    if source.startswith(("http://", "https://")):
+def _cover(source: str, raw: str = "") -> ft.Control:
+    """``source`` 已由 :func:`covers.resolve_cover` 解析成本地路径；空串走占位图。
+
+    地址填了但解析不出来（链接 403/过期、路径不存在）时给占位图挂 tooltip，
+    否则用户只会看到一张灰图，不知道是地址问题。
+    """
+    if source:
         return ft.Image(
             src=source, width=64, height=84, fit=ft.BoxFit.COVER, border_radius=6,
             error_content=_placeholder_cover(),
         )
-    if source and Path(source).exists():
-        return ft.Image(src=source, width=64, height=84, fit=ft.BoxFit.COVER, border_radius=6)
-    return _placeholder_cover()
+    placeholder = _placeholder_cover()
+    if (raw or "").strip():
+        placeholder.tooltip = "封面加载失败：地址无效、图片不可访问，或豆瓣等图床链接已过期"
+    return placeholder
 
 
-def _item_card(item: Entertainment, page, refresh) -> ft.Control:
+def _item_card(item: Entertainment, cover_src: str, page, refresh) -> ft.Control:
     return ft.Container(
         content=ft.Column(
             [
                 ft.Row(
                     [
-                        _cover(item),
+                        _cover(cover_src, item.cover or ""),
                         ft.Column(
                             [
                                 ft.Text(item.title, size=12, color=TEXT, weight="bold",
@@ -100,11 +104,15 @@ def _item_card(item: Entertainment, page, refresh) -> ft.Control:
     )
 
 
-def _query() -> list[Entertainment]:
+def _query() -> list[tuple[Entertainment, str]]:
+    """列表数据 + 解析好的封面地址（后台线程：网络封面在这里下载缓存）。"""
     with session_scope() as session:
-        return list(
+        items = list(
             session.scalars(select(Entertainment).where(Entertainment.is_deleted.is_(False)))
         )
+    # 先并发预热网络封面，再逐条解析成本地路径。
+    prefetch([item.cover for item in items])
+    return [(item, resolve_cover(item.cover)) for item in items]
 
 
 def build(page: ft.Page, refresh) -> ft.Control:
@@ -112,7 +120,9 @@ def build(page: ft.Page, refresh) -> ft.Control:
     return background_section(page, _query, lambda items: _render(page, refresh, items))
 
 
-def _render(page: ft.Page, refresh, items) -> ft.Control:
+def _render(page: ft.Page, refresh, records) -> ft.Control:
+    items = [item for item, _cover_src in records]
+    covers = {item.id: cover_src for item, cover_src in records}
     kind_row = ft.Row(
         [ft.TextButton(("● " if _state["kind"] == k else "") + k,
                        on_click=lambda e, value=k: (_state.__setitem__("kind", value), refresh()))
@@ -132,7 +142,13 @@ def _render(page: ft.Page, refresh, items) -> ft.Control:
                                 ft.Container(expand=True),
                                 ft.Text(f"{len(filtered)} 项", size=11, color=TEXT_MUTED)]),
                         divider(),
-                        ft.Column([_item_card(i, page, refresh) for i in filtered], spacing=10)
+                        ft.Column(
+                            [
+                                _item_card(i, covers.get(i.id, ""), page, refresh)
+                                for i in filtered
+                            ],
+                            spacing=10,
+                        )
                         if filtered else empty("暂无条目"),
                     ],
                     spacing=10,
