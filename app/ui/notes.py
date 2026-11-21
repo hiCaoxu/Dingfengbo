@@ -19,7 +19,16 @@ from ..theme import DIVIDER, PRIMARY, PRIMARY_LIGHT, TEXT, TEXT_MUTED
 from .async_utils import background_section
 from .forms import tags_text
 from .state import state
-from .widgets import card, divider, empty, primary_button, section_header, tag_chip
+from .widgets import (
+    card,
+    delete_with_confirm,
+    divider,
+    empty,
+    icon_button,
+    primary_button,
+    section_header,
+    tag_chip,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -484,12 +493,18 @@ def _render(page: ft.Page, refresh, on_open, records) -> ft.Control:
         if _state["tag_path"] == "全部" or _matches_path(_parse_tags(record[2]), _state["tag_path"])
     ]
 
+    def delete_note(note_id: str) -> None:
+        delete_with_confirm(page, Note, note_id, refresh, "确定删除该笔记？")
+
     rows = [
         ft.ListTile(
             title=ft.Text(title, size=13, color=TEXT, weight="bold"),
             subtitle=ft.Text(
                 (snippet or "").replace("\n", " ")[:60] or "（暂无正文）",
                 size=11, color=TEXT_MUTED, overflow=ft.TextOverflow.ELLIPSIS,
+            ),
+            trailing=icon_button(
+                ACTIONS["delete"], lambda e, i=note_id: delete_note(i), "删除"
             ),
             on_click=lambda e, note_id=note_id: open_note(note_id),
         )
