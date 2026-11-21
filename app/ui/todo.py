@@ -54,6 +54,8 @@ _state = state.todo
 
 LEFT_WIDTH = 288
 RIGHT_WIDTH = 272
+# 每个象限格子里最多列出的任务条数，其余折成「还有 N 项」
+QUADRANT_PREVIEW_LIMIT = 3
 
 
 def _quadrant_color(key: str) -> str:
@@ -269,13 +271,43 @@ def _quadrant_card(page, refresh, items, today: date) -> ft.Control:
         )
         active = _state.quadrant == key
         color = _quadrant_color(key)
-        first = grouped[key][0].title if grouped[key] else ""
+        # 到期日近的排在前面，没有日期的排最后，格子里先看到最该做的事
+        bucket = sorted(
+            grouped[key],
+            key=lambda it: (it.due_date is None, it.due_date or today),
+        )
+        preview = bucket[:QUADRANT_PREVIEW_LIMIT]
+        rest = len(bucket) - len(preview)
+
+        def entry(item: Todo) -> ft.Control:
+            overdue = bool(item.due_date and item.due_date < today)
+            due = f" {item.due_date.strftime('%m/%d')}" if item.due_date else ""
+            return ft.Container(
+                content=ft.Text(
+                    f"{item.title}{due}",
+                    size=9,
+                    color=th.DANGER if overdue else th.TEXT,
+                    max_lines=1,
+                    overflow=ft.TextOverflow.ELLIPSIS,
+                ),
+                padding=ft.Padding.symmetric(vertical=1, horizontal=3),
+                border_radius=4,
+                tooltip=f"完成「{item.title}」",
+                on_click=lambda e, i=item.id: toggle(page, i, refresh),
+            )
+
+        body: list[ft.Control] = [entry(item) for item in preview]
+        if rest:
+            body.append(ft.Text(f"还有 {rest} 项", size=8, color=th.TEXT_MUTED))
+        if not bucket:
+            body.append(ft.Text("暂无任务", size=9, color=th.DIVIDER))
+
         return ft.Container(
             content=ft.Column(
                 [
                     ft.Row(
                         [
-                            ft.Container(width=3, height=22, bgcolor=color, border_radius=2),
+                            ft.Container(width=3, height=20, bgcolor=color, border_radius=2),
                             ft.Column(
                                 [
                                     ft.Text(label, size=10, color=th.TEXT, weight="bold"),
@@ -285,24 +317,20 @@ def _quadrant_card(page, refresh, items, today: date) -> ft.Control:
                                 tight=True,
                                 expand=True,
                             ),
+                            ft.Text(str(counts[key]), size=16, color=color, weight="bold"),
                         ],
                         spacing=6,
                     ),
-                    ft.Text(str(counts[key]), size=18, color=color, weight="bold"),
-                    ft.Text(
-                        first or "暂无任务",
-                        size=9,
-                        color=th.TEXT_MUTED if first else th.DIVIDER,
-                        max_lines=1,
-                        overflow=ft.TextOverflow.ELLIPSIS,
-                    ),
+                    *body,
                 ],
                 spacing=2,
-                expand=True,
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                tight=True,
             ),
             padding=ft.Padding.all(9),
             expand=True,
+            alignment=ft.Alignment.TOP_LEFT,
+            # 窗口很矮时裁掉溢出内容，避免出现黄黑溢出条
+            clip_behavior=ft.ClipBehavior.HARD_EDGE,
             bgcolor=th.PRIMARY_LIGHT if active else th.CARD,
             border=ft.Border.all(2 if active else 1, color if active else th.DIVIDER),
             border_radius=10,

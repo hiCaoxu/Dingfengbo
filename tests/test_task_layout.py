@@ -1,10 +1,11 @@
-"""任务页布局回归：三栏结构、四象限填充剩余高度、列表用 ListView 滚动。
+"""任务页布局回归：三栏结构、四象限填充剩余高度并列出任务、列表用 ListView 滚动。
 
 曾经的问题：
 - ``card(expand=...)`` 不把 expand 传给内层 Column，列表拿不到高度；
 - 筛选行用 ``ft.Row(wrap=True)`` 却塞了 ``ft.Container(expand=True)`` 间隔器，
   Wrap 不接受 flex 子项，整列被 Flet 渲染成一整块灰色空白；
-- 四象限不 expand，下方留出大片空白。
+- 四象限不 expand，下方留出大片空白；
+- 四象限只显示数量和首条标题，看不到任务内容。
 """
 
 from __future__ import annotations
@@ -131,6 +132,23 @@ class TaskPageLayoutTests(unittest.TestCase):
         texts = [c.value for c in walk(quadrants) if isinstance(c, ft.Text)]
         for label in ("重要且紧急", "重要不紧急", "紧急不重要", "不重要不紧急"):
             self.assertIn(label, texts)
+
+    def test_quadrant_cells_list_task_titles(self) -> None:
+        """格子里要能看到任务内容，而不是只有数量或首条标题。"""
+        quadrants = self.build().controls[0].controls[1]
+        texts = [c.value for c in walk(quadrants) if isinstance(c, ft.Text)]
+        joined = " | ".join(texts)
+        # 样本里两条未完成任务都属于「重要且紧急」，日期前缀不影响匹配
+        self.assertIn("写周报", joined)
+        self.assertIn("体检预约", joined)
+        # 已完成的任务不进格子
+        self.assertNotIn("已完成的整理", joined)
+        # 其余三个象限为空
+        self.assertEqual(texts.count("暂无任务"), 3)
+        # 格子内容用自然高度，不能出现 ListView（无界高度会变灰块）
+        self.assertFalse(
+            [c for c in walk(quadrants) if isinstance(c, ft.ListView)]
+        )
 
 
 if __name__ == "__main__":
