@@ -7,7 +7,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 import flet as ft
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from ..db.models import Diet, Exercise, Sleep, Weight
 from ..db.session import session_scope
@@ -15,6 +15,7 @@ from ..icons import ACTIONS, ico
 from ..services.charts import bar_chart, line_chart
 from ..services.health import bmi
 from ..theme import ACCENT, DIVIDER, PRIMARY, TEXT, TEXT_MUTED
+from .async_utils import background_section
 from .forms import open_diet_dialog, open_exercise_dialog, open_sleep_dialog, open_weight_dialog
 from .state import state
 from .widgets import card, delete_with_confirm, divider, empty, icon_button, primary_button, section_header
@@ -93,10 +94,11 @@ def _row(item, tab: str, page, refresh) -> ft.Control:
     )
 
 
-def build(page: ft.Page, refresh) -> ft.Control:
+def _load() -> dict:
+    """健康页数据（后台线程执行）：列表、最新体重、今日摄入与四张图表的数据。"""
     start, end = _date_range()
     tab = _state["tab"]
-    model, opener = _TABS[tab]
+    model = _TABS[tab][0]
     with session_scope() as session:
         items = list(
             session.scalars(
@@ -105,10 +107,15 @@ def build(page: ft.Page, refresh) -> ft.Control:
                 ).order_by(model.date.desc())
             )
         )
-        latest_weight = session.scalar(select(Weight).where(Weight.is_deleted.is_(False)).order_by(Weight.date.desc()))
-        today_kcal = sum(d.calories for d in session.scalars(
-            select(Diet).where(Diet.is_deleted.is_(False), Diet.date == date.today())
-        ))
+        latest_weight = session.scalar(
+            select(Weight).where(Weight.is_deleted.is_(False)).order_by(Weight.date.desc())
+        )
+        # 今日摄入交给 SQL 求和，不再把当天饮食行搬进 Python。
+        today_kcal = session.scalar(
+            select(func.coalesce(func.sum(Diet.calories), 0.0)).where(
+                Diet.is_deleted.is_(False), Diet.date == date.today()
+            )
+        )
         chart_models = (Weight, Sleep, Exercise, Diet)
         weights, sleeps, exercises, diets = [
             list(session.scalars(
@@ -120,6 +127,31 @@ def build(page: ft.Page, refresh) -> ft.Control:
             ))
             for chart_model in chart_models
         ]
+    return {
+        "tab": tab,
+        "items": items,
+        "latest_weight": latest_weight,
+        "today_kcal": float(today_kcal or 0.0),
+        "weights": weights,
+        "sleeps": sleeps,
+        "exercises": exercises,
+        "diets": diets,
+    }
+
+
+def build(page: ft.Page, refresh) -> ft.Control:
+    # 查询放后台线程；图表本身在 _render 内继续异步渲染。
+    return background_section(page, _load, lambda data: _render(page, refresh, data))
+
+
+def _render(page: ft.Page, refresh, data) -> ft.Control:
+    tab = data["tab"]
+    items = data["items"]
+    latest_weight = data["latest_weight"]
+    today_kcal = data["today_kcal"]
+    weights, sleeps = data["weights"], data["sleeps"]
+    exercises, diets = data["exercises"], data["diets"]
+    opener = _TABS[tab][1]
 
     def labels_of(rows):
         return [r.date.strftime("%m-%d") for r in rows[-14:]]

@@ -14,7 +14,7 @@ from ..services.ai.provider import AIError
 from ..theme import ACCENT, CARD, DIVIDER, PRIMARY, PRIMARY_LIGHT, TEXT, TEXT_MUTED, card_border
 from .forms import open_settings_dialog
 from .state import state
-from .widgets import primary_button, snack
+from .widgets import dismiss, primary_button, snack
 
 logger = logging.getLogger(__name__)
 
@@ -216,8 +216,7 @@ def build(page: ft.Page, refresh) -> ft.Control:
         tables = "、".join(f"@{get_label(name)}" for name in refs)
 
         def close(_):
-            dialog.open = False
-            page.update()
+            dismiss(page, dialog)
 
         def agree(_):
             save_settings({"ai_data_notice_ack": True})

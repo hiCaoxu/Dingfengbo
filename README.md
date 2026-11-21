@@ -48,7 +48,8 @@ python run_server.py
 - 接口：`POST /api/sync/pull`、`POST /api/sync/push`、`GET /api/sync/check`，Bearer token 鉴权并按用户隔离。
 - 冲突：按 `updated_at` 最后写入获胜；删除使用软删除，同步完成后物理清理。
 - 序列：服务端用全局单调递增的 `sync_seq` 分配号，客户端以 `sync_seq > cursor` 增量拉取；已有数据的服务端库升级时会把计数器锚定到存量最大值（启动日志会打印「同步序列当前值」）。需要自检时在服务端跑 `python scripts/check_sync_sequence.py <cloud.db 路径>`，输出计数器与各表 `MAX(sync_seq)` 的比对结论。
-- 被拒记录：push 校验失败的记录由服务端回传 `table`/`id`，客户端标记为 `error` 退出待同步队列，不再无限重推；重新编辑该记录后自动回到 `pending`。设置页可看到「N 条被服务端拒收」。
+- 被拒记录：push 校验失败的记录由服务端回传 `table`/`id`，客户端标记为 `error` 退出待同步队列，不再无限重推；重新编辑该记录后自动回到 `pending`。
+- 队列可见性：顶部状态栏在有待同步或失败记录时显示「待同步 N · 失败 M」，设置页显示同样统计；统计用一条 `UNION ALL` 聚合十张表，状态栏周期刷新不会带来额外往返。
 
 ## Docker 部署同步服务
 

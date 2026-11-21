@@ -13,6 +13,7 @@ from ..db.session import session_scope
 from ..icons import ACTIONS, ico
 from ..services.sync import mark_pending_write
 from ..theme import DIVIDER, PRIMARY_LIGHT, TEXT, TEXT_MUTED
+from .async_utils import background_section
 from .forms import ENTERTAINMENT_KINDS, open_entertainment_dialog
 from .state import state
 from .widgets import card, delete_with_confirm, divider, empty, icon_button, primary_button, section_header
@@ -99,10 +100,19 @@ def _item_card(item: Entertainment, page, refresh) -> ft.Control:
     )
 
 
-def build(page: ft.Page, refresh) -> ft.Control:
+def _query() -> list[Entertainment]:
     with session_scope() as session:
-        items = list(session.scalars(select(Entertainment).where(Entertainment.is_deleted.is_(False))))
+        return list(
+            session.scalars(select(Entertainment).where(Entertainment.is_deleted.is_(False)))
+        )
 
+
+def build(page: ft.Page, refresh) -> ft.Control:
+    # 查询放后台线程，避免条目增多后切换模块卡顿。
+    return background_section(page, _query, lambda items: _render(page, refresh, items))
+
+
+def _render(page: ft.Page, refresh, items) -> ft.Control:
     kind_row = ft.Row(
         [ft.TextButton(("● " if _state["kind"] == k else "") + k,
                        on_click=lambda e, value=k: (_state.__setitem__("kind", value), refresh()))

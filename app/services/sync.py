@@ -12,7 +12,14 @@ import httpx
 
 from ..config import DEFAULT_SERVER_URL, load_settings, save_settings
 from ..db.models import utcnow
-from ..db.repo import apply_remote, mark_clean, mark_rejected, pending_changes, purge_deleted
+from ..db.repo import (
+    apply_remote,
+    mark_clean,
+    mark_rejected,
+    pending_changes,
+    purge_deleted,
+    sync_queue_stats,
+)
 from ..db.session import session_scope
 from ..services.clock import set_clock_offset
 
@@ -117,8 +124,8 @@ class SyncClient:
         rejected = payload.get("rejected", []) or []
         with session_scope() as session:
             mark_clean(session, accepted)
-            if rejected:
-                self.rejected_count = mark_rejected(session, rejected)
+            # 每轮都复算，避免上一轮的被拒数一直挂在状态栏上。
+            self.rejected_count = mark_rejected(session, rejected) if rejected else 0
         if rejected:
             logger.warning("同步被拒 %d 条：%s", len(rejected), rejected[:3])
 
@@ -175,6 +182,20 @@ class SyncClient:
             response = client.get(self._endpoint("/api/sync/check"), headers=self._headers())
             response.raise_for_status()
             return response.json()
+
+
+def queue_counts() -> tuple[int, int]:
+    """返回（待同步, 同步失败）记录数，供状态栏显示队列可见性。
+
+    只读一次单条聚合 SQL；异常时返回 (0, 0)，不让状态栏刷新影响主流程。
+    """
+    try:
+        with session_scope() as session:
+            stats = sync_queue_stats(session)
+    except Exception:
+        logger.exception("读取同步队列统计失败")
+        return 0, 0
+    return stats.get("pending", 0), stats.get("error", 0)
 
 
 def probe(server_url: str, token: str) -> str:

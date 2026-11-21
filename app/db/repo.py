@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any, Iterable
 
-from sqlalchemy import func, select, update as sql_update
+from sqlalchemy import func, literal, select, union_all, update as sql_update
 from sqlalchemy.orm import Session
 
 from ..services.clock import get_clock_offset
@@ -126,17 +126,27 @@ def mark_rejected(
 
 
 def sync_queue_stats(session: Session, owner_id: str = "local") -> dict[str, int]:
-    """统计待同步与被拒记录数，供设置页展示同步队列可见性。"""
-    stats = {"pending": 0, "error": 0, "clean": 0}
-    for model in MODEL_BY_TABLE.values():
-        rows = session.execute(
-            select(model.sync_status, func.count())
-            .where(model.owner_id == owner_id)
-            .group_by(model.sync_status)
+    """统计各同步状态的记录数（待同步/被拒/已同步）。
+
+    用一条 ``UNION ALL`` 汇总十张表，而不是逐表发十条 SQL：状态栏会周期性调用，
+    往返次数必须与表数量脱钩。
+    """
+    statements = [
+        select(
+            literal(model.__tablename__).label("table_name"),
+            model.sync_status.label("status"),
+            func.count().label("total"),
         )
-        for status, count in rows:
-            key = str(status or "pending")
-            stats[key] = stats.get(key, 0) + int(count or 0)
+        .where(model.owner_id == owner_id)
+        .group_by(model.sync_status)
+        for model in MODEL_BY_TABLE.values()
+    ]
+    stats: dict[str, int] = {}
+    for _table, status, total in session.execute(union_all(*statements)):
+        key = str(status or "pending")
+        stats[key] = stats.get(key, 0) + int(total or 0)
+    stats.setdefault("pending", 0)
+    stats.setdefault("error", 0)
     return stats
 
 

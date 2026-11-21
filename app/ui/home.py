@@ -154,12 +154,14 @@ def _heatmap_cell(day: date, count: int, on_open) -> ft.Container:
 
 
 def _heatmap_card(year: int, on_open, set_year, height: int | None = None) -> ft.Container:
-    current_year = date.today().year
-    end = date(year, 12, 31)
+    today = date.today()
+    current_year = today.year
+    # 当年只画到今天：未来日期没有数据，画出来只是空行；历史年份取自然年。
+    end = today if year == current_year else date(year, 12, 31)
     start = date(year, 1, 1)
     if year == current_year:
-        # 当年热力图铺满过去 12 个月；其他年份即自然年，避免未来年份渲染约两年空格。
-        start_year, start_month = shift_month(current_year, date.today().month, -11)
+        # 当年热力图铺满过去 12 个月；未来年份已在切换按钮上禁用。
+        start_year, start_month = shift_month(current_year, today.month, -11)
         start = date(start_year, start_month, 1)
     anchor = start - timedelta(days=start.weekday())
     counts = _activity_counts(since=anchor)

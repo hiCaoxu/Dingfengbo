@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import date
+import logging
+from datetime import date, datetime
 
 import flet as ft
 
@@ -12,13 +13,15 @@ from .logging_setup import setup_logging
 from .icons import ACTIONS, NAV, ico
 from .services.dates import weekday_cn
 from .services.diary import ensure_diary
-from .services.sync import mark_pending_write, sync_client
-from .theme import BG, CARD, DIVIDER, NAV_WIDTH, PRIMARY, PRIMARY_LIGHT, TEXT, TEXT_MUTED
+from .services.sync import mark_pending_write, queue_counts, sync_client
+from .theme import ACCENT, BG, CARD, DIVIDER, NAV_WIDTH, PRIMARY, PRIMARY_LIGHT, TEXT, TEXT_MUTED
 from .ui import ai_assistant, diary as diary_ui
 from .ui import entertainment, finance_ui, health_ui, home, notes, todo
 from .ui.forms import open_settings_dialog
 from .ui.scheduler import bind as bind_sync
 from .ui.widgets import icon_button, primary_button
+
+logger = logging.getLogger(__name__)
 
 MODULES = [
     ("home", "首页"),
@@ -33,8 +36,6 @@ MODULES = [
 
 
 def _greeting() -> str:
-    hour = date.today().timetuple().tm_hour
-    from datetime import datetime
     hour = datetime.now().hour
     if hour < 6:
         return "夜深了"
@@ -76,6 +77,7 @@ def main(page: ft.Page) -> None:
 
     state = {"current": "home", "preview_note": None}
     sync_text = ft.Text(sync_client.status, size=11, color=TEXT_MUTED)
+    queue_text = ft.Text("", size=11, color=TEXT_MUTED, visible=False)
     body = ft.Container(expand=True, padding=ft.Padding.all(16))
     date_text = ft.Text(
         f"{date.today().year}年{date.today().month}月{date.today().day}日 {weekday_cn(date.today())}",
@@ -118,6 +120,7 @@ def main(page: ft.Page) -> None:
                         [
                             ft.Container(width=7, height=7, bgcolor=PRIMARY, border_radius=4),
                             sync_text,
+                            queue_text,
                             ft.TextButton("立即同步", on_click=lambda e: _manual_sync()),
                             icon_button(ACTIONS["settings"], lambda e: open_settings_dialog(page, refresh, refresh_status), "设置"),
                         ],
@@ -139,11 +142,49 @@ def main(page: ft.Page) -> None:
     def refresh_status() -> None:
         sync_text.value = sync_client.status
         sync_text.color = TEXT_MUTED if "已同步" in sync_client.status else "#C97B63"
+        # 队列可见性：单条聚合查询，告诉用户「还有多少没传上去 / 有多少被拒」。
+        pending, failed = queue_counts()
+        parts = []
+        if pending:
+            parts.append(f"待同步 {pending}")
+        if failed:
+            parts.append(f"失败 {failed}")
+        queue_text.value = " · ".join(parts)
+        queue_text.color = ACCENT if failed else TEXT_MUTED
+        queue_text.visible = bool(parts)
+
+    syncing = {"value": False}
 
     def _manual_sync():
-        sync_client.sync_once()
-        refresh_status()
+        # 手动同步放到后台线程：sync_once 含最长 10s 的 HTTP 超时，同步执行会冻结界面。
+        if syncing["value"]:
+            return
+        syncing["value"] = True
+        sync_text.value = "正在同步…"
+        sync_text.color = TEXT_MUTED
         page.update()
+
+        def worker() -> None:
+            try:
+                sync_client.sync_once()
+            except Exception:
+                logger.exception("手动同步异常")
+
+            async def apply() -> None:
+                syncing["value"] = False
+                refresh_status()
+                if sync_client.status.startswith("已同步"):
+                    refresh()  # 拉取到新数据后刷新当前模块
+                else:
+                    page.update()
+
+            try:
+                page.run_task(apply)
+            except Exception:
+                syncing["value"] = False
+                logger.exception("手动同步结果回 UI 线程失败")
+
+        page.run_thread(worker)
 
     def navigate(key: str) -> None:
         state["current"] = key

@@ -72,8 +72,8 @@ def _date(value: str | None, default: date | None = None) -> date | None:
 
 
 def _close_and_refresh(page, dialog, on_done):
-    dialog.open = False
-    page.update()
+    # close_modal 会同时把弹窗移出 overlay，避免开窗次数增长后控件树膨胀。
+    close_modal(page, dialog)
     if on_done:
         on_done()
 
@@ -208,7 +208,7 @@ def open_account_dialog(page: ft.Page, account: Account | None = None, on_done: 
             snack(page, "请填写账户名称", "#C97B63")
             return
         try:
-            amount = float(balance.value or 0)
+            amount = round(float(balance.value or 0), 2)
         except ValueError:
             snack(page, "余额格式不正确", "#C97B63")
             return
@@ -284,7 +284,7 @@ def open_transaction_dialog(page: ft.Page, kind: str = "expense", tx: Transactio
 
     def save(_):
         try:
-            value = float(amount.value or 0)
+            value = round(float(amount.value or 0), 2)
         except ValueError:
             snack(page, "金额格式不正确", "#C97B63")
             return

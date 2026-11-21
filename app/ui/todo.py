@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 
 import flet as ft
 from sqlalchemy import select
 
-from ..db.models import Todo
+from ..db.models import Todo, utcnow
 from ..db.repo import create, update
 from ..db.session import session_scope
 from ..icons import ACTIONS, ico
 from ..services.dates import lunar_md, next_due, next_lunar_due
 from ..services.sync import mark_pending_write
 from ..theme import DANGER, DIVIDER, PRIMARY_LIGHT, TEXT, TEXT_MUTED
+from .async_utils import background_section
 from .forms import open_todo_dialog, tags_text
 from .state import state
 from .widgets import card, delete_with_confirm, divider, empty, icon_button, primary_button, section_header, tag_chip
@@ -47,10 +48,10 @@ def toggle(page: ft.Page, todo_id: str, refresh) -> None:
                     repeat_rule=item.repeat_rule,
                     priority=item.priority, completed=False, is_template=False,
                 )
-            update(session, item, completed=True, completed_at=datetime.utcnow(), is_template=True)
+            update(session, item, completed=True, completed_at=utcnow(), is_template=True)
         else:
             update(session, item, completed=not item.completed,
-                   completed_at=datetime.utcnow() if not item.completed else None)
+                   completed_at=utcnow() if not item.completed else None)
     mark_pending_write()
     refresh()
 
@@ -59,13 +60,21 @@ def delete(page: ft.Page, todo_id: str, refresh) -> None:
     delete_with_confirm(page, Todo, todo_id, refresh, "确定删除该待办？")
 
 
-def build(page: ft.Page, refresh) -> ft.Control:
+def _query() -> list[Todo]:
     with session_scope() as session:
-        items = list(
+        return list(
             session.scalars(
                 select(Todo).where(Todo.is_deleted.is_(False)).order_by(Todo.due_date, Todo.id)
             )
         )
+
+
+def build(page: ft.Page, refresh) -> ft.Control:
+    # 查询放后台线程：待办量增长后不再阻塞 UI。
+    return background_section(page, _query, lambda items: _render(page, refresh, items))
+
+
+def _render(page: ft.Page, refresh, items) -> ft.Control:
     tags = _all_tags(items)
     today = date.today()
 

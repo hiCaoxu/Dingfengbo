@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 
 import flet as ft
@@ -19,6 +20,8 @@ from ..theme import (
     TEXT_MUTED,
     card_border,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def card(
@@ -148,8 +151,7 @@ def delete_with_confirm(
 
 def confirm(page: ft.Page, message: str, on_confirm: Callable) -> None:
     def close(_):
-        dialog.open = False
-        page.update()
+        dismiss(page, dialog)
 
     def accept(_):
         close(_)
@@ -222,6 +224,26 @@ def modal(page: ft.Page, title: str, body: ft.Control, actions: list[ft.Control]
     return dialog
 
 
-def close_modal(page: ft.Page, dialog: ft.AlertDialog) -> None:
-    dialog.open = False
+def dismiss(page: ft.Page, dialog: ft.Control) -> None:
+    """关闭弹窗并把它移出 ``page.overlay``。
+
+    只置 ``open = False`` 会把隐藏的 AlertDialog 永久留在 overlay 里，
+    每次开窗都新增一个，长期使用后控件树与增量消息持续膨胀。
+    """
+    try:
+        dialog.open = False
+    except Exception:
+        logger.debug("设置弹窗关闭状态失败", exc_info=True)
+    try:
+        # Flet 控件按值比较（`==` 相等），必须按身份移除，否则可能误删参数相同的另一个弹窗。
+        for index, control in enumerate(page.overlay):
+            if control is dialog:
+                del page.overlay[index]
+                break
+    except Exception:
+        logger.debug("弹窗移出 overlay 失败", exc_info=True)
     page.update()
+
+
+def close_modal(page: ft.Page, dialog: ft.AlertDialog) -> None:
+    dismiss(page, dialog)
