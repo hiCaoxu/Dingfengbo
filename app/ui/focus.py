@@ -104,7 +104,7 @@ def render(
             spacing=6,
         )
     else:
-        todo_body = empty("今天没有待办，享受空白")
+        todo_body = empty("今天没有任务，享受空白")
 
     todo_card = card(
         ft.Column(
@@ -112,7 +112,7 @@ def render(
                 ft.Row(
                     [
                         ft.Text(
-                            f"完成 {data['completed_today']} 项 · 待办 {data['pending_count']} 项"
+                            f"完成 {data['completed_today']} 项 · 未完成 {data['pending_count']} 项"
                             + (f" · 逾期 {data['overdue_count']} 项" if data["overdue_count"] else ""),
                             size=11, color=th.TEXT_MUTED,
                         ),
@@ -130,7 +130,7 @@ def render(
             [
                 primary_button("番茄钟", lambda e: open_pomodoro_dialog(page, refresh),
                                ACTIONS["timer"]),
-                primary_button("去待办", lambda e: navigate("todo"), ACTIONS["add"]),
+                primary_button("去任务", lambda e: navigate("todo"), ACTIONS["add"]),
             ],
             spacing=6,
         ),
@@ -249,7 +249,7 @@ def render(
     habit_card = card(
         ft.Column(habit_controls, spacing=6),
         title="习惯打卡",
-        trailing=ft.TextButton("管理", on_click=lambda e: navigate("habits")),
+        trailing=ft.TextButton("管理", on_click=lambda e: navigate("todo")),
         expand=2,
     )
 
@@ -277,7 +277,7 @@ def render(
         ft.Column(
             [
                 ft.Text(
-                    "把今天的待办、健康、消费和习惯交给 AI，让它给出今天最值得做的三件事。",
+                    "把今天的任务、健康、消费和习惯交给 AI，让它给出今天最值得做的三件事。",
                     size=11, color=th.TEXT_MUTED,
                 ),
                 primary_button("生成今日建议", ai_brief, "AUTO_AWESOME_OUTLINED"),

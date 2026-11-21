@@ -122,15 +122,15 @@ def open_pomodoro_dialog(page: ft.Page, refresh=None):
             )
         )
 
-    todo_select = dropdown("关联待办（可选）", [""], "")
-    todo_select.options = [ft.dropdown.Option(key="", text="（不关联待办）")] + [
+    todo_select = dropdown("关联任务（可选）", [""], "")
+    todo_select.options = [ft.dropdown.Option(key="", text="（不关联任务）")] + [
         ft.dropdown.Option(key=item.id, text=item.title[:40]) for item in todos
     ]
     todo_select.width = 380
 
     duration = dropdown("专注时长", ["25 分钟", "45 分钟", "60 分钟"], "25 分钟", width=150)
     remain_text = ft.Text("25:00", size=44, color=th.PRIMARY, weight="bold")
-    status_text = ft.Text("选择待办与时长后点开始", size=11, color=th.TEXT_MUTED)
+    status_text = ft.Text("选择任务与时长后点开始", size=11, color=th.TEXT_MUTED)
 
     def stop(_=None):
         _session["active"] = False

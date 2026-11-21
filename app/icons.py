@@ -18,7 +18,7 @@ def ico(name: str) -> str:
 
 NAV = {
     "home": "HOME_OUTLINED",
-    "todo": "CHECK_CALENDAR_OUTLINED",
+    "todo": "TASK_ALT_OUTLINED",
     "diary": "AUTO_STORIES_OUTLINED",
     "notes": "DESCRIPTION_OUTLINED",
     "health": "FAVORITE_OUTLINED",

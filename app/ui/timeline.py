@@ -83,7 +83,7 @@ def open_links_dialog(page: ft.Page, item: TimelineItem, refresh) -> ft.AlertDia
     links_box = ft.Column(spacing=6)
     targets_box = ft.Column(spacing=2, height=180, scroll=ft.ScrollMode.AUTO)
     search_field = ft.TextField(
-        hint_text="搜索要关联的待办/笔记/日记/娱乐…",
+        hint_text="搜索要关联的任务/笔记/日记/娱乐…",
         dense=True,
         border_color=th.DIVIDER,
         focused_border_color=th.PRIMARY,

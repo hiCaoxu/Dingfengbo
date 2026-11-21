@@ -81,7 +81,7 @@ class Hit:
     @property
     def label(self) -> str:
         return {
-            "todo": "待办",
+            "todo": "任务",
             "notes": "笔记",
             "diary": "日记",
             "finance": "收支",

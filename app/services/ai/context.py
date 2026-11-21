@@ -43,6 +43,8 @@ TABLES: list[tuple[str, str, Any]] = [
 
 TABLE_BY_NAME = {name: (label, model) for name, label, model in TABLES}
 TABLE_BY_LABEL = {label: name for name, label, _model in TABLES}
+# 兼容旧写法：任务表曾叫「待办」，用户输入 @待办 仍应命中。
+TABLE_BY_LABEL.setdefault("待办", "todos")
 
 # 每次引用最多读取的记录条数。
 CONTEXT_LIMIT = 30

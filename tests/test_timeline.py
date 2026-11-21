@@ -59,7 +59,7 @@ class TagTests(unittest.TestCase):
     def test_tag_counts_merge_sources(self) -> None:
         tags = {tag: (count, sources) for tag, count, sources in tag_counts(days=30)}
         self.assertIn("工作", tags)
-        self.assertIn("待办", tags["工作"][1])
+        self.assertIn("任务", tags["工作"][1])
         self.assertIn("笔记", tags["工作"][1])
         self.assertIn("AI", tags)
 

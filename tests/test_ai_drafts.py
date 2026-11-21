@@ -144,7 +144,7 @@ class TaskRequestTests(unittest.TestCase):
     def test_report_task_includes_local_stats(self) -> None:
         request = build_request("weekly_report")
         self.assertIn("回顾", request.content)
-        self.assertIn("待办", request.content)
+        self.assertIn("任务", request.content)
 
     def test_unknown_task_raises(self) -> None:
         with self.assertRaises(ValueError):

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 # 允许 AI 产出的草稿类型 → 中文名
 DRAFT_TYPES = {
-    "todo": "待办",
+    "todo": "任务",
     "note": "笔记",
     "transaction": "收支",
     "entertainment": "娱乐",

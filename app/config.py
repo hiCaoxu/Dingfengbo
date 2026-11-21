@@ -78,7 +78,7 @@ _DEFAULT_SETTINGS: dict[str, Any] = {
     "theme_mode": "light",
     "home_view": "focus",
     "module_order": [
-        "home", "todo", "diary", "notes", "health", "fun", "finance", "habits", "reports", "timeline", "ai",
+        "home", "todo", "diary", "notes", "health", "fun", "finance", "reports", "timeline", "ai",
     ],
     "hidden_modules": [],
     # 系统集成：开机自启、关闭窗口最小化（有 pystray 时收入托盘）

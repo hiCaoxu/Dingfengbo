@@ -169,6 +169,167 @@ def build(page: ft.Page, refresh) -> ft.Control:
     return background_section(page, _load, lambda items: _render(page, refresh, items))
 
 
+def _week_cells(item: dict, today: date, size: int = 10) -> list[ft.Control]:
+    week_start = today - timedelta(days=today.weekday())
+    cells: list[ft.Control] = []
+    for offset in range(7):
+        day = week_start + timedelta(days=offset)
+        done = day in item["days"]
+        cells.append(
+            ft.Container(
+                width=size,
+                height=size,
+                bgcolor=th.PRIMARY if done else th.DIVIDER,
+                border_radius=3,
+                tooltip=f"{day.isoformat()} {'已打卡' if done else '未打卡'}",
+            )
+        )
+    return cells
+
+
+def _mini_button(icon: str, on_click, tooltip: str) -> ft.Container:
+    """窄栏用的小图标按钮：IconButton 的最小点击区在 300px 列里会挤爆布局。"""
+    from ..icons import ico
+
+    return ft.Container(
+        content=ft.Icon(ico(icon), size=14, color=th.TEXT_MUTED),
+        width=24,
+        height=24,
+        alignment=ft.Alignment.CENTER,
+        border_radius=6,
+        tooltip=tooltip,
+        on_click=on_click,
+    )
+
+
+def build_panel(page: ft.Page, refresh) -> ft.Control:
+    """窄栏版本（任务模块右侧），一屏放下打卡、连续天数与周进度。"""
+    return background_section(page, _load, lambda items: render_panel(page, refresh, items))
+
+
+def render_panel(page: ft.Page, refresh, items: list[dict]) -> ft.Control:
+    """纯渲染版本：任务页把习惯数据与任务一起查出来，避免嵌套后台加载。"""
+    today = date.today()
+    done_count = sum(1 for item in items if item["done_today"])
+    pending = [item["name"] for item in items if not item["done_today"]]
+
+    def toggle(habit_id: str, done: bool) -> None:
+        try:
+            check_in(habit_id, today, not done)
+        except Exception:
+            logger.exception("习惯打卡失败")
+            snack(page, "打卡失败，详见日志", th.ACCENT)
+            return
+        refresh()
+
+    rows: list[ft.Control] = []
+    for item in items:
+        on_target = item["week_done"] >= item["target_per_week"]
+        rows.append(
+            ft.Container(
+                ft.Column(
+                    [
+                        ft.Row(
+                            [
+                                ft.Checkbox(
+                                    value=item["done_today"],
+                                    on_change=lambda e, hid=item["id"], d=item["done_today"]: toggle(hid, d),
+                                ),
+                                ft.Text(
+                                    item["name"], size=12, color=th.TEXT, weight="bold",
+                                    max_lines=1, overflow=ft.TextOverflow.ELLIPSIS, expand=True,
+                                ),
+                                ft.Text(
+                                    f"连续 {item['streak']} 天" if item["streak"] else "",
+                                    size=9,
+                                    color=th.PRIMARY if item["streak"] else th.TEXT_MUTED,
+                                ),
+                            ],
+                            spacing=4,
+                        ),
+                        ft.Row(
+                            [
+                                ft.Row(_week_cells(item, today), spacing=2),
+                                ft.Text(
+                                    f"{item['week_done']}/{item['target_per_week']}",
+                                    size=9,
+                                    color=th.PRIMARY if on_target else th.TEXT_MUTED,
+                                ),
+                                ft.Container(expand=True),
+                                _mini_button(ACTIONS["calendar"],
+                                             lambda e, it=item: open_calendar_dialog(page, it),
+                                             "打卡日历"),
+                                _mini_button(ACTIONS["edit"],
+                                             lambda e, it=item: open_habit_dialog(page, it["habit"], refresh),
+                                             "编辑"),
+                                _mini_button(
+                                    ACTIONS["delete"],
+                                    lambda e, it=item: confirm(
+                                        page,
+                                        f"删除习惯「{it['name']}」及其打卡记录？",
+                                        lambda: (delete_habit(it["id"]), refresh()),
+                                    ),
+                                    "删除",
+                                ),
+                            ],
+                            spacing=4,
+                        ),
+                    ],
+                    spacing=2,
+                    tight=True,
+                ),
+                padding=ft.Padding.symmetric(vertical=6, horizontal=8),
+                border=ft.Border.all(1, th.DIVIDER),
+                border_radius=10,
+            )
+        )
+
+    body: ft.Control = (
+        ft.Column(rows, spacing=6)
+        if rows
+        else empty("还没有习惯。加一个「每天阅读 30 分钟」之类的小目标。")
+    )
+
+    return card(
+        ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Text("习惯", size=13, color=th.TEXT, weight="bold"),
+                        ft.Text(
+                            f"{done_count}/{len(items)}" if items else "0",
+                            size=10,
+                            color=th.PRIMARY if items and done_count == len(items) else th.TEXT_MUTED,
+                        ),
+                        ft.Container(expand=True),
+                        _mini_button(ACTIONS["add"],
+                                     lambda e: open_habit_dialog(page, None, refresh),
+                                     "新增习惯"),
+                    ],
+                    spacing=6,
+                ),
+                divider(),
+                (
+                    ft.Column([body], scroll=ft.ScrollMode.AUTO, expand=True)
+                    if rows
+                    else body
+                ),
+                ft.Text(
+                    "待打卡：" + "、".join(pending[:3]) + ("…" if len(pending) > 3 else "")
+                    if pending
+                    else "今天全部打卡完成",
+                    size=9,
+                    color=th.TEXT_MUTED,
+                ),
+            ],
+            spacing=8,
+            expand=True,
+        ),
+        expand=True,
+        padding=ft.Padding.symmetric(vertical=12, horizontal=12),
+    )
+
+
 def _render(page: ft.Page, refresh, items: list[dict]) -> ft.Control:
     today = date.today()
     today_done = sum(1 for item in items if item["done_today"])

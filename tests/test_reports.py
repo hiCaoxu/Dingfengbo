@@ -54,7 +54,7 @@ class ReportTests(unittest.TestCase):
     def test_markdown_contains_core_sections(self) -> None:
         report = build_report("week", date.today())
         markdown = render_markdown(report, "本周状态不错")
-        for heading in ("## AI 总结", "## 待办", "## 日记与笔记", "## 健康", "## 财务"):
+        for heading in ("## AI 总结", "## 任务", "## 日记与笔记", "## 健康", "## 财务"):
             self.assertIn(heading, markdown)
         self.assertIn("本周状态不错", markdown)
         self.assertIn("32.50", markdown)

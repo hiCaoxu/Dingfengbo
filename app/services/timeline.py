@@ -37,7 +37,7 @@ from .dates import local_date_from_utc
 
 # 时间轴模块：键 → (中文, 跳转模块)
 MODULE_META = {
-    "todo": ("待办", "todo"),
+    "todo": ("任务", "todo"),
     "diary": ("日记", "diary"),
     "notes": ("笔记", "notes"),
     "exercise": ("锻炼", "health"),
@@ -46,7 +46,7 @@ MODULE_META = {
     "sleep": ("睡眠", "health"),
     "fun": ("娱乐", "fun"),
     "finance": ("收支", "finance"),
-    "habit": ("习惯", "habits"),
+    "habit": ("习惯", "todo"),
 }
 
 
@@ -107,7 +107,7 @@ def collect(
                     items.append(
                         TimelineItem(
                             "todo", "todos", item.id, day, item.title,
-                            ("已完成" if item.completed else "待办")
+                            ("已完成" if item.completed else "进行中")
                             + (f" · {item.priority}" if item.priority else ""),
                             _tags(item.tags) + ([item.priority] if item.priority else []),
                             item.due_time or "",
@@ -255,7 +255,7 @@ def tag_counts(days: int = 365, today: date | None = None) -> list[tuple[str, in
         ):
             for tag in _tags(item.tags):
                 counts[tag] += 1
-                sources[tag].add("待办")
+                sources[tag].add("任务")
         for item in session.scalars(select(Note).where(Note.is_deleted.is_(False))):
             for tag in _tags(item.tags):
                 counts[tag] += 1

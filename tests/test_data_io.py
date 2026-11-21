@@ -110,7 +110,7 @@ class MarkdownTests(unittest.TestCase):
     def test_markdown_files_created(self) -> None:
         files = export_markdown(self.root)
         names = {path.name for path in files}
-        self.assertIn("待办.md", names)
+        self.assertIn("任务.md", names)
         self.assertIn("收支.md", names)
         self.assertTrue(any(name.startswith("笔记-") for name in names))
         self.assertTrue(any(name.startswith("日记-") for name in names))

@@ -288,9 +288,9 @@ def export_markdown(dest_dir: Path | str, tables: list[str] | None = None) -> li
                 ]
                 for row in rows
             ]
-            path = folder / "待办.md"
+            path = folder / "任务.md"
             path.write_text(
-                "# 待办导出\n\n" + _table_markdown(headers, body) + "\n", encoding="utf-8"
+                "# 任务导出\n\n" + _table_markdown(headers, body) + "\n", encoding="utf-8"
             )
             written.append(path)
         elif table == "transactions":

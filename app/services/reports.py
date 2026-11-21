@@ -328,7 +328,7 @@ def render_markdown(report: dict[str, Any], narrative: str = "") -> str:
         lines += ["## AI 总结", "", narrative.strip(), ""]
     todo = report["todo"]
     lines += [
-        "## 待办",
+        "## 任务",
         f"- 完成 {todo['completed']} 项，新建 {todo['created']} 项，未完成 {todo['pending']} 项"
         f"（完成率 {todo['completion_rate']}%）",
         f"- 逾期 {todo['overdue']} 项",

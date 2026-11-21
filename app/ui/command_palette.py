@@ -78,7 +78,7 @@ def open_command_palette(
     results = ft.Column(spacing=2, scroll=ft.ScrollMode.AUTO, height=360)
     status = ft.Text("输入关键字，或直接选择下面的命令", size=10, color=th.TEXT_MUTED)
     query_field = ft.TextField(
-        hint_text="搜索待办 / 笔记 / 日记 / 收支 / 娱乐，或输入命令…",
+        hint_text="搜索任务 / 笔记 / 日记 / 收支 / 娱乐，或输入命令…",
         autofocus=True,
         border_color=th.DIVIDER,
         focused_border_color=th.PRIMARY,
@@ -131,7 +131,7 @@ def open_command_palette(
         go("reports")
 
     def open_habits(_=None) -> None:
-        go("habits")
+        go("todo")
 
     def open_timeline(_=None) -> None:
         go("timeline")
@@ -149,11 +149,11 @@ def open_command_palette(
         open_quick_parse_dialog(page, refresh)
 
     commands: list[tuple[str, str, str, object]] = [
-        ("ADD_TASK_OUTLINED", "新增待办", "打开待办录入弹窗", new_todo),
+        ("ADD_TASK_OUTLINED", "新增任务", "打开任务录入弹窗", new_todo),
         ("NOTE_ADD_OUTLINED", "新增笔记", "新建一条 Markdown 笔记", new_note),
         ("PAYMENTS_OUTLINED", "记一笔", "快速记录收支", new_transaction),
         ("BOLT_OUTLINED", "一句话记账", "输入「午饭花了 32 元」直接生成收支", quick_expense),
-        ("CHECK_CIRCLE_OUTLINE", "习惯打卡", "打开习惯模块打卡", open_habits),
+        ("CHECK_CIRCLE_OUTLINE", "任务与习惯", "月历、四象限、任务列表与习惯打卡", open_habits),
         ("TIMELINE_OUTLINED", "生活时间轴", "跨模块时间线与标签", open_timeline),
         ("SYNC_OUTLINED", "立即同步", "把本地改动推到服务端并拉取远端数据", sync_now),
         ("AUTO_AWESOME_OUTLINED", "问 AI", "打开 AI 助手", ask_ai),
@@ -227,7 +227,7 @@ def open_command_palette(
         if not controls:
             controls.append(
                 ft.Container(
-                    ft.Text("没有匹配结果，试试「待办 今天 高优先级」这类过滤", size=11,
+                    ft.Text("没有匹配结果，试试「任务 今天 高优先级」这类过滤", size=11,
                             color=th.TEXT_MUTED),
                     padding=ft.Padding.all(12),
                 )
@@ -294,7 +294,7 @@ def open_command_palette(
             query_field,
             ft.Container(
                 ft.Text(
-                    "支持自然语言过滤：待办 今天 高优先级 / 笔记 AI / 日记 本月",
+                    "支持自然语言过滤：任务 今天 高优先级 / 笔记 AI / 日记 本月",
                     size=10, color=th.TEXT_MUTED,
                 ),
                 padding=ft.Padding.only(left=4, top=2),

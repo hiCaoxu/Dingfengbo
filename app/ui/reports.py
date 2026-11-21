@@ -80,7 +80,7 @@ def _render(page: ft.Page, refresh, report: dict) -> ft.Control:
                 _section_row(
                     [
                         _metric("完成", f"{todo['completed']} 项", "本期勾选完成"),
-                        _metric("新建", f"{todo['created']} 项", "本期新增待办"),
+                        _metric("新建", f"{todo['created']} 项", "本期新增任务"),
                         _metric("未完成", f"{todo['pending']} 项", f"逾期 {todo['overdue']} 项",
                                 th.ACCENT if todo["overdue"] else None),
                         _metric("完成率", f"{todo['completion_rate']}%", "完成 / 全部"),
@@ -96,7 +96,7 @@ def _render(page: ft.Page, refresh, report: dict) -> ft.Control:
             ],
             spacing=10,
         ),
-        title="待办",
+        title="任务",
         expand=2,
     )
 

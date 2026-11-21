@@ -44,7 +44,7 @@ class FocusTests(unittest.TestCase):
     def test_brief_text_mentions_today(self) -> None:
         text = brief_text(today_focus(date.today()))
         self.assertIn("今日", text)
-        self.assertIn("待办", text)
+        self.assertIn("任务", text)
 
 
 class SyncDetailTests(unittest.TestCase):

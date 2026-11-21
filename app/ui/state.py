@@ -40,6 +40,12 @@ class HomeState(_StateBase):
 class TodoState(_StateBase):
     tag: str = "全部"
     status: str = "未完成"
+    year: int = field(default_factory=lambda: date.today().year)
+    month: int = field(default_factory=lambda: date.today().month)
+    # 选中的日期（ISO 字符串，None=不按日期筛选）
+    date: str | None = None
+    # 四象限筛选：空=全部，q1..q4
+    quadrant: str = ""
 
 
 @dataclass

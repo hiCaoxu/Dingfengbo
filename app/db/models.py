@@ -58,6 +58,8 @@ class Todo(SyncMixin, Base):
     repeat_rule: Mapped[str] = mapped_column(String(16), default="none")  # none/day/week/month/year/irregular/custom
     repeat_config: Mapped[str] = mapped_column(Text, default="")  # custom 规则的 JSON 参数
     priority: Mapped[str] = mapped_column(String(16), default="")  # '', low, medium, high
+    # 四象限：空=按优先级/到期自动推导，q1..q4=用户在编辑里手选
+    quadrant: Mapped[str] = mapped_column(String(4), default="")
     # 提前提醒：可多选，remind_days 为 JSON 数组如 [1,3,7]（0=到期当天，空=不提醒）
     # remind_days_before 保留为旧版单值字段（新版写最大值，便于旧端理解）
     remind_days: Mapped[str] = mapped_column(Text, default="[]")
@@ -300,7 +302,7 @@ MODEL_BY_TABLE = {m.__tablename__: m for m in SYNC_MODELS}
 
 # 表名 → 中文名：界面展示与 AI 上下文共用同一份，避免两处各自维护而漂移。
 TABLE_LABELS = {
-    "todos": "待办",
+    "todos": "任务",
     "diaries": "日记",
     "notes": "笔记",
     "exercises": "锻炼",

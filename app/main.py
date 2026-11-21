@@ -22,7 +22,7 @@ from .services.diary import ensure_diary
 from .services.holidays import ensure_sample_file
 from .services.sync import mark_pending_write, queue_counts, sync_client
 from .ui import ai_assistant, diary as diary_ui
-from .ui import entertainment, finance_ui, habits as habits_ui, health_ui, home, notes
+from .ui import entertainment, finance_ui, health_ui, home, notes
 from .ui import reports as reports_ui
 from .ui import timeline as timeline_ui
 from .ui import todo
@@ -38,13 +38,12 @@ logger = logging.getLogger(__name__)
 # 全部可用模块；实际顺序与显隐由设置里的 module_order / hidden_modules 决定。
 MODULES = [
     ("home", "首页"),
-    ("todo", "待办"),
+    ("todo", "任务"),
     ("diary", "日记"),
     ("notes", "笔记"),
     ("health", "健康"),
     ("fun", "娱乐"),
     ("finance", "记账"),
-    ("habits", "习惯"),
     ("reports", "回顾"),
     ("timeline", "时间轴"),
     ("ai", "AI 助手"),
@@ -116,7 +115,8 @@ def main(page: ft.Page) -> None:
     page.spacing = 0
     page.window.width = 1280
     page.window.height = 880
-    page.window.min_width = 900
+    # 任务页是三栏（月历/象限 + 列表 + 习惯），低于此宽度会把中间列表挤没
+    page.window.min_width = 1120
     page.window.min_height = 600
     page.window.resizable = True
     page.window.maximizable = True
@@ -407,8 +407,6 @@ def main(page: ft.Page) -> None:
             body.content = entertainment.build(page, refresh)
         elif current == "finance":
             body.content = finance_ui.build(page, refresh)
-        elif current == "habits":
-            body.content = habits_ui.build(page, refresh)
         elif current == "reports":
             body.content = reports_ui.build(page, refresh)
         elif current == "timeline":
@@ -427,9 +425,10 @@ def main(page: ft.Page) -> None:
         if e.ctrl and key == "t":
             toggle_theme()
             return
-        if e.ctrl and key in {str(index) for index in range(1, 10)}:
-            modules = [key for key, _label in _module_list()]
-            index = int(key) - 1
+        if e.ctrl and len(key) == 1 and key in "0123456789":
+            modules = [name for name, _label in _module_list()]
+            # Ctrl+1..9 对应前九个模块，Ctrl+0 对应第十个
+            index = 9 if key == "0" else int(key) - 1
             if 0 <= index < len(modules):
                 navigate(modules[index])
             return

@@ -21,7 +21,7 @@ from .forms import open_quick_action
 from .widgets import card, empty, section_header, tag_chip
 
 QUICK_ITEMS = [
-    ("todo", "新增待办"),
+    ("todo", "新增任务"),
     ("note", "新增笔记"),
     ("finance", "新增收支"),
     ("exercise", "记录锻炼"),
@@ -497,8 +497,8 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
             ),
             ft.Row(
                 [
-                    card(todo_rows(todo_today, "今天没有待办"), title="今日待办", expand=1, height=180),
-                    card(todo_rows(todo_soon, "最近 7 天没有待办"), title="最近 7 天", expand=1, height=180),
+                    card(todo_rows(todo_today, "今天没有任务"), title="今日任务", expand=1, height=180),
+                    card(todo_rows(todo_soon, "最近 7 天没有任务"), title="最近 7 天", expand=1, height=180),
                     card(note_body, title="随机笔记", on_click=open_note if note else None,
                          expand=1, height=180),
                 ],

@@ -146,12 +146,12 @@ def brief_text(data: dict[str, Any]) -> str:
     """把聚焦数据压成一段纯文本，供 AI「今日建议」使用（不含正文）。"""
     lines = [
         f"日期：{data['today'].isoformat()}",
-        f"今日未完成待办 {data['pending_count']} 项（已逾期 {data['overdue_count']} 项），"
+        f"今日未完成任务 {data['pending_count']} 项（已逾期 {data['overdue_count']} 项），"
         f"今天已完成 {data['completed_today']} 项，完成率 {data['completion_rate']}%。",
     ]
     titles = "、".join(item.title for item in data["todos"][:8])
     if titles:
-        lines.append(f"今日待办：{titles}")
+        lines.append(f"今日任务：{titles}")
     lines.append(
         f"日记：{'已写' if data['diary_written'] else '未写'}，连续写作 {data['writing_streak']} 天。"
     )
