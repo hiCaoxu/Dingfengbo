@@ -28,6 +28,7 @@ from ..theme import (
     TEXT_MUTED,
     card_border,
 )
+from ..db.repo import create
 from .forms import open_quick_action
 from .widgets import card, divider, empty, primary_button, section_header, tag_chip
 
@@ -53,7 +54,7 @@ def _calendar_card(selected: date, set_date, width: int | None = None, height: i
             [
                 ft.Text(
                     f"{selected.year}年{selected.month}月",
-                    size=14, color="#FFFFFF", weight="bold",
+                    size=15, color="#FFFFFF", weight="bold",
                 ),
             ],
             alignment=ft.MainAxisAlignment.CENTER,
@@ -62,24 +63,31 @@ def _calendar_card(selected: date, set_date, width: int | None = None, height: i
         border_radius=ft.BorderRadius(
             top_left=CARD_RADIUS, top_right=CARD_RADIUS, bottom_left=0, bottom_right=0
         ),
-        padding=ft.Padding.symmetric(vertical=6, horizontal=10),
+        padding=ft.Padding.symmetric(vertical=8, horizontal=10),
     )
+    days_left = (date(selected.year, 12, 31) - selected).days
     body = ft.Column(
         [
-            ft.Text(str(selected.day), size=60, color=TEXT, weight="bold", text_align=ft.TextAlign.CENTER),
+            ft.Container(expand=True),
+            ft.Text(str(selected.day), size=86, color=TEXT, weight="bold", text_align=ft.TextAlign.CENTER),
             ft.Text(
                 f"第{day_of_year(selected)}天 · 第{iso_week(selected)}周",
-                size=11, color=TEXT_MUTED, text_align=ft.TextAlign.CENTER,
+                size=13, color=TEXT_MUTED, text_align=ft.TextAlign.CENTER,
             ),
             ft.Text(
                 f"{lunar_text(selected).split(' ')[0]} {weekday_cn(selected)}",
-                size=13, color=TEXT, text_align=ft.TextAlign.CENTER,
+                size=18, color=TEXT, text_align=ft.TextAlign.CENTER,
+            ),
+            ft.Container(expand=True),
+            ft.Text(
+                f"距今年结束还有 {days_left} 天",
+                size=11, color=TEXT_MUTED, text_align=ft.TextAlign.CENTER,
             ),
         ],
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         alignment=ft.MainAxisAlignment.CENTER,
         expand=True,
-        spacing=6,
+        spacing=8,
     )
     return ft.Container(
         content=ft.Column(
@@ -231,10 +239,11 @@ def _heatmap_card(year: int, on_open, set_year, height: int | None = None) -> ft
             [
                 ft.TextButton(f"{year - 1}", on_click=lambda e: set_year(year - 1)),
                 ft.Text(str(year), size=12, color=PRIMARY, weight="bold"),
+                # 不展示未来年份：当年时直接不渲染「下一年」入口。
                 ft.TextButton(
                     f"{year + 1}",
                     on_click=lambda e: set_year(year + 1),
-                    disabled=year >= current_year,
+                    visible=year < current_year,
                 ),
             ],
             spacing=2,
@@ -245,6 +254,9 @@ def _heatmap_card(year: int, on_open, set_year, height: int | None = None) -> ft
 def build(page: ft.Page, refresh, on_open_diary, on_open_note) -> ft.Control:
     """首页：查询后台化，避免数据量大时阻塞 UI 线程。"""
     today = date.today()
+    # 历史状态可能残留未来年份（旧版本允许切换），进来先纠正。
+    if _HOME_STATE["year"] > today.year:
+        _HOME_STATE["year"] = today.year
     holder = ft.Container(
         content=ft.Container(
             content=ft.Text("加载中…", size=12, color=TEXT_MUTED),
@@ -258,8 +270,7 @@ def build(page: ft.Page, refresh, on_open_diary, on_open_note) -> ft.Control:
         with session_scope() as session:
             summary = month_summary(session, today.year, today.month)
             assets = total_assets(session)
-            week_start = today - timedelta(days=today.weekday())
-            week_end = week_start + timedelta(days=6)
+            soon_end = today + timedelta(days=6)
             todo_today = list(
                 session.scalars(
                     select(Todo).where(
@@ -268,11 +279,12 @@ def build(page: ft.Page, refresh, on_open_diary, on_open_note) -> ft.Control:
                     ).order_by(Todo.due_date, Todo.priority)
                 )
             )[:5]
-            todo_week = list(
+            # 最近 7 天：今天起滚动 7 天（而非自然周），避免周一刚过就空掉。
+            todo_soon = list(
                 session.scalars(
                     select(Todo).where(
                         Todo.is_deleted.is_(False), Todo.completed.is_(False),
-                        Todo.due_date >= week_start, Todo.due_date <= week_end,
+                        Todo.due_date >= today, Todo.due_date <= soon_end,
                     ).order_by(Todo.due_date)
                 )
             )[:5]
@@ -284,7 +296,7 @@ def build(page: ft.Page, refresh, on_open_diary, on_open_note) -> ft.Control:
         async def apply() -> None:
             holder.content = _render_home(
                 page, refresh, on_open_diary, on_open_note,
-                summary, assets, todo_today, todo_week, note,
+                summary, assets, todo_today, todo_soon, note,
             )
             page.update()
 
@@ -295,7 +307,7 @@ def build(page: ft.Page, refresh, on_open_diary, on_open_note) -> ft.Control:
 
 
 def _render_home(page, refresh, on_open_diary, on_open_note,
-                 summary, assets, todo_today, todo_week, note) -> ft.Control:
+                 summary, assets, todo_today, todo_soon, note) -> ft.Control:
     today = date.today()
 
     def set_date(value: date):
@@ -351,6 +363,13 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
         if note:
             on_open_note(note)
 
+    def new_note(_):
+        """快捷入口「新增笔记」：建空笔记后直接进入编辑页，省掉弹窗。"""
+        with session_scope() as session:
+            created = create(session, Note, title="未命名笔记", content="", tags="[]")
+        mark_pending_write()
+        on_open_note(created)
+
     def open_day(day: date):
         with session_scope() as session:
             ensure_diary(session, day)
@@ -372,7 +391,9 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
                     horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                     spacing=6,
                 ),
-                on_click=lambda e, k=key: open_quick_action(page, k, refresh),
+                on_click=lambda e, k=key: (
+                    new_note(e) if k == "note" else open_quick_action(page, k, refresh)
+                ),
             )
             for key, label in QUICK_ITEMS
         ],
@@ -385,12 +406,12 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
                 [
                     ft.Column(
                         [
-                            _heatmap_card(_HOME_STATE["year"], open_day, set_year, height=220),
+                            _heatmap_card(_HOME_STATE["year"], open_day, set_year, height=200),
                             ft.Row(
                                 [
-                                    _stat_card("本月收入", money(summary["income"]), height=130),
-                                    _stat_card("本月支出", money(summary["expense"]), accent=True, height=130),
-                                    _stat_card("总资产", money(assets), height=130),
+                                    _stat_card("本月收入", money(summary["income"]), height=120),
+                                    _stat_card("本月支出", money(summary["expense"]), accent=True, height=120),
+                                    _stat_card("总资产", money(assets), height=120),
                                 ],
                                 spacing=12,
                             ),
@@ -399,14 +420,14 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
                         expand=True,
                         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                     ),
-                    _calendar_card(_HOME_STATE["selected_date"], set_date, width=280, height=358),
+                    _calendar_card(_HOME_STATE["selected_date"], set_date, width=280, height=328),
                 ],
                 spacing=12,
             ),
             ft.Row(
                 [
                     card(todo_rows(todo_today, "今天没有待办"), title="今日待办", expand=1, height=180),
-                    card(todo_rows(todo_week, "本周没有待办"), title="本周待办", expand=1, height=180),
+                    card(todo_rows(todo_soon, "最近 7 天没有待办"), title="最近 7 天", expand=1, height=180),
                     card(note_body, title="随机笔记", on_click=open_note if note else None,
                          expand=1, height=180),
                 ],

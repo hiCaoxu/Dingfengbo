@@ -123,7 +123,20 @@ def main(page: ft.Page) -> None:
             content=ft.Row(
                 [
                     ft.Column(
-                        [ft.Text(f"{_greeting()}，欢迎回来", size=18, color=TEXT, weight="bold"), date_text],
+                        [
+                            ft.Text(f"{_greeting()}，欢迎回来", size=18, color=TEXT, weight="bold"),
+                            ft.Row(
+                                [
+                                    date_text,
+                                    ft.Text("·", size=11, color=DIVIDER),
+                                    ft.Text(
+                                        "刻意练习  要事第一  持续精进",
+                                        size=11, color=PRIMARY, weight="bold",
+                                    ),
+                                ],
+                                spacing=8,
+                            ),
+                        ],
                         spacing=4,
                     ),
                     ft.Container(expand=True),
