@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from collections import Counter, defaultdict
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import func, select
@@ -31,6 +32,7 @@ from ..db.models import (
 from ..db.session import session_scope
 from .dates import local_date_from_utc
 from .finance import money
+from .money import ZERO, quantize, to_float, total
 
 PERIODS = {"week": "本周", "month": "本月", "year": "本年"}
 
@@ -205,11 +207,11 @@ def _finance_section(session: Session, start: date, end: date) -> dict[str, Any]
         )
         .group_by(Transaction.kind, Transaction.category)
     )
-    income = 0.0
-    expense = 0.0
-    categories: dict[str, float] = defaultdict(float)
-    for kind, category, total in rows:
-        amount = float(total or 0)
+    income = ZERO
+    expense = ZERO
+    categories: dict[str, Decimal] = defaultdict(Decimal)
+    for kind, category, row_total in rows:
+        amount = quantize(row_total)
         if kind == "income":
             income += amount
         elif kind == "expense":
@@ -218,11 +220,11 @@ def _finance_section(session: Session, start: date, end: date) -> dict[str, Any]
     top = sorted(categories.items(), key=lambda item: -item[1])[:5]
     days = _days(start, end)
     return {
-        "income": round(income, 2),
-        "expense": round(expense, 2),
-        "balance": round(income - expense, 2),
-        "daily_expense": round(expense / days, 2),
-        "top_categories": [(name, round(value, 2)) for name, value in top],
+        "income": to_float(income),
+        "expense": to_float(expense),
+        "balance": to_float(income - expense),
+        "daily_expense": to_float(expense / days),
+        "top_categories": [(name, to_float(value)) for name, value in top],
     }
 
 
@@ -290,36 +292,36 @@ def _budget_section(session: Session, start: date, end: date) -> dict[str, Any]:
         )
         .group_by(Transaction.category)
     )
-    actual = {str(category or "其他"): float(value or 0) for category, value in spent}
-    monthly: dict[str, float] = {}
-    standing: dict[str, float] = {}
-    total_monthly = 0.0
-    total_standing = 0.0
+    actual = {str(category or "其他"): quantize(value) for category, value in spent}
+    monthly: dict[str, Decimal] = {}
+    standing: dict[str, Decimal] = {}
+    total_monthly = ZERO
+    total_standing = ZERO
     for item in budgets:
-        amount = float(item.amount or 0)
+        amount = quantize(item.amount)
         if item.category:
             bucket = monthly if item.month else standing
-            bucket[item.category] = bucket.get(item.category, 0.0) + amount
+            bucket[item.category] = bucket.get(item.category, ZERO) + amount
         elif item.month:
             total_monthly += amount
         else:
             total_standing += amount
     category_budgets = {**standing, **monthly}
-    total = total_monthly or total_standing
+    total_budget = total_monthly or total_standing
     categories = [
         {
             "category": category,
-            "budget": round(amount, 2),
-            "actual": round(actual.get(category, 0.0), 2),
+            "budget": to_float(amount),
+            "actual": to_float(actual.get(category, Decimal(0))),
         }
         for category, amount in sorted(category_budgets.items(), key=lambda kv: -kv[1])
     ]
-    expense = round(sum(actual.values()), 2)
+    expense = total(actual.values())
     return {
         "month": month,
-        "total": round(total, 2),
-        "expense": expense,
-        "remaining": round(total - expense, 2) if total else 0.0,
+        "total": to_float(total_budget),
+        "expense": to_float(expense),
+        "remaining": to_float(total_budget - expense) if total_budget else 0.0,
         "categories": categories,
     }
 

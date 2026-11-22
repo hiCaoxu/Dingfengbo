@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import calendar
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
@@ -18,17 +19,14 @@ from sqlalchemy.orm import Session
 from ..db.models import Account, Budget, RecurringRule, Transaction
 from ..db.repo import create, update
 from ..db.session import session_scope
+from .money import ZERO, is_over, percent, quantize, to_float, total
 
 PERIOD_LABELS = {"month": "每月", "week": "每周"}
 MAX_CATCH_UP = 12  # 一次最多补生成 12 期，避免长期未启动后爆量
 
 
 def _cents(value: float | None) -> int:
-    """金额换算成整数分。
-
-    全项目金额是 float，直接比较会把 ``1.10 + 2.20 > 3.30`` 判成真（浮点表示误差），
-    于是"刚好花完"被报成超支、提示金额算出 ¥0.00。所有比较与展示统一先落到分。
-    """
+    """金额换算成整数分（兼容旧调用；新代码统一用 ``services.money``）。"""
     return int(round(float(value or 0) * 100))
 
 
@@ -105,7 +103,7 @@ def spending_by_category(session: Session, start: date, end: date) -> dict[str, 
         )
         .group_by(Transaction.category)
     )
-    return {str(category or "其他"): float(total or 0) for category, total in rows}
+    return {str(category or "其他"): to_float(total) for category, total in rows}
 
 
 def overview(today: date | None = None) -> dict[str, Any]:
@@ -122,19 +120,19 @@ def overview(today: date | None = None) -> dict[str, Any]:
             )
         )
         actual = spending_by_category(session, start, end)
-        month_expense = sum(actual.values())
+        month_expense = total(actual.values())
 
         # 同一分类可能同时存在「长期」与「本月」两条：月度条目覆盖长期条目，
         # 不能相加，否则长期 1000 + 本月 1500 会变成 2500 的假上限。
-        monthly: dict[str, float] = {}
-        standing: dict[str, float] = {}
-        total_monthly = 0.0
-        total_standing = 0.0
+        monthly: dict[str, Decimal] = {}
+        standing: dict[str, Decimal] = {}
+        total_monthly = ZERO
+        total_standing = ZERO
         for row in rows:
-            amount = float(row.amount or 0)
+            amount = quantize(row.amount)
             if row.category:
                 bucket = monthly if row.month else standing
-                bucket[row.category] = bucket.get(row.category, 0.0) + amount
+                bucket[row.category] = bucket.get(row.category, ZERO) + amount
             elif row.month:
                 total_monthly += amount
             else:
@@ -144,30 +142,30 @@ def overview(today: date | None = None) -> dict[str, Any]:
 
     items = []
     for category, amount in sorted(categories.items(), key=lambda item: -item[1]):
-        used = actual.get(category, 0.0)
-        budget_cents = _cents(amount)
-        used_cents = _cents(used)
+        used = quantize(actual.get(category, 0.0))
         items.append(
             {
                 "category": category,
-                "budget": budget_cents / 100,
-                "used": used_cents / 100,
-                "remaining": (budget_cents - used_cents) / 100,
-                "percent": round(used_cents / budget_cents * 100) if budget_cents else 0,
-                "over": used_cents > budget_cents,
+                "budget": to_float(amount),
+                "used": to_float(used),
+                "remaining": to_float(amount - used),
+                "percent": percent(used, amount),
+                "over": used > amount,
             }
         )
-    total_cents = _cents(total_budget)
-    expense_cents = _cents(month_expense)
     return {
         "month": month_key(today),
-        "total_budget": total_cents / 100,
-        "expense": expense_cents / 100,
-        "remaining": (total_cents - expense_cents) / 100 if total_cents else 0.0,
-        "percent": round(expense_cents / total_cents * 100) if total_cents else 0,
+        "total_budget": to_float(total_budget),
+        "expense": to_float(month_expense),
+        "remaining": to_float(total_budget - month_expense) if total_budget else 0.0,
+        "percent": percent(month_expense, total_budget),
         "categories": items,
-        "uncategorized": round(
-            sum(value for category, value in actual.items() if category not in categories), 2
+        "uncategorized": to_float(
+            total(
+                value
+                for category, value in actual.items()
+                if category not in categories
+            )
         ),
     }
 
@@ -176,9 +174,9 @@ def alerts(today: date | None = None) -> list[str]:
     """超支/接近上限提示，供今日聚焦与记账页展示。"""
     data = overview(today)
     messages: list[str] = []
-    if data["total_budget"] and data["expense"] > data["total_budget"]:
+    if data["total_budget"] and is_over(data["expense"], data["total_budget"]):
         messages.append(
-            f"本月总预算已超支 ¥{data['expense'] - data['total_budget']:.2f}"
+            f"本月总预算已超支 ¥{quantize(data['expense']) - quantize(data['total_budget']):.2f}"
         )
     elif data["percent"] >= 80:
         messages.append(f"本月预算已用 {data['percent']}%")
@@ -214,7 +212,7 @@ def upcoming(days: int = 7, today: date | None = None) -> list[dict[str, Any]]:
                 {
                     "id": rule.id,
                     "name": rule.name,
-                    "amount": float(rule.amount or 0),
+                    "amount": to_float(rule.amount),
                     "next_date": rule.next_date,
                     "period": rule.period,
                 }
@@ -282,7 +280,7 @@ def generate_due(today: date | None = None) -> int:
                         Transaction,
                         id=record_id,
                         kind=rule.kind or "expense",
-                        amount=float(rule.amount or 0),
+                        amount=to_float(rule.amount),
                         category=rule.category or "",
                         account_id=account_id,
                         date=due,
@@ -364,10 +362,10 @@ def delete_rule(rule_id: str) -> None:
 
 def monthly_fixed_total() -> float:
     """固定支出合计（周付按 4.33 折算成月），供记账概览展示。"""
-    total = 0.0
+    total_amount = ZERO
     for rule in rules():
         if not rule.active or rule.kind != "expense":
             continue
-        amount = float(rule.amount or 0)
-        total += amount * (4.33 if rule.period == "week" else 1)
-    return round(total, 2)
+        amount = quantize(rule.amount)
+        total_amount += amount * (Decimal("4.33") if rule.period == "week" else 1)
+    return to_float(total_amount)

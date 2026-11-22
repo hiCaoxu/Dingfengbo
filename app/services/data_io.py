@@ -20,6 +20,7 @@ from sqlalchemy import update as sql_update
 from ..db.models import MODEL_BY_TABLE, Account, table_label
 from ..db.repo import apply_remote, serialize
 from ..db.session import session_scope
+from .money import to_float
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,8 @@ def export_json(dest: Path | str, tables: list[str] | None = None) -> Path:
 
 
 _DATE_FORMATS = ("%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d", "%Y年%m月%d日", "%d/%m/%Y", "%m/%d/%Y")
+# 金额列导入时统一量化到分，避免 CSV 里的 0.1 变成二进制浮点后累加出分位误差。
+_MONEY_FIELDS = {"amount", "initial_balance"}
 
 
 def _coerce_date(value: Any) -> date | None:
@@ -125,7 +128,8 @@ def _coerce(column, value: Any) -> Any:
         if python_type is bool:
             return str(value).strip().lower() in ("1", "true", "yes", "是", "y")
         if python_type is float:
-            return float(value)
+            parsed = float(value)
+            return to_float(parsed) if column.name in _MONEY_FIELDS else parsed
         if python_type is int:
             return int(float(value))
         return str(value)

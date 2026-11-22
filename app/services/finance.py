@@ -2,37 +2,42 @@
 
 汇总一律下推 SQL 聚合（GROUP BY / SUM），避免把明细行搬进 Python 再累加：
 交易量增长时，结果集只与「月份数 × 类型数 / 账户数」相关，与数据总量基本脱钩。
+
+金额在 Python 侧统一用 Decimal 累加（见 ``services.money``）：SQL 的 SUM 结果本身
+是浮点，多笔相加/比较时改用精确十进制，最后再量化到分返回 float。
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..db.models import Account, Transaction
-from ..services.dates import shift_month
+from .dates import shift_month
+from .money import ZERO, format_money, to_decimal, to_float
 
 
 def money(value: float) -> str:
-    return f"¥{value:,.2f}"
+    return format_money(value)
 
 
-def account_balances(session: Session) -> dict[str, float]:
-    """一次性聚合全部账户余额：一条按 (账户, 类型) 分组的 SUM，加一条转入 SUM。"""
+def _balances_decimal(session: Session) -> dict[str, Decimal]:
+    """一次性聚合全部账户余额（Decimal 精度），供 total_assets 复用。"""
     accounts = session.scalars(select(Account).where(Account.is_deleted.is_(False)))
-    balances = {account.id: float(account.initial_balance or 0) for account in accounts}
+    balances = {account.id: to_decimal(account.initial_balance) for account in accounts}
     rows = session.execute(
         select(Transaction.account_id, Transaction.kind, func.sum(Transaction.amount))
         .where(Transaction.is_deleted.is_(False))
         .group_by(Transaction.account_id, Transaction.kind)
     )
     for account_id, kind, total in rows:
-        amount = float(total or 0)
-        current = balances.get(account_id, 0.0)
+        amount = to_decimal(total)
+        current = balances.get(account_id, ZERO)
         if kind == "income":
             balances[account_id] = current + amount
         elif kind in ("expense", "transfer"):
@@ -49,8 +54,13 @@ def account_balances(session: Session) -> dict[str, float]:
     for account_id, total in incoming:
         if account_id is None:
             continue
-        balances[account_id] = balances.get(account_id, 0.0) + float(total or 0)
-    return {key: round(value, 2) for key, value in balances.items()}
+        balances[account_id] = balances.get(account_id, ZERO) + to_decimal(total)
+    return balances
+
+
+def account_balances(session: Session) -> dict[str, float]:
+    """全部账户余额（量化到分的 float，供界面与同步计算使用）。"""
+    return {key: to_float(value) for key, value in _balances_decimal(session).items()}
 
 
 def total_assets(session: Session) -> float:
@@ -61,7 +71,11 @@ def total_assets(session: Session) -> float:
             select(Account).where(Account.is_deleted.is_(False), Account.kind != "借贷")
         )
     }
-    return round(sum(value for key, value in account_balances(session).items() if key in asset_ids), 2)
+    total = ZERO
+    for account_id, balance in _balances_decimal(session).items():
+        if account_id in asset_ids:
+            total += balance
+    return to_float(total)
 
 
 def month_summary(session: Session, year: int, month: int) -> dict[str, Any]:
@@ -78,20 +92,24 @@ def month_summary(session: Session, year: int, month: int) -> dict[str, Any]:
         )
         .group_by(Transaction.kind, Transaction.category)
     )
-    income = expense = 0.0
-    categories: dict[str, float] = defaultdict(float)
+    income = ZERO
+    expense = ZERO
+    categories: dict[str, Decimal] = defaultdict(Decimal)
     for kind, category, total in rows:
-        amount = float(total or 0)
+        amount = to_decimal(total)
         if kind == "income":
             income += amount
         elif kind == "expense":
             expense += amount
             categories[category or "其他"] += amount
     return {
-        "income": round(income, 2),
-        "expense": round(expense, 2),
-        "balance": round(income - expense, 2),
-        "categories": {k: round(v, 2) for k, v in sorted(categories.items(), key=lambda x: -x[1])},
+        "income": to_float(income),
+        "expense": to_float(expense),
+        "balance": to_float(income - expense),
+        "categories": {
+            key: to_float(value)
+            for key, value in sorted(categories.items(), key=lambda item: -item[1])
+        },
     }
 
 
@@ -109,9 +127,9 @@ def six_month_trend(session: Session, today: date) -> list[dict[str, Any]]:
         )
         .group_by(month_key, Transaction.kind)
     )
-    totals: dict[tuple[str, str], float] = defaultdict(float)
+    totals: dict[tuple[str, str], Decimal] = defaultdict(Decimal)
     for label, kind, total in rows:
-        totals[(str(label), str(kind))] += float(total or 0)
+        totals[(str(label), str(kind))] += to_decimal(total)
 
     result: list[dict[str, Any]] = []
     for offset in range(-5, 1):
@@ -120,8 +138,8 @@ def six_month_trend(session: Session, today: date) -> list[dict[str, Any]]:
         result.append(
             {
                 "label": f"{month}月",
-                "income": round(totals.get((key, "income"), 0.0), 2),
-                "expense": round(totals.get((key, "expense"), 0.0), 2),
+                "income": to_float(totals.get((key, "income"), Decimal(0))),
+                "expense": to_float(totals.get((key, "expense"), Decimal(0))),
             }
         )
     return result

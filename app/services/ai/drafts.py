@@ -22,6 +22,7 @@ from ...db.repo import create
 from ...db.session import session_scope
 from ..covers import is_safe_remote_url
 from ..expense_rules import suggest_category
+from ..money import to_float
 
 logger = logging.getLogger(__name__)
 
@@ -184,13 +185,14 @@ def _normalize(item: dict[str, Any], today: date) -> Draft:
 
     if kind == "transaction":
         try:
-            amount = round(float(item.get("amount") or 0), 2)
+            raw_amount = float(item.get("amount") or 0)
         except (TypeError, ValueError):
-            amount = 0.0
+            raw_amount = 0.0
         # NaN/Inf 能通过 float()，但 NaN 写库会触发 NOT NULL（SQLite 把 NaN 存成 NULL），
         # Inf 会污染后续所有 SUM/报表，必须在入口拦掉。
-        if not math.isfinite(amount):
+        if not math.isfinite(raw_amount):
             return Draft(kind, raw=item, reason="金额不是有限数值")
+        amount = to_float(raw_amount)
         if amount <= 0:
             return Draft(kind, raw=item, reason="金额无效")
         if amount > 1_000_000_000:

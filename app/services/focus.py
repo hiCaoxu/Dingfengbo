@@ -27,6 +27,7 @@ from .dates import local_date_from_utc, lunar_text
 from .habits import overview as habits_overview
 from .habits import pending_today
 from .holidays import holiday_name
+from .money import to_float
 
 
 def _writing_streak(session, today: date) -> int:
@@ -132,7 +133,7 @@ def today_focus(today: date | None = None) -> dict[str, Any]:
         "sleep_hours": float(sleep.hours or 0) if sleep else 0.0,
         "sleep_quality": int(sleep.quality or 0) if sleep else 0,
         "weight": float(weight.kg) if weight else None,
-        "spent_today": round(float(spent_today or 0), 2),
+        "spent_today": to_float(spent_today),
         "budget": budget_data,
         "budget_alerts": budget_service.alerts(today),
         "habits": habits,
