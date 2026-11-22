@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import sys
 import threading
+import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,9 @@ _tray_thread: threading.Thread | None = None
 # pystray 的 run() 在 setup 阶段抛错（无 explorer/权限/无图标）时线程会直接退出。
 # 必须把"线程已启动"和"真的跑起来了"区分开，否则主窗口会被隐藏且再也叫不回来。
 _tray_failed = threading.Event()
+# 托盘就绪：pystray 的 run(setup=...) 在图标真正可用时回调。没有这个信号时，
+# 成功路径也只能靠「等满超时仍没失败」推断，每次关窗口都要白等一截。
+_tray_ready = threading.Event()
 
 
 def _icon_image():
@@ -106,6 +110,7 @@ def start_tray(page, on_quit=None) -> bool:
     if _tray_icon is not None or not tray_available():
         return False
     _tray_failed.clear()
+    _tray_ready.clear()
     try:
         import pystray
     except Exception:
@@ -139,7 +144,7 @@ def start_tray(page, on_quit=None) -> bool:
     def run() -> None:
         global _tray_icon
         try:
-            _tray_icon.run()
+            _tray_icon.run(setup=lambda _icon: _tray_ready.set())
         except Exception:
             logger.exception("托盘线程异常")
             _tray_failed.set()
@@ -158,14 +163,22 @@ def start_tray(page, on_quit=None) -> bool:
 def tray_running(wait: float = 0.0) -> bool:
     """托盘是否真的可用。
 
-    ``wait`` > 0 时最多等这么久来观察 run() 是否立刻失败——关闭窗口前调用，
-    避免"图标没建起来却把窗口藏了"导致程序彻底失联。
+    ``wait`` > 0 时最多等这么久，等到「就绪」或「失败」任一发生就返回——旧实现
+    只在失败时被唤醒，成功路径每次都要白等满整个超时。
     """
     if _tray_icon is None:
         return False
-    if wait > 0 and not _tray_failed.is_set():
-        _tray_failed.wait(wait)
-    return _tray_icon is not None and not _tray_failed.is_set()
+    if wait > 0:
+        deadline = time.monotonic() + wait
+        while time.monotonic() < deadline:
+            if _tray_failed.is_set():
+                return False
+            if _tray_ready.is_set():
+                return True
+            time.sleep(0.02)
+    return _tray_icon is not None and not _tray_failed.is_set() and (
+        _tray_ready.is_set() or wait <= 0
+    )
 
 
 def stop_tray() -> None:

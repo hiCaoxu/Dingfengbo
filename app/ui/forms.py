@@ -1348,21 +1348,23 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
         # 模块显隐/排序改了要立刻重建左侧导航，否则用户会以为设置没生效。
         from . import theme_switch as _theme_switch
 
-        _theme_switch.refresh_nav()
         previous_autostart = bool(settings.get("autostart", False))
         if bool(autostart.value) != previous_autostart:
             ok, message = system_integration.set_autostart(bool(autostart.value))
             if not ok:
                 snack(page, message, th.ACCENT)
+
+        # 先切主题、再重建界面：反过来的话页面会先用旧配色重建一次，紧接着 apply()
+        # 又整页重建一次（设置保存一度触发三次整页重建）。
+        if theme_dd.value == "暗色" and not th.is_dark():
+            _theme_switch.apply("dark")
+        elif theme_dd.value == "亮色" and th.is_dark():
+            _theme_switch.apply("light")
+
+        _theme_switch.refresh_nav()
         if refresh_status:
             refresh_status()
         _close_and_refresh(page, dialog, on_done)
-        from . import theme_switch
-
-        if theme_dd.value == "暗色" and not th.is_dark():
-            theme_switch.apply("dark")
-        elif theme_dd.value == "亮色" and th.is_dark():
-            theme_switch.apply("light")
 
     def _group(title: str) -> ft.Control:
         return ft.Column(

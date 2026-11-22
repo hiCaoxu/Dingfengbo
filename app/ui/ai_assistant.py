@@ -205,7 +205,9 @@ def build(page: ft.Page, refresh) -> ft.Control:
                     text = f"⚠️ {exc}"
                 except Exception as exc:
                     logger.exception("AI 调用异常")
-                    text = f"⚠️ 出错了：{exc}"
+                    # 不在界面里回显原始异常文本：部分 HTTP 异常的 str() 会带上完整
+                    # 请求 URL（含签名/query），直接显示与写日志都可能泄露凭据。
+                    text = f"⚠️ 出错了（{type(exc).__name__}），详见日志"
 
                 # 模型可能返回 content=null；以前这里会在 try 之外抛 AttributeError，
                 # 线程静默退出、busy 永远为 True，界面就卡在「正在思考…」。

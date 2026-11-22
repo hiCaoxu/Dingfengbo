@@ -61,3 +61,58 @@ class SerializeRowTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class ProviderPayloadTests(unittest.TestCase):
+    """OpenAI 兼容 Provider：带上 max_tokens，且复用同一个 httpx.Client。"""
+
+    def setUp(self) -> None:
+        from app.services.ai import openai_compat as mod
+
+        self.mod = mod
+        mod._CLIENT = None
+        mod._CLIENT_TIMEOUT = None
+
+    def tearDown(self) -> None:
+        client = self.mod._CLIENT
+        self.mod._CLIENT = None
+        self.mod._CLIENT_TIMEOUT = None
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
+
+    def _fake_client_factory(self, captured: list, created: list):
+        from unittest import mock
+
+        def factory(timeout=None, **kwargs):
+            created.append(timeout)
+            client = mock.Mock()
+
+            def post(url, headers=None, json=None):
+                captured.append(json)
+                response = mock.Mock()
+                response.raise_for_status = lambda: None
+                response.json = lambda: {"choices": [{"message": {"content": "好的"}}]}
+                return response
+
+            client.post = post
+            return client
+
+        return factory
+
+    def test_payload_has_max_tokens_and_client_is_reused(self) -> None:
+        from unittest import mock
+
+        captured: list[dict] = []
+        created: list = []
+        provider = self.mod.OpenAICompatProvider("https://api.test/v1", "key", "model")
+        with mock.patch.object(
+            self.mod.httpx, "Client", side_effect=self._fake_client_factory(captured, created)
+        ):
+            self.assertEqual(provider.chat([{"role": "user", "content": "一"}]), "好的")
+            self.assertEqual(provider.chat([{"role": "user", "content": "二"}]), "好的")
+
+        self.assertEqual(len(captured), 2)
+        self.assertEqual(captured[0]["max_tokens"], self.mod.MAX_TOKENS)
+        self.assertEqual(len(created), 1, "连续两次提问应复用同一个连接池客户端")

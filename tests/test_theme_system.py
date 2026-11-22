@@ -94,3 +94,41 @@ class FontPatchTests(unittest.TestCase):
         self.assertEqual(style.font_family, th.FONT_LATIN)
         custom = self.ft.TextStyle(size=13, font_family="Consolas")
         self.assertEqual(custom.font_family, "Consolas")
+
+class TrayReadinessTests(unittest.TestCase):
+    """托盘就绪检测：成功路径不该白等满超时，失败要立刻返回。"""
+
+    def setUp(self) -> None:
+        from app.services import system_integration as si
+
+        self.si = si
+        self._saved = (si._tray_icon, si._tray_ready.is_set(), si._tray_failed.is_set())
+        si._tray_icon = object()
+        si._tray_ready.clear()
+        si._tray_failed.clear()
+
+    def tearDown(self) -> None:
+        icon, ready, failed = self._saved
+        self.si._tray_icon = icon
+        (self.si._tray_ready.set() if ready else self.si._tray_ready.clear())
+        (self.si._tray_failed.set() if failed else self.si._tray_failed.clear())
+
+    def test_ready_returns_without_waiting_full_timeout(self) -> None:
+        import time
+
+        self.si._tray_ready.set()
+        start = time.monotonic()
+        self.assertTrue(self.si.tray_running(wait=0.5))
+        self.assertLess(time.monotonic() - start, 0.2, "已就绪时不应白等满 wait")
+
+    def test_failure_returns_quickly(self) -> None:
+        import time
+
+        self.si._tray_failed.set()
+        start = time.monotonic()
+        self.assertFalse(self.si.tray_running(wait=0.5))
+        self.assertLess(time.monotonic() - start, 0.2)
+
+    def test_no_icon_is_not_running(self) -> None:
+        self.si._tray_icon = None
+        self.assertFalse(self.si.tray_running(wait=0.1))

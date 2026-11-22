@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 
 import httpx
@@ -11,10 +12,42 @@ from .provider import AIError
 
 logger = logging.getLogger(__name__)
 
+_CLIENT_LOCK = threading.Lock()
+_CLIENT: httpx.Client | None = None
+_CLIENT_TIMEOUT: float | None = None
+
+
+class _shared_client:
+    """按需创建并复用 httpx.Client（连接池复用，避免每次提问重新握手）。
+
+    ``with`` 只用于加锁取用，**不关闭**客户端：进程退出时由 httpx 自己回收。
+    """
+
+    def __init__(self, timeout: float) -> None:
+        self.timeout = timeout
+
+    def __enter__(self) -> httpx.Client:
+        global _CLIENT, _CLIENT_TIMEOUT
+        with _CLIENT_LOCK:
+            if _CLIENT is None or _CLIENT_TIMEOUT != self.timeout:
+                if _CLIENT is not None:
+                    try:
+                        _CLIENT.close()
+                    except Exception:
+                        logger.debug("关闭旧 AI 客户端失败", exc_info=True)
+                _CLIENT = httpx.Client(timeout=self.timeout)
+                _CLIENT_TIMEOUT = self.timeout
+            return _CLIENT
+
+    def __exit__(self, *exc_info) -> bool:
+        return False
+
 # 429/5xx 多为瞬时抖动：有限退避重试，避免用户看到一个「服务暂时不可用」就以为挂了。
 _MAX_ATTEMPTS = 3
 _RETRY_DELAYS = (0.6, 1.5)
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+# 单次回复上限：不设时服务端可能生成极长内容（慢 + 贵），界面也放不下。
+MAX_TOKENS = 2048
 
 
 class OpenAICompatProvider:
@@ -36,12 +69,15 @@ class OpenAICompatProvider:
             "model": self.model,
             "messages": messages,
             "temperature": 0.7,
+            "max_tokens": MAX_TOKENS,
             "stream": False,
         }
         for attempt in range(_MAX_ATTEMPTS):
             retry_left = attempt + 1 < _MAX_ATTEMPTS
             try:
-                with httpx.Client(timeout=self.timeout) as client:
+                # 复用同一个 Client（连接池 + keep-alive）：每次 new 一个会让每次追问
+                # 都重新握手，连续对话明显变慢。
+                with _shared_client(self.timeout) as client:
                     response = client.post(url, headers=headers, json=payload)
                     response.raise_for_status()
                     data = response.json()

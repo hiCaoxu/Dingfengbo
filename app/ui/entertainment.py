@@ -29,12 +29,22 @@ _state = state.entertainment
 
 
 def move(item_id: str, direction: int, page, refresh) -> None:
+    """把条目在「想看/在看/看完」之间挪一格。
+
+    已经在最左/最右时不再整页重建：界面上那一格是禁用的，但按钮仍可能被点到，
+    没必要为一次无变化的操作重排整页（封面还会重新走一遍缓存查找）。
+    """
+    changed = False
     with session_scope() as session:
         item = session.get(Entertainment, item_id)
         if item:
             index = COLUMNS.index(item.status) if item.status in COLUMNS else 0
             target = COLUMNS[min(len(COLUMNS) - 1, max(0, index + direction))]
-            update(session, item, status=target)
+            if target != item.status:
+                update(session, item, status=target)
+                changed = True
+    if not changed:
+        return
     mark_pending_write()
     refresh()
 
