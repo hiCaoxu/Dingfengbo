@@ -77,17 +77,48 @@ class Draft:
         return not self.reason
 
 
+_FENCE = re.compile(r"^\s*```")
+
+
+def _fenced_blocks(text: str) -> list[str]:
+    """按行提取 ``` 围栏内的内容（开/闭围栏必须各自独占一行）。
+
+    不能用 ``re`` 的非贪婪匹配：模型生成的笔记正文里可能本身就有代码块，反引号
+    会让正则提前截断，JSON 解析失败后草稿被静默丢弃。
+    """
+    blocks: list[str] = []
+    buffer: list[str] | None = None
+    for line in (text or "").splitlines():
+        if _FENCE.match(line):
+            if buffer is None:
+                buffer = []
+            else:
+                blocks.append("\n".join(buffer))
+                buffer = None
+            continue
+        if buffer is not None:
+            buffer.append(line)
+    if buffer:  # 没有闭合围栏：也当成一块，交给 json.loads 决定
+        blocks.append("\n".join(buffer))
+    return blocks
+
+
 def _json_blocks(text: str) -> list[Any]:
-    """从模型回复中取出所有 JSON 对象（优先 ```json 代码块）。"""
+    """从模型回复中取出所有 JSON 对象（优先 ``` 代码块）。"""
     payloads: list[Any] = []
-    for match in re.finditer(r"```(?:json)?\s*(.+?)```", text or "", re.S):
-        raw = match.group(1).strip()
+    for raw in _fenced_blocks(text):
+        candidate = raw.strip()
+        # 代码块的类型标记（json / JSON）单独占首行时去掉
+        if candidate.lower().startswith("json"):
+            candidate = candidate[4:].lstrip()
+        if not candidate:
+            continue
         try:
-            payloads.append(json.loads(raw))
+            payloads.append(json.loads(candidate))
         except ValueError as exc:
             # 不再静默丢弃：模型偶尔输出带注释/尾逗号的 JSON，留一条日志便于排查
             # （只记异常类型与长度，不记正文，避免把用户内容写进日志）。
-            logger.warning("草稿 JSON 块解析失败（%s，长度 %d）", type(exc).__name__, len(raw))
+            logger.warning("草稿 JSON 块解析失败（%s，长度 %d）", type(exc).__name__, len(candidate))
             continue
     if payloads:
         return payloads
@@ -353,8 +384,13 @@ def save(drafts: list[Draft]) -> list[dict[str, Any]]:
     return saved
 
 
-def undo(saved: list[dict[str, Any]]) -> int:
-    """撤销刚保存的草稿（软删除，仍走同步）。"""
+def undo(saved: list[dict[str, Any]], drafts: list["Draft"] | None = None) -> int:
+    """撤销刚保存的草稿（软删除，仍走同步）。
+
+    ``drafts`` 传入原始草稿对象时会一并复位 ``saved`` 标记：否则用户在 SnackBar 上
+    点撤销后，气泡里的「保存为记录」按钮不会回来（它按 ``not draft.saved`` 判断），
+    只能重新问一遍 AI 才能再保存。
+    """
     from ...db.models import MODEL_BY_TABLE
     from ...db.repo import soft_delete
 
@@ -372,6 +408,10 @@ def undo(saved: list[dict[str, Any]]) -> int:
         from ..sync import mark_pending_write
 
         mark_pending_write()
+    if removed and drafts:
+        # 撤销成功的草稿重新可保存（UI 的「保存为记录」按钮按 saved 判断是否显示）。
+        for draft in drafts:
+            draft.saved = False
     return removed
 
 

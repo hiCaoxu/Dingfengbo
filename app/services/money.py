@@ -8,7 +8,10 @@
   格式也改成整数分，老客户端的 `12.34` 会被新端当成分读成 1/100——跨版本数据直接
   写坏。换算收敛在 `models.MoneyCents` 类型装饰器里，业务代码继续用元。
 
-`from_cents()` 则是给 SQL 聚合用的：`SUM(金额列)` 拿到的是分，必须换算回元。
+关于 SQL 聚合：``func.sum(MoneyCents 列)`` 的结果**已经由类型装饰器的
+``process_result_value`` 换算回元**，业务代码直接 ``to_decimal`` / ``quantize`` 即可，
+**不要**再套一层 ``from_cents()``（那会再除以 100）。``from_cents()`` 只服务于
+``MoneyCents`` 内部「读库」这一步。
 """
 
 from __future__ import annotations

@@ -395,7 +395,8 @@ def push(payload: PushRequest, authorization: str | None = Header(default=None))
             obj = session.get(model, record_id) if model and record_id else None
             if obj is not None:
                 obj.sync_seq = seq
-        # 回填 sync_seq 供客户端 mark_clean 精确确认（幂等推送返回现存序列号）。
+        # 回填 sync_seq 仅用于诊断/对账（客户端 mark_clean 只按 id + updated_at 精确
+        # 匹配，并不消费这个值；本地也不落库 sync_seq）。不要把它当成确认协议的一部分。
         for change in accepted:
             model = MODEL_BY_TABLE.get(change.get("table"))
             record_id = str(change.get("record_id") or "")

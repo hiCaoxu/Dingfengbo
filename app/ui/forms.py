@@ -1394,9 +1394,15 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
     def save(_):
         try:
             h = float(height.value or DEFAULT_HEIGHT_CM)
-        except ValueError as exc:
-            logger.warning("设置未保存：密钥保护不可用（%s）", type(exc).__name__)
-            h = DEFAULT_HEIGHT_CM
+        except ValueError:
+            # 与其它字段一致：报错并中止保存，而不是静默把身高重置成默认值。
+            logger.debug("设置未保存：身高不是数字")
+            snack(page, "身高需为 50-250 之间的数字", th.ACCENT)
+            return
+        if not 50 <= h <= 250:
+            logger.debug("设置未保存：身高越界 %.1f", h)
+            snack(page, "身高需为 50-250 之间的数字", th.ACCENT)
+            return
         try:
             save_settings(dict(
                 server_url=server.value or DEFAULT_SERVER_URL, sync_token=token.value or "",

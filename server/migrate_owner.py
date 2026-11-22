@@ -31,7 +31,12 @@ def owner_digest(token: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--old-token", required=True, help="旧的同步令牌")
+    parser.add_argument(
+        "--old-token",
+        default=None,
+        help="旧的同步令牌（不推荐：会留在 shell 历史与进程列表里；"
+        "建议改用环境变量 DINGFENGBO_OLD_TOKEN 或交互输入）",
+    )
     parser.add_argument(
         "--db",
         default=os.environ.get("DINGFENGBO_SERVER_DB", r"D:\Data\Dingfengbo\cloud.db"),
@@ -39,8 +44,19 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    old_owner = args.old_token[:64]
-    new_owner = owner_digest(args.old_token)
+    old_token = args.old_token or os.environ.get("DINGFENGBO_OLD_TOKEN", "").strip()
+    if not old_token:
+        # 交互输入不落 shell 历史；getpass 给出提示但回显为空。
+        import getpass
+
+        old_token = getpass.getpass("旧同步令牌：").strip()
+    if not old_token:
+        raise SystemExit("缺少旧同步令牌（--old-token / DINGFENGBO_OLD_TOKEN / 交互输入）")
+    if args.old_token:
+        print("提示：令牌通过命令行传入，可能已进入 shell 历史；下次建议用环境变量。")
+
+    old_owner = old_token[:64]
+    new_owner = owner_digest(old_token)
 
     engine = create_sqlite_engine(Path(args.db))
     initialize_schema(engine)

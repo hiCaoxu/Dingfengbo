@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from ..db.models import Account, Budget, RecurringRule, Transaction
 from ..db.repo import create, update
 from ..db.session import session_scope
-from .money import ZERO, from_cents, is_over, percent, quantize, to_float, total
+from .money import ZERO, is_over, percent, quantize, to_float, total
 
 logger = logging.getLogger(__name__)
 

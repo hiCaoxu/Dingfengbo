@@ -94,6 +94,7 @@ if (Test-Path "docker/Caddyfile") {
 $deploy = @'
 set -e
 cd __REMOTE_DIR__
+export DINGFENGBO_SYNC_IMAGE=dingfengbo-sync:__VERSION__
 docker compose -f docker/docker-compose.yml up -d --build
 for i in $(seq 1 30); do
   curl -fsS http://127.0.0.1:8000/api/health >/dev/null 2>&1 && echo health-ready && break
@@ -102,9 +103,12 @@ done
 docker ps --filter name=dingfengbo-sync --format '{{.Status}}'
 curl -fsS http://127.0.0.1:8000/api/health
 '@
+# Image tag follows app/__init__.py __version__ (single source of truth), so the
+# running container is always traceable to a release number.
+$appVersion = (Select-String -Path "app/__init__.py" -Pattern '__version__\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
 # Use string replacement instead of PowerShell's -f operator: -f collapses
 # {{.Status}} into {.Status}, which breaks docker's --format argument.
-$deploy = $deploy.Replace("__REMOTE_DIR__", $RemoteDir)
+$deploy = $deploy.Replace("__REMOTE_DIR__", $RemoteDir).Replace("__VERSION__", $appVersion)
 # Same CRLF trap as the backup script: bash would see "set -e\r" and abort with
 # "set: -: invalid option". Normalize to LF before shipping the command.
 $deploy = $deploy.Replace("`r`n", "`n").Replace("`r", "")

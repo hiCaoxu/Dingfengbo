@@ -7,6 +7,7 @@ import logging
 from typing import Any
 from urllib.parse import urlsplit
 
+from ...logging_setup import safe_url
 from ...config import load_settings
 from .openai_compat import OpenAICompatProvider
 from .provider import AIError
@@ -38,9 +39,9 @@ def _validate_base_url(base_url: str) -> str:
         logger.debug("_validate_base_url：忽略 %s", type(exc).__name__)
         pass
     if private:
-        logger.warning("AI 服务地址指向本机/内网：%s（API Key 与引用内容会发往该地址）", base_url)
+        logger.warning("AI 服务地址指向本机/内网：%s（API Key 与引用内容会发往该地址）", safe_url(base_url))
     if parts.scheme == "http":
-        logger.warning("AI 服务地址使用明文 HTTP：%s", base_url)
+        logger.warning("AI 服务地址使用明文 HTTP：%s", safe_url(base_url))
     return base_url
 
 

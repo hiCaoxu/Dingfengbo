@@ -26,7 +26,7 @@ from ..db.repo import (
     sync_queue_stats,
 )
 from ..db.session import session_scope
-from ..services.clock import set_clock_offset
+from ..services.clock import observe_offset, set_clock_offset
 
 logger = logging.getLogger(__name__)
 
@@ -206,8 +206,9 @@ class SyncClient:
         received = utcnow()
         reference = sent_at or received
         rtt = max(0.0, (received - reference).total_seconds())
-        self.clock_offset = round((server_now - reference).total_seconds() - rtt / 2, 3)
-        set_clock_offset(self.clock_offset)
+        sample = round((server_now - reference).total_seconds() - rtt / 2, 3)
+        # 取最近几次观测的中位数：单次高 RTT 不应该整体带偏后续写入的时间戳。
+        self.clock_offset = observe_offset(sample)
         if abs(self.clock_offset) > 120:
             self.status = "本机时钟异常，请校准系统时间"
             logger.warning("时钟偏移 %.0f 秒，超过阈值", self.clock_offset)

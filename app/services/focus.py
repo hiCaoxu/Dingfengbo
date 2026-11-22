@@ -28,7 +28,7 @@ from .dates import local_date_from_utc, lunar_text
 from .habits import overview as habits_overview
 from .habits import pending_today
 from .holidays import holiday_name
-from .money import from_cents, to_float
+from .money import to_float
 
 logger = logging.getLogger(__name__)
 

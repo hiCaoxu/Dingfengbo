@@ -360,7 +360,11 @@ def _parse(column, value: Any) -> Any:
     return value
 
 
-_VERSION_AGNOSTIC_FIELDS = {"owner_id", "sync_status", "sync_seq"}
+# 幂等比较（_same_version）要忽略的字段：归属与同步元数据之外，**id / created_at
+# 也不能比**——按业务键合并的日记/打卡行保留了本地主键，两端 id 必不相同，
+# 拿它比较会让「内容完全相同」的幂等推送永远走不进 changed=False 快速路径，
+# 反而误报一条同步冲突。
+_VERSION_AGNOSTIC_FIELDS = {"owner_id", "sync_status", "sync_seq", "id", "created_at"}
 
 # 落库时不允许由载荷决定的字段：同步元数据由各自一侧（客户端队列 / 服务端序列）
 # 单独维护。服务端若把客户端带上的 sync_seq 抄进被合并的行，会打乱全局序列；

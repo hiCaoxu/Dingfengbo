@@ -304,7 +304,11 @@ def _render(page: ft.Page, refresh, report: dict) -> ft.Control:
 
             page.run_thread(worker)
 
-        if not ensure_consent(page, ["todos", "diaries", "transactions", "entertainments"], go):
+        if not ensure_consent(
+            page,
+            "本期统计（任务、日记、笔记、健康、收支、娱乐、习惯）",
+            go,
+        ):
             return
         go()
 

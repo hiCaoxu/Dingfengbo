@@ -11,6 +11,11 @@ from tests.helpers import reset_db, seed
 
 
 class RangeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # build_report 会读库：不建库时这条用例依赖「别的用例先跑过」，
+        # 单独跑或顺序变化就会 no such table: todos。
+        reset_db()
+
     def test_week_starts_on_monday(self) -> None:
         start, end = range_of("week", date(2026, 11, 21))  # 周六
         self.assertEqual(start, date(2026, 11, 16))

@@ -30,7 +30,27 @@ def _not_configured(page: ft.Page, refresh=None) -> None:
     open_settings_dialog(page, refresh, refresh)
 
 
-def ensure_consent(page: ft.Page, scope: str, on_agree) -> bool:
+def _scope_text(scope: str | list[str]) -> str:
+    """把数据范围归一成一句人话。
+
+    调用方有时传字符串、有时传表名列表（reports 传的是 list）。直接 f-string 拼进去
+    会把 Python 的 list repr 显示给用户（"['todos', 'diaries']"），既不美观也说不清
+    到底发了什么。
+    """
+    if isinstance(scope, str):
+        return scope
+    labels = []
+    for name in scope:
+        try:
+            from ...db.models import table_label
+
+            labels.append(table_label(str(name)))
+        except Exception:  # 表名未知时退回原文
+            labels.append(str(name))
+    return "、".join(labels)
+
+
+def ensure_consent(page: ft.Page, scope: str | list[str], on_agree) -> bool:
     """首次把本地数据发给第三方模型前的知情确认；已确认/无数据返回 True。
 
     ``scope`` 是**本次实际会外发的数据范围**，必须包含 source=focus/report 这类
@@ -38,6 +58,7 @@ def ensure_consent(page: ft.Page, scope: str, on_agree) -> bool:
     """
     if not scope or load_settings().get("ai_data_notice_ack"):
         return True
+    scope_text = _scope_text(scope)
     provider = AI_PROVIDERS.get(load_settings().get("ai_provider", "custom"), {}).get(
         "name", "自定义服务"
     )
@@ -55,7 +76,7 @@ def ensure_consent(page: ft.Page, scope: str, on_agree) -> bool:
         title=ft.Text("数据将发送至第三方大模型", size=th.FONT_SECTION_TITLE,
                       color=th.TEXT, weight="bold"),
         content=ft.Text(
-            f"本次任务会把{scope}通过网络发送至 {provider}。"
+            f"本次任务会把{scope_text}通过网络发送至 {provider}。"
             "该提示只出现一次，取消则不会发送任何内容。",
             size=th.FONT_BODY,
             color=th.TEXT_MUTED,
@@ -243,11 +264,21 @@ def open_draft_dialog(page: ft.Page, drafts: list, on_saved=None) -> ft.AlertDia
             snack(page, "保存失败，详见日志", th.ACCENT)
             return
         close_modal(page, dialog)
+        # 被跳过的草稿（账户不存在/多账户未选等）要说明原因，否则用户只看到
+        # 「保存 N 条」而不知道哪条没进去、为什么。
+        skipped = [item for item in drafts if item.valid and not item.saved]
         if not saved:
-            snack(page, "没有可保存的草稿", th.TEXT_MUTED)
+            reason = skipped[0].reason if skipped and skipped[0].reason else "没有可保存的草稿"
+            snack(page, reason, th.TEXT_MUTED)
             return
+        if skipped:
+            logger.info("AI 草稿部分保存：跳过 %d 条（%s）", len(skipped), skipped[0].reason)
         bar = ft.SnackBar(
-            ft.Text(f"已保存 {len(saved)} 条记录", color=th.ON_PRIMARY, size=th.FONT_BODY),
+            ft.Text(
+                f"已保存 {len(saved)} 条记录"
+                + (f"，{len(skipped)} 条未保存：{skipped[0].reason}" if skipped else ""),
+                color=th.ON_PRIMARY, size=th.FONT_BODY,
+            ),
             bgcolor=th.PRIMARY,
             action="撤销",
             on_action=lambda e: _undo(saved),
@@ -261,7 +292,7 @@ def open_draft_dialog(page: ft.Page, drafts: list, on_saved=None) -> ft.AlertDia
             on_saved()
 
     def _undo(saved: list) -> None:
-        removed = draft_service.undo(saved)
+        removed = draft_service.undo(saved, drafts)
         snack(page, f"已撤销 {removed} 条记录", th.TEXT_MUTED)
         if on_saved is not None:
             on_saved()
