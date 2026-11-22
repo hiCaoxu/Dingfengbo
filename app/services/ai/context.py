@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -93,8 +93,14 @@ def serialize_row(obj) -> str:
     return text
 
 
-def read_context(table_names: list[str], limit: int = CONTEXT_LIMIT) -> str:
-    """读取引用表最近 limit 条非删除记录，返回供 AI 阅读的文本上下文。"""
+def read_context(
+    table_names: list[str], limit: int = CONTEXT_LIMIT, since: date | None = None
+) -> str:
+    """读取引用表最近 limit 条非删除记录，返回供 AI 阅读的文本上下文。
+
+    ``since`` 用于把范围收窄到某个日期之后（例如「本月消费分析」只发本月流水）：
+    不加限定的话，「本月」这类指令会拿到最近 30 条——可能是上周也可能是三个月前。
+    """
     sections: list[str] = []
     total = 0
     truncated = False
@@ -107,14 +113,19 @@ def read_context(table_names: list[str], limit: int = CONTEXT_LIMIT) -> str:
             if total >= _TOTAL_MAX_CHARS:
                 truncated = True
                 break
-            rows = list(
-                session.scalars(
-                    select(model)
-                    .where(model.is_deleted.is_(False))
-                    .order_by(model.updated_at.desc())
-                    .limit(limit)
+            stmt = select(model).where(model.is_deleted.is_(False))
+            if since is not None:
+                column = next(
+                    (
+                        getattr(model, field)
+                        for field in ("date", "due_date")
+                        if hasattr(model, field)
+                    ),
+                    None,
                 )
-            )
+                if column is not None:
+                    stmt = stmt.where(column >= since)
+            rows = list(session.scalars(stmt.order_by(model.updated_at.desc()).limit(limit)))
             body = "\n".join(f"- {serialize_row(r)}" for r in rows) if rows else "（暂无数据）"
             chunk = f"【{label}】\n{body}"
             if total + len(chunk) > _TOTAL_MAX_CHARS:

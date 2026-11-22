@@ -143,3 +143,41 @@ class DraftPreviewTests(unittest.TestCase):
         text = _detail_text(draft)
         self.assertLess(len(text), 200, "长正文应折成短摘要")
         self.assertIn("…", text)
+
+class ContextScopeTests(unittest.TestCase):
+    """「本月消费分析」只发本月数据，不能拿最近 30 条冒充。"""
+
+    def setUp(self) -> None:
+        from tests.helpers import reset_db
+
+        reset_db()
+
+    def test_since_filters_old_rows(self) -> None:
+        from datetime import date, timedelta
+
+        from app.db.models import Account, Transaction
+        from app.db.repo import create
+        from app.db.session import session_scope
+        from app.services.ai.context import read_context
+
+        today = date.today()
+        with session_scope() as session:
+            account = create(session, Account, name="现金", initial_balance=0)
+            account_id = account.id
+            create(session, Transaction, kind="expense", amount=10, category="餐饮",
+                   account_id=account_id, date=today, note="本月午餐")
+            create(session, Transaction, kind="expense", amount=99, category="餐饮",
+                   account_id=account_id, date=today - timedelta(days=200), note="很久以前")
+        scoped = read_context(["transactions"], since=today.replace(day=1))
+        self.assertIn("本月午餐", scoped)
+        self.assertNotIn("很久以前", scoped)
+
+    def test_spending_task_scope_starts_at_month_begin(self) -> None:
+        from datetime import date
+
+        from app.services.ai.tasks import build_request
+
+        self.assertEqual(
+            build_request("spending", today=date(2026, 11, 22)).since, date(2026, 11, 1)
+        )
+        self.assertIsNone(build_request("weekly_report", today=date(2026, 11, 22)).since)

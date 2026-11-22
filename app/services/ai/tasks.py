@@ -127,6 +127,8 @@ class TaskRequest:
     # 也会把统计拼进 prompt）——知情确认必须按它判断，而不是只看 refs。
     sends_data: bool = False
     data_scope: str = ""
+    # 上下文时间下界：本月类任务只把本月的数据发给模型。
+    since: date | None = None
 
 
 def build_request(key: str, extra: str = "", today: date | None = None) -> TaskRequest:
@@ -159,4 +161,5 @@ def build_request(key: str, extra: str = "", today: date | None = None) -> TaskR
         task=task,
         sends_data=bool(send_scope),
         data_scope=send_scope,
+        since=today.replace(day=1) if key == "spending" else None,
     )

@@ -114,7 +114,7 @@ def run_task_dialog(
         content = request.content
         refs = list(request.refs)
         if refs:
-            content = f"用户引用了以下数据：\n{read_context(refs)}\n\n{content}"
+            content = f"用户引用了以下数据：\n{read_context(refs, since=request.since)}\n\n{content}"
         text = chat(
             [
                 {"role": "system", "content": request.system},
@@ -151,7 +151,9 @@ def run_task_dialog(
                 text, drafts = f"⚠️ {exc}", []
             except Exception as exc:  # 网络/解析异常都要回到 UI，避免弹窗一直转圈
                 logger.exception("AI 任务执行失败")
-                text, drafts = f"⚠️ 出错了：{exc}", []
+                # 与 ai_assistant 一致：不回显原始异常文本（HTTP 异常的 str 可能带
+                # 完整请求 URL 与签名参数）。
+                text, drafts = f"⚠️ 出错了（{type(exc).__name__}），详见日志", []
 
             async def apply() -> None:
                 try:

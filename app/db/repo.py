@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Any, Iterable
 
@@ -258,6 +259,16 @@ def ignore_issue(
     return bool(result.rowcount)
 
 
+def _display_title(obj: Any) -> str:
+    """同步明细里给记录取一个能看懂的名字（依次尝试常见业务字段）。"""
+    for field in ("title", "name", "food", "kind"):
+        if hasattr(obj, field):
+            title = str(getattr(obj, field) or "")
+            if title:
+                return title
+    return ""
+
+
 def list_error_records(session: Session, owner_id: str = "local", limit: int = 100) -> list[dict]:
     """列出同步失败（error）记录：表名、ID、标题与最近拒收原因。
 
@@ -275,12 +286,7 @@ def list_error_records(session: Session, owner_id: str = "local", limit: int = 1
             .where(model.owner_id == owner_id, model.sync_status == "error")
             .limit(limit)
         ):
-            title = ""
-            for field in ("title", "name", "food", "kind"):
-                if hasattr(obj, field):
-                    title = str(getattr(obj, field) or "")
-                    if title:
-                        break
+            title = _display_title(obj)
             issue = issues.get((table, obj.id))
             rows.append(
                 {
@@ -552,21 +558,25 @@ def record_superseded(
 
 def list_conflicts(session: Session, limit: int = 50) -> list[dict]:
     """最近的同步冲突（本地获胜的记录，新→旧）。"""
-    rows = session.scalars(
-        select(SyncConflict).order_by(SyncConflict.created_at.desc()).limit(limit)
+    rows = list(
+        session.scalars(
+            select(SyncConflict).order_by(SyncConflict.created_at.desc()).limit(limit)
+        )
     )
+    # 对端标题按表批量取：逐条 session.get 在冲突多时就是几十次往返（N+1）。
+    ids_by_table: dict[str, set[str]] = defaultdict(set)
+    for row in rows:
+        ids_by_table[row.table_name].add(row.record_id)
+    titles: dict[tuple[str, str], str] = {}
+    for table, ids in ids_by_table.items():
+        model = MODEL_BY_TABLE.get(table)
+        if model is None:
+            continue
+        for obj in session.scalars(select(model).where(model.id.in_(ids))):
+            titles[(table, obj.id)] = _display_title(obj)
     result: list[dict] = []
     for row in rows:
-        title = ""
-        model = MODEL_BY_TABLE.get(row.table_name)
-        if model is not None:
-            obj = session.get(model, row.record_id)
-            if obj is not None:
-                for field in ("title", "name", "food", "kind"):
-                    if hasattr(obj, field):
-                        title = str(getattr(obj, field) or "")
-                        if title:
-                            break
+        title = titles.get((row.table_name, row.record_id), "")
         result.append(
             {
                 "table": row.table_name,
@@ -611,17 +621,20 @@ def purge_deleted(session: Session, retention_days: int = TOMBSTONE_RETENTION_DA
     """同步完成后物理清理已删除且已同步的墓碑。
 
     保留 ``retention_days`` 天的恢复窗口（误删后仍可恢复），过期后才真正删除。
+    每张表一条 DELETE：旧实现先把命中的行全部 ORM 实例化再逐行 delete，
+    墓碑多时会同时占住大量对象并发出上千条单行 DELETE。
     """
     cutoff = utcnow() - timedelta(days=retention_days)
     count = 0
     for model in MODEL_BY_TABLE.values():
-        stmt = select(model).where(
-            model.is_deleted.is_(True),
-            model.sync_status == "clean",
-            model.updated_at < cutoff,
+        result = session.execute(
+            delete(model)
+            .where(
+                model.is_deleted.is_(True),
+                model.sync_status == "clean",
+                model.updated_at < cutoff,
+            )
+            .execution_options(synchronize_session=False)
         )
-        for obj in session.scalars(stmt):
-            session.delete(obj)
-            count += 1
-    session.flush()
+        count += int(result.rowcount or 0)
     return count
