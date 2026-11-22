@@ -160,12 +160,49 @@ def _render_overview(page: ft.Page, refresh, data) -> ft.Control:
         height=96,
     )
 
+    def entry(icon: str, title: str, subtitle: str, target: str) -> ft.Control:
+        return card(
+            ft.Column(
+                [
+                    ft.Icon(ico(icon), size=26, color=th.PRIMARY),
+                    ft.Text(title, size=th.FONT_CARD_TITLE, color=th.TEXT, weight="bold",
+                            text_align=ft.TextAlign.CENTER, max_lines=1,
+                            overflow=ft.TextOverflow.ELLIPSIS),
+                    ft.Text(subtitle, size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+                            text_align=ft.TextAlign.CENTER, max_lines=2,
+                            overflow=ft.TextOverflow.ELLIPSIS),
+                ],
+                spacing=6,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                alignment=ft.MainAxisAlignment.CENTER,
+                # 入口卡的高度来自父容器的弹性分配（不是 card 的固定 height），
+                # 正文撑满卡片，CENTER 才能真正把图标与文字居中。
+                expand=True,
+            ),
+            on_click=lambda e: _go(page, refresh, target),
+            expand=1,
+        )
+
+    # 收支记录 / 账户列表：两张入口卡上下排列，紧接在「收支趋势」右侧，
+    # 与两张图表同高（各占一半高度）。
+    # 注意这里给固定宽度、不能用 expand：外层 Row 带横向滚动（窗口窄时能滑动），
+    # 滚动容器里是「无界宽度」，再放 flex 子控件会触发 Flutter 布局断言。
+    nav_stack = ft.Column(
+        [
+            entry("RECEIPT_LONG_OUTLINED", "收支记录", "查看、筛选与新增", "records"),
+            entry("ACCOUNT_BALANCE_WALLET_OUTLINED", "账户列表", "管理账户与余额", "accounts"),
+        ],
+        spacing=12,
+        width=220,
+    )
+
     pie_slot = _chart_slot(320, 220)
     trend_slot = _chart_slot(420, 220)
     charts = ft.Row(
         [
             card(pie_slot, title="支出占比", width=352, height=284),
             card(trend_slot, title="收支趋势", width=452, height=284),
+            nav_stack,
         ],
         spacing=12,
         scroll=ft.ScrollMode.AUTO,
@@ -220,38 +257,7 @@ def _render_overview(page: ft.Page, refresh, data) -> ft.Control:
         if recent_rows
         else empty("暂无收支记录"),
         title="最新收支",
-        expand=2,
-    )
-
-    def entry(icon: str, title: str, subtitle: str, target: str) -> ft.Control:
-        return card(
-            ft.Column(
-                [
-                    ft.Icon(ico(icon), size=26, color=th.PRIMARY),
-                    ft.Text(title, size=th.FONT_CARD_TITLE, color=th.TEXT, weight="bold",
-                            text_align=ft.TextAlign.CENTER, max_lines=1,
-                            overflow=ft.TextOverflow.ELLIPSIS),
-                    ft.Text(subtitle, size=th.FONT_CAPTION, color=th.TEXT_MUTED,
-                            text_align=ft.TextAlign.CENTER, max_lines=2,
-                            overflow=ft.TextOverflow.ELLIPSIS),
-                ],
-                spacing=6,
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                alignment=ft.MainAxisAlignment.CENTER,
-            ),
-            on_click=lambda e: _go(page, refresh, target),
-            expand=1,
-        )
-
-    # 最新收支、收支记录、账户列表 一行三卡片（等高）
-    entries = equal_height_row(
-        [
-            recent_card,
-            entry("RECEIPT_LONG_OUTLINED", "收支记录", "查看、筛选与新增", "records"),
-            entry("ACCOUNT_BALANCE_WALLET_OUTLINED", "账户列表", "管理账户与余额", "accounts"),
-        ],
-        spacing=12,
-        height=170,
+        expand=1,
     )
 
     budget_data = data.get("budget") or {}
@@ -361,8 +367,8 @@ def _render_overview(page: ft.Page, refresh, data) -> ft.Control:
             ),
             summary_cards,
             charts,
-            entries,
-            equal_height_row([budget_card, fixed_card], spacing=12, height=210),
+            # 最新收支 / 本月预算 / 固定支出与订阅：一行三卡，高度一致
+            equal_height_row([recent_card, budget_card, fixed_card], spacing=12, height=210),
         ],
         spacing=12,
         expand=True,
