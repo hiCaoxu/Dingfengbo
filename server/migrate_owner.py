@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import logging
 import os
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from app.db.engine import create_sqlite_engine
 from app.db.migrations import initialize_schema
 from app.db.models import SYNC_MODELS
 
+logger = logging.getLogger(__name__)
 
 def owner_digest(token: str) -> str:
     return hashlib.sha256(f"dingfengbo-v1\0{token}".encode()).hexdigest()

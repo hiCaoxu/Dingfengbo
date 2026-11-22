@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import threading
 from datetime import date
@@ -33,6 +34,8 @@ from .widgets import (
     page_header,
     primary_button,
 )
+
+logger = logging.getLogger(__name__)
 
 _state = state.diary
 _EDITOR_LOCK = threading.Lock()
@@ -230,6 +233,7 @@ def _life_panel(page: ft.Page, refresh, events: list[dict]) -> ft.Control:
             try:
                 day = life.parse_target_date(date_field.value or "")
             except ValueError as exc:
+                logger.debug("_life_panel：忽略 %s", type(exc).__name__)
                 error_text.value = str(exc)
                 page.update()
                 return

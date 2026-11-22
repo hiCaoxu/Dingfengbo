@@ -5,8 +5,10 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Protocol
 
+logger = logging.getLogger(__name__)
 
 class AIError(Exception):
     """AI 调用失败的统一异常；message 面向最终用户。"""

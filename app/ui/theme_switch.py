@@ -6,8 +6,8 @@
 
 from __future__ import annotations
 
-import logging
 
+import logging
 from .. import theme as th
 from ..config import save_settings
 

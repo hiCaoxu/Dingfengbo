@@ -13,7 +13,6 @@ from .. import theme as th
 
 logger = logging.getLogger(__name__)
 
-
 def card(
     content: ft.Control,
     title: str | None = None,

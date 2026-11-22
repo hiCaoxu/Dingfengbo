@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import flet as ft
+
+logger = logging.getLogger(__name__)
 
 _FALLBACK = "CIRCLE_OUTLINED"
 _VARIANT_SUFFIXES = ("_OUTLINED", "_SHARP", "_ROUND", "_FILLED")

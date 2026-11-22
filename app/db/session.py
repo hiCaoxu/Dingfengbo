@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -12,6 +13,8 @@ from ..config import DB_PATH
 from .engine import create_sqlite_engine
 from .migrations import initialize_schema
 from .models import Food
+
+logger = logging.getLogger(__name__)
 
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 engine = create_sqlite_engine(DB_PATH)

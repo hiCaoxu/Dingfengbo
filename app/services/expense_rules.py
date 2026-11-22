@@ -6,8 +6,11 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import date, timedelta
+
+logger = logging.getLogger(__name__)
 
 # 关键字 → 分类（按顺序匹配，越具体的规则放前面）
 CATEGORY_RULES: list[tuple[tuple[str, ...], str]] = [
@@ -42,7 +45,8 @@ _MINUS = "-\u2212"
 def _to_amount(number: str, sign: str | None, unit: str | None) -> float | None:
     try:
         value = float(number)
-    except ValueError:
+    except ValueError as exc:
+        logger.debug("_to_amount：忽略 %s", type(exc).__name__)
         return None
     value *= _MULTIPLIERS.get(unit or "", 1)
     return -value if sign else value
@@ -107,7 +111,8 @@ def parse_date(text: str, today: date | None = None) -> date:
             year = today.year if month <= today.month else today.year - 1
             try:
                 return date(year, month, day)
-            except ValueError:
+            except ValueError as exc:
+                logger.debug("parse_date：忽略 %s", type(exc).__name__)
                 return today
     return today
 

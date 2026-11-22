@@ -227,7 +227,8 @@ def _parse_tags(raw: str) -> list[str]:
     try:
         data = json.loads(raw or "[]")
         return [str(t).strip() for t in data if str(t).strip()]
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as exc:
+        logger.debug("_parse_tags：忽略 %s", type(exc).__name__)
         return []
 
 

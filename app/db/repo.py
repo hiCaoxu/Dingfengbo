@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Any, Iterable
@@ -25,6 +26,7 @@ from .models import (
     utcnow,
 )
 
+logger = logging.getLogger(__name__)
 
 def _jsonable(value: Any) -> Any:
     if isinstance(value, (datetime, date)):
@@ -57,15 +59,27 @@ def create(session: Session, model: type[SyncMixin], owner_id: str = "local", **
         obj.created_at = stamp
     session.add(obj)
     session.flush()
+    # 只记表名与主键：这是排查「这条记录为什么没同步」时唯一需要的线索，
+    # 不记业务字段（可能含用户正文）。INFO 下不输出，默认看不到噪音。
+    logger.debug("新建 %s id=%s", model.__tablename__, getattr(obj, "id", "")[:8])
     return obj
 
 
 def update(session: Session, obj: SyncMixin, **fields: Any):
+    changed = []
     for key, value in fields.items():
         if hasattr(obj, key):
             setattr(obj, key, value)
+            changed.append(key)
     mark_dirty(obj)
     session.flush()
+    # 一次写只记一行：把「软删除」认成一种更新，避免 soft_delete 再补一条重复日志。
+    action = "软删除" if fields.get("is_deleted") is True else "更新"
+    logger.debug(
+        "%s %s id=%s 字段=%s",
+        action, type(obj).__tablename__, str(getattr(obj, "id", ""))[:8],
+        ",".join(sorted(changed)),
+    )
     return obj
 
 
@@ -103,7 +117,8 @@ def mark_clean(
             continue
         try:
             version = datetime.fromisoformat(str(updated_at))
-        except ValueError:
+        except ValueError as exc:
+            logger.debug("mark_clean 跳过无法解析的 updated_at：%s", type(exc).__name__)
             continue
         stmt = (
             sql_update(model)
@@ -375,6 +390,7 @@ def _find_merge_target(session: Session, model, owner: str, data: dict[str, Any]
             try:
                 conditions.append(column == date.fromisoformat(str(raw)[:10]))
             except ValueError:
+                logger.debug("_find_merge_target：业务键不是合法日期，放弃按业务键合并")
                 return None
         else:
             conditions.append(column == str(raw))
@@ -392,6 +408,7 @@ def _same_version(obj: SyncMixin, model, data: dict[str, Any]) -> bool:
         try:
             expected = _parse(column, data[column.name])
         except (TypeError, ValueError):
+            logger.debug("_same_version：字段 %s 无法按类型解析，按内容不同处理", column.name)
             return False
         if getattr(obj, column.name) != expected:
             return False
@@ -424,6 +441,7 @@ def payload_digest(model, source: dict[str, Any]) -> str:
         try:
             parsed = _parse(column, source[column.name])
         except (TypeError, ValueError):
+            logger.debug("payload_digest：字段 %s 无法解析，退回字符串比较", column.name)
             parsed = str(source[column.name])
         fields[column.name] = _jsonable(parsed)
     blob = json.dumps(fields, sort_keys=True, ensure_ascii=False, default=str)
@@ -642,5 +660,10 @@ def purge_deleted(session: Session, retention_days: int = TOMBSTONE_RETENTION_DA
             )
             .execution_options(synchronize_session=False)
         )
-        count += int(result.rowcount or 0)
+        removed = int(result.rowcount or 0)
+        count += removed
+        if removed:
+            logger.debug("清理墓碑 %s：%d 条", model.__tablename__, removed)
+    if count:
+        logger.info("已清理 %d 条过期墓碑（保留 %d 天）", count, retention_days)
     return count

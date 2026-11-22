@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date, timedelta
 from typing import Any
 
@@ -29,6 +30,7 @@ from .habits import pending_today
 from .holidays import holiday_name
 from .money import from_cents, to_float
 
+logger = logging.getLogger(__name__)
 
 def _writing_streak(session, today: date) -> int:
     """连续写作天数：只取「有正文」的日期列，不把整篇日记搬进内存。

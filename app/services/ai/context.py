@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import date, datetime
 from typing import Any
@@ -25,6 +26,8 @@ from ...db.models import (
 )
 from ...db.session import session_scope
 from ..dates import local_datetime_from_utc
+
+logger = logging.getLogger(__name__)
 
 # (表名, 中文名, 模型)；中文名统一取自 models.TABLE_LABELS，顺序即快捷指令展示顺序。
 TABLES: list[tuple[str, str, Any]] = [

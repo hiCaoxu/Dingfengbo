@@ -358,6 +358,7 @@ def open_sync_detail(page: ft.Page, refresh_status=None) -> ft.AlertDialog:
             reset_sync_cursors()
         except SyncCursorResetError as exc:
             # 保存失败必须让用户看到：此时游标还是旧的，提示「已重置」会把人带偏。
+            logger.warning("重置同步游标失败：%s", type(exc).__name__)
             snack(page, f"{exc}（游标未重置，请检查设置文件是否可写）", th.ACCENT)
             return
         mark_pending_write()  # 走「写入后 10 秒同步」通道，不必手动再点一次

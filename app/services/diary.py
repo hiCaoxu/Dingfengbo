@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 
 from sqlalchemy import select
@@ -11,6 +12,7 @@ from ..db.models import Diary
 from ..db.repo import create, update
 from .dates import diary_title
 
+logger = logging.getLogger(__name__)
 
 def ensure_diary(session: Session, day: date) -> Diary:
     """取当天日记，没有就建；**优先复用墓碑**。

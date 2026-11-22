@@ -7,6 +7,9 @@
 
 from __future__ import annotations
 
+import logging
+logger = logging.getLogger(__name__)
+
 _clock_offset = 0.0
 
 

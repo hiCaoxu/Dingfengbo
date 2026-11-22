@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import date, datetime
 from typing import Any
@@ -16,6 +17,8 @@ from ..db.models import LifeEvent
 from ..db.repo import create, soft_delete, update
 from ..db.session import session_scope
 from .sync import mark_pending_write
+
+logger = logging.getLogger(__name__)
 
 MAX_TITLE = 15  # 一行放下，不缩成两行
 _DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from sqlalchemy import Engine, create_engine, event
 
+logger = logging.getLogger(__name__)
 
 def create_sqlite_engine(path: Path) -> Engine:
     """创建带 WAL + busy_timeout 的 SQLite 引擎。

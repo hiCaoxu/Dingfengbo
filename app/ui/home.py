@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 
@@ -39,6 +40,8 @@ QUICK_ITEMS = [
 
 # 首页视图状态需跨 refresh 保留，否则每次重建都会回到今天。
 from .state import state
+
+logger = logging.getLogger(__name__)
 
 _HOME_STATE = state.home
 

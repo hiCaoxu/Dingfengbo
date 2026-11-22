@@ -8,11 +8,13 @@ import threading
 from datetime import datetime
 from typing import Any
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 import httpx
 
 from ..config import DEFAULT_SERVER_URL, load_settings, save_settings
 from ..db.models import utcnow
+from ..logging_setup import safe_url
 from ..db.repo import (
     _record_issue,
     apply_remote,
@@ -56,7 +58,8 @@ def _parse_iso(value: Any) -> datetime | None:
         return None
     try:
         return datetime.fromisoformat(str(value))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        logger.debug("_parse_iso：忽略 %s", type(exc).__name__)
         return None
 
 
@@ -100,6 +103,17 @@ class SyncClient:
         self.rejected_count = 0  # 最近一次 push 被服务端永久拒收的条数
         self.pending_upload = 0  # 最近一次 push 上传条数（同步明细页展示）
         self._lock = threading.Lock()
+        # 一次同步 = 一个 correlation id：pull/push/清理的日志都带同一个前缀，
+        # 排查时按 id grep 就能拼出完整的一轮，而不用靠时间戳猜。
+        self.run_id = ""
+        self.last_run_id = ""
+        self.last_pull_count = 0
+        self.last_push_count = 0
+        self.last_purged = 0
+
+    def _log(self, level: int, message: str, *args: Any) -> None:
+        """带 correlation id 的日志。"""
+        logger.log(level, f"[sync {self.run_id or '-'}] " + message, *args)
 
     def _endpoint(self, path: str) -> str:
         base = load_settings().get("server_url", DEFAULT_SERVER_URL).rstrip("/")
@@ -164,7 +178,8 @@ class SyncClient:
             return
         try:
             server_now = datetime.fromisoformat(str(raw))
-        except ValueError:
+        except ValueError as exc:
+            logger.debug("_observe_server_time：忽略 %s", type(exc).__name__)
             return
         received = utcnow()
         reference = sent_at or received
@@ -250,11 +265,12 @@ class SyncClient:
     def _pull(self, client: httpx.Client, settings: dict[str, Any]) -> None:
         cursors = self._load_cursors(settings)
         selected = self.selected_tables(settings)
+        pages = 0
         while True:
             if _auto_pause.is_set():
                 # 备份恢复期间库会被整库替换：飞行中的多页 pull 必须立刻停手，
                 # 否则后续页面会写进已被替换/已关闭的库。
-                logger.info("自动同步已暂停，停止本轮拉取")
+                self._log(logging.INFO, "自动同步已暂停，停止本轮拉取")
                 return
             before = {table: dict(cursor) for table, cursor in cursors.items()}
             sent_at = utcnow()
@@ -280,6 +296,8 @@ class SyncClient:
                     if str(change.get("table")) in selected
                 ]
             self._apply_page(remote_changes)
+            pages += 1
+            self.last_pull_count += len(remote_changes)
             updates = payload.get("cursors", {})
             if isinstance(updates, dict):
                 # 选择性同步时不要推进未选表的游标，否则以后勾选回来会漏拉历史。
@@ -303,9 +321,12 @@ class SyncClient:
                 for table in cursors
             ):
                 logger.warning(
-                    "同步分页无进展（可能是未勾选的表积压超过一页），本轮回退退出"
+                    "[sync %s] 同步分页无进展（可能是未勾选的表积压超过一页），本轮回退退出",
+                    self.run_id or "-",
                 )
                 break
+        if pages:
+            self._log(logging.DEBUG, "拉取结束：%d 页，%d 条", pages, self.last_pull_count)
 
     def _push(self, client: httpx.Client) -> None:
         selected = self.selected_tables(load_settings())
@@ -318,7 +339,7 @@ class SyncClient:
             return
         if _auto_pause.is_set():
             # 推送前也要复查：暂停可能发生在收集队列之后、真正发请求之前。
-            logger.info("自动同步已暂停，取消本次推送")
+            self._log(logging.INFO, "自动同步已暂停，取消本次推送")
             return
         sent_at = utcnow()
         response = client.post(
@@ -339,13 +360,20 @@ class SyncClient:
             for item in superseded:
                 _remember_superseded(session, item)
         if rejected:
-            logger.warning("同步被拒 %d 条：%s", len(rejected), rejected[:3])
+            self._log(logging.WARNING, "同步被拒 %d 条：%s", len(rejected), rejected[:3])
         if superseded:
-            logger.warning("同步被云端更新版本覆盖 %d 条（本地改动已出队）", len(superseded))
+            self._log(logging.WARNING, "同步被云端更新版本覆盖 %d 条（本地改动已出队）", len(superseded))
+        self.last_push_count = len(accepted)
+        if accepted:
+            self._log(logging.DEBUG, "推送结束：%d 条被接受", len(accepted))
 
     def sync_once(self) -> str:
         if not self._lock.acquire(blocking=False):
             return self.status
+        self.run_id = uuid4().hex[:8]
+        self.last_pull_count = 0
+        self.last_push_count = 0
+        self.last_purged = 0
         try:
             if _auto_pause.is_set():
                 self.status = f"同步已暂停（{_auto_pause_reason or '恢复备份中'}）"
@@ -357,19 +385,20 @@ class SyncClient:
             if insecure_remote_server(settings.get("server_url", DEFAULT_SERVER_URL)):
                 logger.warning(
                     "同步服务端为明文 HTTP（%s）：令牌与数据可能在链路被嗅探，建议改用 https",
-                    settings.get("server_url"),
+                    safe_url(settings.get("server_url")),
                 )
             token = settings.get("sync_token", "").strip()
             if not token:
                 self.status = "未配置令牌"
                 return self.status
+            self._log(logging.DEBUG, "同步开始")
             try:
                 with httpx.Client(timeout=10.0) as client:
                     self._pull(client, settings)
                     self._push(client)
                 # 墓碑清理放在成功路径末尾：只 pull 不 push 的客户端也能清理已确认的墓碑。
                 with session_scope() as session:
-                    purge_deleted(session)
+                    self.last_purged = purge_deleted(session)
                 now = datetime.now()
                 self.last_sync = now
                 self.last_error = ""
@@ -378,7 +407,12 @@ class SyncClient:
                 )
                 self._remember_device(settings)
                 self._remember_history(self.status)
-                logger.info("同步成功")
+                self.last_run_id = self.run_id
+                self._log(
+                    logging.INFO,
+                    "同步成功：拉取 %d 条，推送 %d 条，清理墓碑 %d 条",
+                    self.last_pull_count, self.last_push_count, self.last_purged,
+                )
             except httpx.HTTPStatusError as exc:
                 self.last_error = str(exc)[:120]
                 code = exc.response.status_code
@@ -389,16 +423,23 @@ class SyncClient:
                 else:
                     self.status = f"同步失败({code})"
                 self._remember_history(self.status)
-                logger.warning("同步请求被拒：%s", self.status)
+                self._log(logging.WARNING, "同步请求被拒：%s", self.status)
             except httpx.RequestError as exc:  # 网络错误：断网不影响本地使用
+                # 只记异常类型与目标主机：httpx 的异常文本会带完整 URL（含查询串）。
                 self.last_error = str(exc)[:120]
                 self.status = "离线可用"
                 self._remember_history(self.status)
-                logger.info("网络不可达：%s", self.last_error)
+                self._log(
+                    logging.INFO,
+                    "网络不可达：%s（%s）",
+                    type(exc).__name__,
+                    safe_url(settings.get("server_url")),
+                )
             except Exception as exc:
                 self.last_error = str(exc)[:120]
                 self.status = "同步失败"
                 self._remember_history(self.status)
+                self._log(logging.ERROR, "同步异常：%s", type(exc).__name__)
                 logger.exception("同步异常")
             return self.status
         finally:
@@ -416,7 +457,8 @@ def _hostname() -> str:
 
     try:
         return socket.gethostname()
-    except Exception:
+    except Exception as exc:
+        logger.debug("_hostname：忽略 %s", type(exc).__name__)
         return "unknown"
 
 
@@ -475,6 +517,7 @@ def probe(server_url: str, token: str) -> str:
             )
             response.raise_for_status()
     except httpx.HTTPStatusError as exc:
+        logger.info("同步连接测试未通过：HTTP %s", exc.response.status_code)
         code = exc.response.status_code
         if code in (401, 403):
             return "令牌无效（401），请核对同步令牌"

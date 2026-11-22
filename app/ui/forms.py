@@ -111,7 +111,8 @@ def _tags(value: str) -> str:
 def tags_text(raw: str | None) -> str:
     try:
         return ", ".join(json.loads(raw or "[]"))
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as exc:
+        logger.debug("tags_text：忽略 %s", type(exc).__name__)
         return ""
 
 
@@ -144,7 +145,8 @@ def _number(
         return (None, None) if allow_empty else (0.0, None)
     try:
         value = float(text)
-    except ValueError:
+    except ValueError as exc:
+        logger.debug("_number：忽略 %s", type(exc).__name__)
         return None, f"{label}格式不正确"
     if not math.isfinite(value):
         return None, f"{label}必须是有限数值"
@@ -199,6 +201,7 @@ def _save_or_alert(page, model, record_id, fields, resolve=None) -> bool:
     try:
         save_record(model, record_id, fields, resolve=resolve)
     except SaveTargetMissing as exc:
+        logger.debug("_save_or_alert：忽略 %s", type(exc).__name__)
         snack(page, str(exc), th.ACCENT)
         return False
     return True
@@ -482,7 +485,8 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
         else:
             try:
                 due_date = _date(due.value)
-            except ValueError:
+            except ValueError as exc:
+                logger.debug("open_todo_dialog：忽略 %s", type(exc).__name__)
                 snack(page, "到期日期格式不正确", th.ACCENT)
                 return
             lunar_reminder = ""
@@ -492,7 +496,8 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
             unit = UNIT_BY_LABEL.get(unit_dd.value or "天", "day")
             try:
                 interval = int((interval_field.value or "1").strip())
-            except ValueError:
+            except ValueError as exc:
+                logger.debug("open_todo_dialog：忽略 %s", type(exc).__name__)
                 snack(page, "间隔需为数字", th.ACCENT)
                 return
             if interval < 1:
@@ -647,7 +652,8 @@ def open_account_dialog(page: ft.Page, account: Account | None = None, on_done: 
             return
         try:
             amount = round(float(balance.value or 0), 2)
-        except ValueError:
+        except ValueError as exc:
+            logger.debug("open_account_dialog：忽略 %s", type(exc).__name__)
             snack(page, "余额格式不正确", th.ACCENT)
             return
         fields = dict(name=name.value.strip(), kind=kind.value, initial_balance=amount)
@@ -732,7 +738,8 @@ def open_transaction_dialog(page: ft.Page, kind: str = "expense", tx: Transactio
         value = round(parsed, 2)
         try:
             record_date = _date(date_field.value, date.today()) or date.today()
-        except ValueError:
+        except ValueError as exc:
+            logger.debug("open_transaction_dialog：忽略 %s", type(exc).__name__)
             snack(page, "日期格式不正确", th.ACCENT)
             return
         mapped = {"支出": "expense", "收入": "income", "转账": "transfer"}.get(
@@ -802,7 +809,8 @@ def open_exercise_dialog(page: ft.Page, item: Exercise | None = None, on_done: C
             return
         try:
             record_date = _date(day.value, date.today()) or date.today()
-        except ValueError:
+        except ValueError as exc:
+            logger.debug("open_exercise_dialog：忽略 %s", type(exc).__name__)
             snack(page, "日期格式不正确", th.ACCENT)
             return
         distance_km = distance_value
@@ -842,7 +850,8 @@ def open_diet_dialog(page: ft.Page, item: Diet | None = None, on_done: Callable 
         with session_scope() as session:
             try:
                 calories.value = str(calorie_of(session, food.value or "", float(grams.value or 0)))
-            except ValueError:
+            except ValueError as exc:
+                logger.debug("open_diet_dialog：忽略 %s", type(exc).__name__)
                 calories.value = "0"
         calories.error_text = None
         page.update()
@@ -858,7 +867,8 @@ def open_diet_dialog(page: ft.Page, item: Diet | None = None, on_done: Callable 
             return
         try:
             record_date = _date(day.value, date.today()) or date.today()
-        except ValueError:
+        except ValueError as exc:
+            logger.debug("open_diet_dialog：忽略 %s", type(exc).__name__)
             snack(page, "日期格式不正确", th.ACCENT)
             return
         if kcal is None:
@@ -899,7 +909,8 @@ def open_weight_dialog(page: ft.Page, item: Weight | None = None, on_done: Calla
             return
         try:
             record_date = _date(day.value, date.today()) or date.today()
-        except ValueError:
+        except ValueError as exc:
+            logger.debug("open_weight_dialog：忽略 %s", type(exc).__name__)
             snack(page, "日期格式不正确", th.ACCENT)
             return
         fields = dict(date=record_date, kg=weight, body_fat=body_fat)
@@ -930,12 +941,14 @@ def open_sleep_dialog(page: ft.Page, item: Sleep | None = None, on_done: Callabl
             return
         try:
             record_date = _date(day.value, date.today()) or date.today()
-        except ValueError:
+        except ValueError as exc:
+            logger.debug("open_sleep_dialog：忽略 %s", type(exc).__name__)
             snack(page, "日期格式不正确", th.ACCENT)
             return
         try:
             quality_val = int(quality.value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as exc:
+            logger.debug("open_sleep_dialog：忽略 %s", type(exc).__name__)
             quality_val = 3
         fields = dict(date=record_date, bedtime=bedtime.value or "",
                       wake_time=wake.value or "", hours=hours, quality=quality_val)
@@ -989,7 +1002,8 @@ def open_entertainment_dialog(page: ft.Page, item: Entertainment | None = None, 
             return
         try:
             score = float(rating.value) if (rating.value or "").strip() else None
-        except ValueError:
+        except ValueError as exc:
+            logger.debug("open_entertainment_dialog：忽略 %s", type(exc).__name__)
             snack(page, "评分需为 0-10 的数字", th.ACCENT)
             return
         if score is not None and not 0 <= score <= 10:
@@ -1174,8 +1188,10 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
                     },
                 )
             except AIConfigError as exc:
+                logger.debug("open_settings_dialog：忽略 %s", type(exc).__name__)
                 return str(exc)
             except AIError as exc:
+                logger.debug("open_settings_dialog：忽略 %s", type(exc).__name__)
                 return str(exc)
             except Exception:
                 logger.exception("AI 连接测试异常")
@@ -1307,7 +1323,8 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
     def save(_):
         try:
             h = float(height.value or DEFAULT_HEIGHT_CM)
-        except ValueError:
+        except ValueError as exc:
+            logger.warning("设置未保存：密钥保护不可用（%s）", type(exc).__name__)
             h = DEFAULT_HEIGHT_CM
         try:
             save_settings(dict(
@@ -1326,10 +1343,12 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
             ))
         except InsufficientSecretProtection as exc:
             # 缺 DPAPI 时拒绝把凭据写成 base64：留在弹窗里让用户勾选「允许弱保护存储」重试。
+            logger.warning("设置未保存：设置文件存在但无法解析（%s）", type(exc).__name__)
             snack(page, str(exc), th.ACCENT)
             return
         except SettingsUnreadable as exc:
             # 设置文件损坏时拒绝回写（否则会把整份配置覆盖成默认值），保留弹窗让用户先修文件。
+            logger.debug("open_settings_dialog：忽略 %s", type(exc).__name__)
             snack(page, str(exc), th.ACCENT)
             return
         # 明文 HTTP 同步：令牌是唯一身份凭证，值得显著提示一次（不阻断，本机/内网调试常见）。

@@ -6,12 +6,15 @@ AI 助手原来只有自由对话；这里把周报、任务拆解、日记润�
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import date
 
 from ..focus import brief_text, today_focus
 from ..reports import build_report, report_prompt
 from ...db.models import table_label
+
+logger = logging.getLogger(__name__)
 
 BASE_SYSTEM = (
     "你是「定风波」个人工作台的 AI 助手。用户可能通过「@表名」引用待办、日记、笔记、"

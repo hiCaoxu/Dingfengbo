@@ -16,7 +16,6 @@ from .widgets import snack
 
 logger = logging.getLogger(__name__)
 
-
 def pick_and_upload(
     page: ft.Page,
     on_done: Callable[[str], None],
@@ -40,7 +39,8 @@ def pick_and_upload(
         finally:
             try:
                 page.services.remove(picker)
-            except ValueError:
+            except ValueError as exc:
+                logger.debug("pick_and_upload：忽略 %s", type(exc).__name__)
                 pass
 
         if not files:
@@ -59,6 +59,7 @@ def pick_and_upload(
                     else images.upload_bytes(picked.bytes or b"")
                 )
             except images.UploadError as exc:
+                logger.warning("图片上传失败：%s", type(exc).__name__)
                 async def fail() -> None:
                     snack(page, str(exc), th.DANGER)
                 page.run_task(fail)

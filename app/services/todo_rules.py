@@ -7,11 +7,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date
 
 from .dates import next_due, next_lunar_due
 from .recurrence import describe as describe_custom
 from .recurrence import next_custom_due
+
+logger = logging.getLogger(__name__)
 
 REPEAT_LABELS: dict[str, str] = {
     "none": "不循环",
@@ -38,7 +41,8 @@ RULE_BY_LABEL = {
 def parse_config(raw: str) -> dict:
     try:
         data = json.loads(raw or "{}")
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as exc:
+        logger.debug("parse_config：忽略 %s", type(exc).__name__)
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -54,7 +58,8 @@ def next_occurrence(due: date, rule: str, config_raw: str, lunar: bool) -> date 
         return next_custom_due(due, config)
     try:
         anchor_day = int(config.get("anchor_day")) if config.get("anchor_day") else None
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        logger.debug("next_occurrence：忽略 %s", type(exc).__name__)
         anchor_day = None
     if lunar:
         return next_lunar_due(due, rule, anchor_day)

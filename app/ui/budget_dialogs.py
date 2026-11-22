@@ -69,7 +69,8 @@ def open_budget_dialog(page: ft.Page, refresh) -> ft.AlertDialog:
                 return 0.0
             try:
                 value = float(raw)
-            except ValueError:
+            except ValueError as exc:
+                logger.debug("open_budget_dialog：忽略 %s", type(exc).__name__)
                 snack(page, f"「{label}」金额格式不正确，未保存", th.ACCENT)
                 return None
             if not math.isfinite(value) or value < 0 or value > MAX_BUDGET_AMOUNT:
@@ -158,7 +159,8 @@ def open_rule_form(page: ft.Page, rule=None, on_done=None) -> ft.AlertDialog:
             return
         try:
             value = float((amount.value or "").strip())
-        except ValueError:
+        except ValueError as exc:
+            logger.debug("open_rule_form：忽略 %s", type(exc).__name__)
             snack(page, "金额格式不正确", th.ACCENT)
             return
         if not math.isfinite(value) or value <= 0:
@@ -171,7 +173,8 @@ def open_rule_form(page: ft.Page, rule=None, on_done=None) -> ft.AlertDialog:
         day_max = 7 if is_week else 31
         try:
             day_value = int(float(day.value or 1))
-        except ValueError:
+        except ValueError as exc:
+            logger.debug("open_rule_form：忽略 %s", type(exc).__name__)
             snack(page, "执行日格式不正确", th.ACCENT)
             return
         # 按周期夹取：每周只能 1-7（旧实现一律夹到 31，周规则会存进 day=20 这种非法值）

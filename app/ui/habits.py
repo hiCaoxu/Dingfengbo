@@ -48,11 +48,13 @@ def open_habit_dialog(page: ft.Page, habit=None, on_done=None) -> ft.AlertDialog
             return
         try:
             weekly = max(1, min(7 * 4, int(float(target.value or 7))))
-        except ValueError:
+        except ValueError as exc:
+            logger.debug("open_habit_dialog：忽略 %s", type(exc).__name__)
             weekly = 7
         try:
             mins = max(0, int(float(minutes.value or 0)))
-        except ValueError:
+        except ValueError as exc:
+            logger.debug("open_habit_dialog：忽略 %s", type(exc).__name__)
             mins = 0
         try:
             save_habit(

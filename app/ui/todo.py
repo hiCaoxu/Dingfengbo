@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 from uuid import NAMESPACE_URL, uuid5
 
@@ -52,6 +53,8 @@ from .widgets import (
     primary_button,
     tag_chip,
 )
+
+logger = logging.getLogger(__name__)
 
 _state = state.todo
 

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import DEFAULT_HEIGHT_CM, DEFAULT_WEIGHT_KG, get_setting
 from ..db.models import Food, Weight
+
+logger = logging.getLogger(__name__)
 
 # 常见运动 MET 值，用于估算消耗：kcal ≈ MET × 体重(kg) × 小时
 MET = {

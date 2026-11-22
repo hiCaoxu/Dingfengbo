@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections import Counter
 from datetime import date, timedelta
 from typing import Any, Iterable
@@ -17,6 +18,8 @@ from typing import Any, Iterable
 # 日历网格只保留一份实现（dates.month_grid）：这里曾与 dates.py 各写一份，
 # 改动时容易只改一处，待办与日记的日历就对不上了。re-export 兼容既有调用方。
 from .dates import month_grid  # noqa: F401
+
+logger = logging.getLogger(__name__)
 
 URGENT_WINDOW_DAYS = 1
 
@@ -87,9 +90,6 @@ def shift_month(year: int, month: int, delta: int) -> tuple[int, int]:
     """按月份前后移动（``delta`` 可为负），返回新的 (year, month)。"""
     index = year * 12 + (month - 1) + delta
     return index // 12, index % 12 + 1
-
-
-
 
 
 def counts_by_date(items: Iterable[Any]) -> dict[date, int]:

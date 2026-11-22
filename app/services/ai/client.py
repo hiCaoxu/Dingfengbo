@@ -13,7 +13,6 @@ from .provider import AIError
 
 logger = logging.getLogger(__name__)
 
-
 class AIConfigError(AIError):
     """AI 未配置或配置不完整。"""
 
@@ -35,7 +34,8 @@ def _validate_base_url(base_url: str) -> str:
     try:
         ip = ipaddress.ip_address(host)
         private = private or ip.is_private or ip.is_loopback or ip.is_link_local
-    except ValueError:
+    except ValueError as exc:
+        logger.debug("_validate_base_url：忽略 %s", type(exc).__name__)
         pass
     if private:
         logger.warning("AI 服务地址指向本机/内网：%s（API Key 与引用内容会发往该地址）", base_url)

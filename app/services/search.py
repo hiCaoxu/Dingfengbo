@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from typing import Any
@@ -16,6 +17,8 @@ from sqlalchemy.orm import Session
 
 from ..db.models import Diary, Entertainment, Note, Todo, Transaction
 from ..db.session import session_scope
+
+logger = logging.getLogger(__name__)
 
 # 模块中文名 → 表名（自然语言过滤用）
 MODULE_WORDS = {

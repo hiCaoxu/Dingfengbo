@@ -13,8 +13,11 @@
 
 from __future__ import annotations
 
+import logging
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Iterable
+
+logger = logging.getLogger(__name__)
 
 CENT = Decimal("0.01")
 ZERO = Decimal("0")
@@ -35,7 +38,8 @@ def to_decimal(value: object) -> Decimal:
     text = repr(value) if isinstance(value, float) else str(value)
     try:
         parsed = Decimal(text)
-    except (InvalidOperation, ValueError):
+    except (InvalidOperation, ValueError) as exc:
+        logger.debug("to_decimal：忽略 %s", type(exc).__name__)
         return ZERO
     return parsed if parsed.is_finite() else ZERO
 

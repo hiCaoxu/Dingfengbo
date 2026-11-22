@@ -284,6 +284,7 @@ def _render(page: ft.Page, refresh, report: dict) -> ft.Control:
                         ]
                     )
                 except (AIConfigError, AIError) as exc:
+                    logger.warning("报告 AI 调用失败：%s", type(exc).__name__)
                     text = f"⚠️ {exc}"
                 except Exception:
                     logger.exception("生成回顾叙述失败")

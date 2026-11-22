@@ -3,6 +3,13 @@
 from .client import AIConfigError, ai_configured, chat, create_provider
 from .provider import AIError, AIProvider
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+
+
 __all__ = [
     "AIError",
     "AIProvider",

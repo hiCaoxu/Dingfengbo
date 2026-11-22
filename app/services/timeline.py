@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
@@ -34,6 +35,8 @@ from ..db.models import (
 )
 from ..db.session import session_scope
 from .dates import local_date_from_utc
+
+logger = logging.getLogger(__name__)
 
 # 时间轴模块：键 → (中文, 跳转模块)
 MODULE_META = {
@@ -69,7 +72,8 @@ class TimelineItem:
 def _tags(raw: str | None) -> list[str]:
     try:
         values = json.loads(raw or "[]")
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as exc:
+        logger.debug("_tags：忽略 %s", type(exc).__name__)
         return []
     return [str(v).strip() for v in values if str(v).strip()] if isinstance(values, list) else []
 

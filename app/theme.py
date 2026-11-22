@@ -7,8 +7,11 @@
 
 from __future__ import annotations
 
+import logging
 import flet as ft
 from flet import Border, TextStyle
+
+logger = logging.getLogger(__name__)
 
 LIGHT = {
     "BG": "#FAF7F2",

@@ -15,7 +15,6 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
-
 class NotifyResult(str, Enum):
     """提醒的送达程度：用来决定「要不要重试」。
 

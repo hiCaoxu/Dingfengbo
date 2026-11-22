@@ -46,7 +46,8 @@ def configured_dir() -> Path:
 def configured_keep() -> int:
     try:
         return max(1, int(get_setting("backup_keep", DEFAULT_KEEP) or DEFAULT_KEEP))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        logger.debug("configured_keep：忽略 %s", type(exc).__name__)
         return DEFAULT_KEEP
 
 
@@ -84,7 +85,13 @@ def backup_database(
     ) as dst:
         src.backup(dst)
     if prune:
-        _prune(target_dir, configured_keep() if keep is None else keep)
+        removed = _prune(target_dir, configured_keep() if keep is None else keep)
+        if removed:
+            logger.info("备份清理：删除 %d 份超期备份", removed)
+    # 备份是「出了问题要找的东西」：文件名、大小、标签一次性记全，
+    # 用户报「备份没生成/找不到」时不用再问是哪个目录。
+    size = target.stat().st_size // 1024 if target.exists() else 0
+    logger.info("已生成备份 %s（%d KB，label=%s）", target.name, size, label)
     return target
 
 
@@ -133,7 +140,8 @@ def list_backups(directory: Path | None = None) -> list[dict]:
         if match:
             try:
                 created = datetime.strptime(match.group("stamp"), "%Y%m%d-%H%M%S-%f")
-            except ValueError:
+            except ValueError as exc:
+                logger.debug("list_backups：忽略 %s", type(exc).__name__)
                 created = datetime.fromtimestamp(path.stat().st_mtime)
             label = match.group("label")
         else:
@@ -141,7 +149,8 @@ def list_backups(directory: Path | None = None) -> list[dict]:
             label = "unknown"
         try:
             size = path.stat().st_size
-        except OSError:
+        except OSError as exc:
+            logger.debug("list_backups：忽略 %s", type(exc).__name__)
             size = 0
         items.append(
             {
@@ -175,8 +184,10 @@ def verify_backup(path: Path | str) -> tuple[bool, str]:
             ).fetchone()
             return True, f"校验通过（{int(tables[0]) if tables else 0} 张表）"
     except sqlite3.DatabaseError as exc:
+        logger.debug("verify_backup：忽略 %s", type(exc).__name__)
         return False, f"无法读取：{exc}"
     except OSError as exc:
+        logger.debug("verify_backup：忽略 %s", type(exc).__name__)
         return False, f"无法打开：{exc}"
 
 
@@ -220,15 +231,19 @@ def _atomic_replace(source: Path, target: Path) -> None:
     WinError 5，这里只做几次短重试（句柄多半是刚释放、GC 还没跑）。
     """
     last_error: OSError | None = None
-    for _attempt in range(3):
+    for attempt in range(3):
         try:
             os.replace(source, target)
             return
         except PermissionError as exc:
+            # Windows 上目标文件被杀软/索引器短暂占用是常态：每次重试都留一笔，
+            # 最终失败时日志里能看到「试了几次、最后一次是什么错」。
+            logger.debug("替换 %s 被占用（第 %d 次）：%s", target.name, attempt + 1, exc)
             last_error = exc
             gc.collect()
             time.sleep(0.05)
         except OSError as exc:
+            logger.debug("替换 %s 失败：%s", target.name, exc)
             last_error = exc
             break
     logger.error("原子替换失败，现有数据库保持不变：%s（%s）", target, last_error)

@@ -20,7 +20,6 @@ from .widgets import card, empty, equal_height_row, primary_button, snack
 
 logger = logging.getLogger(__name__)
 
-
 def _metric(title: str, value: str, hint: str = "", accent: bool = False) -> ft.Control:
     return ft.Column(
         [

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
@@ -12,6 +13,8 @@ from pygments.lexers.special import TextLexer
 from pygments.token import Token
 
 from .. import theme as th
+
+logger = logging.getLogger(__name__)
 
 _TOKEN_COLORS = {
     Token.Keyword: "#7B5EA7",
@@ -39,7 +42,8 @@ def _color_for(token: Token) -> str | None:
 def highlight_lines(code: str, lang: str = "") -> list[list[ft.TextSpan]]:
     try:
         lexer = get_lexer_by_name(lang, stripnl=False) if lang else TextLexer(stripnl=False)
-    except Exception:
+    except Exception as exc:
+        logger.debug("highlight_lines：忽略 %s", type(exc).__name__)
         lexer = TextLexer(stripnl=False)
     result: list[list[ft.TextSpan]] = [[]]
     for token, value in lex(code, lexer):

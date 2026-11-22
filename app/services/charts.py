@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import logging
 import math
 import threading
 from typing import Any
@@ -14,6 +15,8 @@ import matplotlib.pyplot as plt
 from matplotlib import font_manager
 
 from .. import theme as th
+
+logger = logging.getLogger(__name__)
 
 _FONT_CANDIDATES = ["Microsoft YaHei", "SimHei", "Noto Sans CJK SC", "PingFang SC", "Arial Unicode MS"]
 _available = {f.name for f in font_manager.fontManager.ttflist}

@@ -37,7 +37,8 @@ def parse_offsets(todo: Todo) -> list[int]:
     """解析提前天数集合；新字段为空时回退到旧版单值字段。"""
     try:
         raw = json.loads(todo.remind_days or "[]")
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as exc:
+        logger.debug("parse_offsets：忽略 %s", type(exc).__name__)
         raw = []
     offsets: list[int] = []
     if isinstance(raw, list):
@@ -52,7 +53,8 @@ def parse_offsets(todo: Todo) -> list[int]:
         return offsets
     try:
         legacy = int(todo.remind_days_before if todo.remind_days_before is not None else -1)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        logger.debug("parse_offsets：忽略 %s", type(exc).__name__)
         legacy = REMIND_NONE
     return [legacy] if legacy >= 0 else []
 

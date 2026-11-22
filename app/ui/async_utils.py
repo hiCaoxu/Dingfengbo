@@ -15,7 +15,6 @@ from .. import theme as th
 
 logger = logging.getLogger(__name__)
 
-
 def _placeholder(text: str) -> ft.Control:
     return ft.Container(
         content=ft.Text(text, size=th.FONT_CAPTION, color=th.TEXT_MUTED),

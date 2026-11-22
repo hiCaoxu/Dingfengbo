@@ -6,11 +6,14 @@
 
 from __future__ import annotations
 
+import logging
 import flet as ft
 
 from .. import theme as th
 from ..icons import NAV, ico
 from .widgets import card, divider, ghost_button, page_header
+
+logger = logging.getLogger(__name__)
 
 QUICK_START: tuple[str, ...] = (
     "左侧导航切换模块；顶栏右侧依次是「立即同步」、搜索、主题和设置，最右是最小化/最大化/关闭。",

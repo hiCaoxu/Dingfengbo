@@ -155,13 +155,15 @@ def _coerce_date(value: Any) -> date | None:
         return None
     try:
         return date.fromisoformat(text[:10])
-    except ValueError:
+    except ValueError as exc:
+        logger.debug("_coerce_date：忽略 %s", type(exc).__name__)
         pass
     ambiguous: set[date] = set()
     for fmt in _DATE_FORMATS:
         try:
             parsed = datetime.strptime(text[:19], fmt).date()
-        except ValueError:
+        except ValueError as exc:
+            logger.debug("_coerce_date：忽略 %s", type(exc).__name__)
             continue
         if fmt not in _AMBIGUOUS_DATE_FORMATS:
             return parsed
@@ -181,7 +183,8 @@ def _coerce(column, value: Any) -> Any:
             text = str(value).strip()
             try:
                 return datetime.fromisoformat(text[:19])
-            except ValueError:
+            except ValueError as exc:
+                logger.debug("_coerce：忽略 %s", type(exc).__name__)
                 parsed = _coerce_date(value)
                 return datetime.combine(parsed, datetime.min.time()) if parsed else None
         if python_type is date:
@@ -194,7 +197,8 @@ def _coerce(column, value: Any) -> Any:
         if python_type is int:
             return int(float(value))
         return str(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        logger.debug("_coerce：忽略 %s", type(exc).__name__)
         return None
 
 
@@ -220,7 +224,8 @@ def _clamp_future_updated_at(data: dict[str, Any]) -> bool:
         return False
     try:
         parsed = datetime.fromisoformat(str(raw)[:19])
-    except ValueError:
+    except ValueError as exc:
+        logger.debug("_clamp_future_updated_at：忽略 %s", type(exc).__name__)
         return False
     limit = _aligned_now()
     if parsed <= limit + _IMPORT_FUTURE_TOLERANCE:
@@ -329,6 +334,12 @@ def import_json(path: Path | str) -> dict[str, Any]:
         from .sync import mark_pending_write
 
         mark_pending_write()
+    # 导入是破坏性操作（LWW 合并）：把「读了几张表、写入几条、跳过几条」一次性记全，
+    # 用户反馈「导入后数据不对」时不用再猜。只记数量，不记正文。
+    logger.info(
+        "JSON 导入完成：表 %d 张，写入 %d 条，跳过 %d 条（旧版本 %d / 一致 %d），入队 %d 条",
+        len(tables_seen), imported, skipped, superseded, unchanged, queued,
+    )
     return {
         "imported": imported,
         "tables": len(tables_seen),
@@ -534,6 +545,7 @@ def import_csv(table: str, path: Path | str) -> dict[str, Any]:
         from .sync import mark_pending_write
 
         mark_pending_write()
+    logger.info("CSV 导入完成：%s 写入 %d 行，跳过 %d 行", table, imported, skipped)
     return {"imported": imported, "skipped": skipped, "errors": errors[:10]}
 
 

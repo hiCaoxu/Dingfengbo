@@ -7,8 +7,8 @@
 
 from __future__ import annotations
 
-import logging
 
+import logging
 import flet as ft
 
 from .. import theme as th
@@ -22,7 +22,6 @@ from ..services.ai.tasks import build_request
 from .widgets import close_modal, dismiss, modal, open_dialog, primary_button, snack
 
 logger = logging.getLogger(__name__)
-
 
 def _not_configured(page: ft.Page, refresh=None) -> None:
     from .forms import open_settings_dialog
@@ -148,6 +147,7 @@ def run_task_dialog(
             try:
                 text, drafts = work()
             except (AIConfigError, AIError) as exc:
+                logger.warning("AI 任务调用失败：%s", type(exc).__name__)
                 text, drafts = f"⚠️ {exc}", []
             except Exception as exc:  # 网络/解析异常都要回到 UI，避免弹窗一直转圈
                 logger.exception("AI 任务执行失败")

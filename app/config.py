@@ -50,7 +50,9 @@ def _resolve_data_dir() -> Path:
         probe.write_text("ok", encoding="utf-8")
         probe.unlink()
         return candidate
-    except OSError:
+    except OSError as exc:
+        # 数据目录不可写会静默换到用户目录：必须留痕，否则用户找不到自己的库。
+        logger.warning("数据目录 %s 不可写（%s），回退到 %s", candidate, exc, Path.home() / "Dingfengbo")
         fallback = Path.home() / "Dingfengbo"
         fallback.mkdir(parents=True, exist_ok=True)
         return fallback
@@ -207,7 +209,8 @@ def _dpapi_crypt(data: bytes, protect: bool) -> bytes | None:
 def _b64_decode(payload: str) -> bytes | None:
     try:
         return base64.urlsafe_b64decode(payload.encode("ascii"))
-    except (ValueError, UnicodeEncodeError):
+    except (ValueError, UnicodeEncodeError) as exc:
+        logger.debug("_b64_decode：忽略 %s", type(exc).__name__)
         return None
 
 
@@ -236,7 +239,9 @@ def _raw_disk_settings() -> dict[str, Any]:
     """按原样读取 settings.json（不解密），用于安全地保留原密文。"""
     try:
         data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError) as exc:
+        # 读不到设置就按默认值跑，但「为什么设置没生效」必须能查。
+        logger.warning("读取设置文件失败，使用默认设置：%s", exc)
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -255,7 +260,8 @@ def _deobfuscate_token(value: str) -> str:
             return value
         try:
             return payload.decode("utf-8")
-        except UnicodeDecodeError:
+        except UnicodeDecodeError as exc:
+            logger.debug("_deobfuscate_token：忽略 %s", type(exc).__name__)
             return value
     return value
 
@@ -277,7 +283,8 @@ def load_settings() -> dict[str, Any]:
     try:
         stat = SETTINGS_PATH.stat()
         stamp: tuple[int, int] | None = (stat.st_mtime_ns, stat.st_size)
-    except OSError:
+    except OSError as exc:
+        logger.debug("load_settings：忽略 %s", type(exc).__name__)
         stamp = None
     if stamp is not None and _SETTINGS_CACHE is not None and _SETTINGS_CACHE[0] == stamp:
         # 命中缓存也要返回深拷贝：调用方（同步游标、设置界面）会就地改字段。

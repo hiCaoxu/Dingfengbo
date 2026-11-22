@@ -62,7 +62,8 @@ def _read_file(path: Path) -> tuple[set[date], set[date]]:
     """解析补充文件，返回（放假日, 调休上班日）。"""
     try:
         stat = path.stat()
-    except OSError:
+    except OSError as exc:
+        logger.debug("_read_file：忽略 %s", type(exc).__name__)
         return set(), set()
     key = str(path)
     signature = (stat.st_mtime, stat.st_size)
@@ -84,7 +85,8 @@ def _read_file(path: Path) -> tuple[set[date], set[date]]:
         target = workdays if raw.startswith("!") else holidays
         try:
             target.add(date.fromisoformat(raw.lstrip("!").strip()[:10]))
-        except ValueError:
+        except ValueError as exc:
+            logger.warning("节假日补充文件有非法日期，已跳过该行")
             continue
     _cache[key] = (signature, (holidays, workdays))
     logger.info(

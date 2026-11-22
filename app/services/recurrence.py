@@ -64,7 +64,8 @@ def normalize_config(raw: dict | None) -> dict:
     if kind == "weekly_times":
         try:
             times = int(raw.get("times") or 1)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as exc:
+            logger.debug("normalize_config：忽略 %s", type(exc).__name__)
             times = 1
         times = max(1, min(7, times))
         return {
@@ -103,7 +104,8 @@ def _as_int(value, default: int) -> int:
         if isinstance(value, bool):
             return default
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        logger.debug("_as_int：忽略 %s", type(exc).__name__)
         return default
 
 
@@ -121,7 +123,8 @@ def _int_list(raw) -> list[int]:
             continue
         try:
             values.append(int(item))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as exc:
+            logger.debug("_int_list：忽略 %s", type(exc).__name__)
             continue
     return values
 
@@ -201,7 +204,8 @@ def _next_year(value: date, config: dict, interval: int) -> date | None:
     mode = str(config.get("year_mode") or "date")
     try:
         month = int(config.get("year_month") or value.month)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        logger.debug("_next_year：忽略 %s", type(exc).__name__)
         month = value.month
     month = min(12, max(1, month))
     for block in range(MAX_STEPS):
@@ -219,7 +223,8 @@ def _next_year(value: date, config: dict, interval: int) -> date | None:
         else:
             try:
                 day = int(config.get("year_day") or value.day)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError) as exc:
+                logger.debug("_next_year：忽略 %s", type(exc).__name__)
                 day = value.day
             day = min(day, calendar.monthrange(year, month)[1])
             targets = [date(year, month, day)]
@@ -237,7 +242,8 @@ def next_custom_due(value: date, raw_config: dict | None) -> date | None:
         return None
     try:
         interval = max(1, int(config.get("interval") or 1))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        logger.debug("next_custom_due：忽略 %s", type(exc).__name__)
         interval = 1
     if unit == "day":
         return _skip_blocked(value + timedelta(days=interval), config)
@@ -262,7 +268,8 @@ def describe(raw_config: dict | None) -> str:
     unit = str(config.get("unit"))
     try:
         interval = max(1, int(config.get("interval") or 1))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        logger.debug("describe：忽略 %s", type(exc).__name__)
         interval = 1
     text = f"每 {interval} {UNIT_LABELS.get(unit, unit)}"
 

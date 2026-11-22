@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from datetime import date, timedelta
 from typing import Any, Iterable
@@ -11,6 +12,8 @@ from sqlalchemy import select
 from ..db.models import Habit, HabitLog
 from ..db.repo import create, soft_delete, update
 from ..db.session import session_scope
+
+logger = logging.getLogger(__name__)
 
 LOOKBACK_DAYS = 400
 

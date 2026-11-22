@@ -135,7 +135,8 @@ def _parse_date(value: Any, today: date) -> date | None:
         return today + timedelta(days=2)
     try:
         return date.fromisoformat(text[:10])
-    except ValueError:
+    except ValueError as exc:
+        logger.debug("_parse_date：忽略 %s", type(exc).__name__)
         return None
 
 
@@ -217,7 +218,8 @@ def _normalize(item: dict[str, Any], today: date) -> Draft:
     if kind == "transaction":
         try:
             raw_amount = float(item.get("amount") or 0)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as exc:
+            logger.debug("_normalize：忽略 %s", type(exc).__name__)
             raw_amount = 0.0
         # NaN/Inf 能通过 float()，但 NaN 写库会触发 NOT NULL（SQLite 把 NaN 存成 NULL），
         # Inf 会污染后续所有 SUM/报表，必须在入口拦掉。

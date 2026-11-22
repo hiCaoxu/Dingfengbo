@@ -10,7 +10,10 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date, timedelta
+
+logger = logging.getLogger(__name__)
 
 # (节日名称, 放假首日, 放假末日) —— 含首尾
 _HOLIDAY_RANGES: list[tuple[str, str, str]] = [

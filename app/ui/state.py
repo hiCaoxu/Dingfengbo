@@ -6,10 +6,12 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
+logger = logging.getLogger(__name__)
 
 class _StateBase:
     """支持字典式访问的类型化状态基类，便于从散落的字典平滑迁移。

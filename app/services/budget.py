@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import calendar
+import logging
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
@@ -20,6 +21,8 @@ from ..db.models import Account, Budget, RecurringRule, Transaction
 from ..db.repo import create, update
 from ..db.session import session_scope
 from .money import ZERO, from_cents, is_over, percent, quantize, to_float, total
+
+logger = logging.getLogger(__name__)
 
 PERIOD_LABELS = {"month": "每月", "week": "每周"}
 MAX_CATCH_UP = 12  # 一次最多补生成 12 期，避免长期未启动后爆量

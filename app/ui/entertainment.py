@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import flet as ft
 from sqlalchemy import select
 
@@ -23,6 +24,8 @@ from .widgets import (
     page_header,
     primary_button,
 )
+
+logger = logging.getLogger(__name__)
 
 COLUMNS = ["想看", "在看", "看完"]
 _state = state.entertainment

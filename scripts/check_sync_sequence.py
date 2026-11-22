@@ -12,9 +12,12 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_DB = Path(r"D:\Data\Dingfengbo\cloud.db")
 

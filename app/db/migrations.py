@@ -159,6 +159,12 @@ def _normalize_nullable_columns(connection: Connection, *, fresh: bool = False) 
                 f'UPDATE "{table.name}" SET "{column.name}" = ? WHERE "{column.name}" IS NULL',
                 (fill,),
             )
+        # 逐表记一笔：迁移后核对「哪几张表被重建、补了哪些列」全靠这行。
+        logger.debug(
+            "重建 %s：补齐 NOT NULL（%s）",
+            table.name,
+            "、".join(column.name for column in offenders),
+        )
         _rebuild_table_strict(connection, table)
         rebuilt += 1
     connection.exec_driver_sql(f"PRAGMA user_version = {NULLABLE_SCHEMA_VERSION}")

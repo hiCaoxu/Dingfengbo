@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import Counter, defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
@@ -34,6 +35,8 @@ from .dates import local_date_from_utc
 from .finance import money
 from .money import ZERO, from_cents, quantize, to_float, total
 
+logger = logging.getLogger(__name__)
+
 PERIODS = {"week": "本周", "month": "本月", "year": "本年"}
 
 
@@ -54,7 +57,8 @@ def _days(start: date, end: date) -> int:
 def _tags_of(raw: str | None) -> list[str]:
     try:
         values = json.loads(raw or "[]")
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as exc:
+        logger.debug("_tags_of：忽略 %s", type(exc).__name__)
         return []
     return [str(v).strip() for v in values if str(v).strip()] if isinstance(values, list) else []
 

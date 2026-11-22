@@ -29,6 +29,7 @@ from app.logging_setup import setup_logging
 
 DB_PATH = Path(os.environ.get("DINGFENGBO_SERVER_DB", r"D:\Data\Dingfengbo\cloud.db"))
 setup_logging(DB_PATH.parent / "logs")
+
 logger = logging.getLogger(__name__)
 
 engine = create_sqlite_engine(DB_PATH)
@@ -450,7 +451,8 @@ def _stale_after_purge(session, item: dict[str, Any], purged_before) -> str | No
         return None  # 记录还在：走正常 LWW
     try:
         stamp = datetime.fromisoformat(str(data.get("updated_at"))[:19])
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        logger.debug("_stale_after_purge：忽略 %s", type(exc).__name__)
         return None
     if stamp < purged_before:
         return (

@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from datetime import date
 from decimal import Decimal
@@ -21,6 +22,7 @@ from ..db.models import Account, Transaction
 from .dates import shift_month
 from .money import ZERO, format_money, from_cents, to_decimal, to_float
 
+logger = logging.getLogger(__name__)
 
 def money(value: float) -> str:
     return format_money(value)

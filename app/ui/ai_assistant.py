@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import logging
 
+import logging
 import flet as ft
 
 from ..config import AI_PROVIDERS, load_settings, save_settings
@@ -200,8 +200,10 @@ def build(page: ft.Page, refresh) -> ft.Control:
                 try:
                     text = work()
                 except AIConfigError as exc:
+                    logger.warning("AI 未配置：%s", type(exc).__name__)
                     text = f"⚠️ {exc}"
                 except AIError as exc:
+                    logger.warning("AI 调用失败：%s", type(exc).__name__)
                     text = f"⚠️ {exc}"
                 except Exception as exc:
                     logger.exception("AI 调用异常")

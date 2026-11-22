@@ -6,6 +6,7 @@ owner_id 用于服务端按用户隔离；单机模式下统一为 "local"。
 
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -28,6 +29,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from ..services.money import cents as to_cents
 from ..services.money import from_cents
 
+logger = logging.getLogger(__name__)
 
 class MoneyCents(TypeDecorator):
     """金额列：库里存**整数分**，ORM 层仍暴露「元」的 float。
@@ -80,7 +82,8 @@ def column_fill_value(column) -> Any:
             return argument
     try:
         python_type = column.type.python_type
-    except (NotImplementedError, AttributeError):
+    except (NotImplementedError, AttributeError) as exc:
+        logger.debug("column_fill_value：忽略 %s", type(exc).__name__)
         python_type = str
     if python_type is bool:
         return False

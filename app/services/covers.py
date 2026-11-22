@@ -163,7 +163,8 @@ def _blocked_host(host: str) -> bool:
     for info in infos:
         try:
             ip = ipaddress.ip_address(info[4][0])
-        except (ValueError, IndexError):
+        except (ValueError, IndexError) as exc:
+            logger.debug("_blocked_host：忽略 %s", type(exc).__name__)
             continue
         if (
             ip.is_private

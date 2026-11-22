@@ -116,7 +116,7 @@ server/main.py       同步服务端（FastAPI）
 docker/              Dockerfile、compose、Caddyfile、deploy.ps1
 packaging/           PyInstaller spec、build.ps1、字体子集化
 scripts/             运维脚本（同步序列自检等）
-tests/               31 个测试文件
+tests/               65 个测试文件
 ```
 
 约定：
@@ -125,6 +125,15 @@ tests/               31 个测试文件
 - **时间口径**：`created_at` / `updated_at` 统一存 **naive UTC**（多端 LWW 需要公共时间轴），
   界面与 AI 上下文展示前一律用 `dates.local_datetime_from_utc()` 转本地时间；
   CSV/JSON 导出保持 UTC，便于原样回灌。写库时两个字段用同一个（已对齐的）时钟。
+- **日志**：统一走 `app/logging_setup.py`（滚动文件 2MB × 5 份，控制台同格式）。
+  排查时设 `DINGFENGBO_LOG_LEVEL=DEBUG` 即可看到写库、解析、同步分页等细节，不必改代码。
+  一次同步的全部日志带同一个 `[sync xxxxxxxx]` 前缀，按 id 就能还原一轮。
+  **日志里不写用户正文、凭据和完整 URL**：地址一律过 `logging_setup.safe_url()`（只保留
+  `scheme://host`），记录只写表名 + 主键前 8 位。`tests/test_logging.py` 会强制「每个模块都有
+  module logger」「不允许完全吞掉异常」。
+- **注释**：模块/函数用中文 docstring 讲**为什么**（LWW 决胜、时间戳方向、金额单位边界、
+  SQLite 怪癖这类反直觉处必须写），不复述代码在做什么；改到这些地方时顺手补一句，
+  比事后集中补注释更省力。
 - 界面文案新增生僻字会影响字体子集，改完跑 `python packaging\subset_font.py`（见下）。
 - 金额：库里存**整数分**（`models.MoneyCents` 类型装饰器，写元读元），同步载荷与 CSV/JSON 导出仍是「元」——旧客户端按元推送不会被读成 1/100；`app/services/money.py` 统一 Decimal 舍入与比较。迁移由 `PRAGMA user_version` 保证只执行一次。
 - 已知技术债：Caddy TLS 仅文档就绪，未在真实域名生产演练。

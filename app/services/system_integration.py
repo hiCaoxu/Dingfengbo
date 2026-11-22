@@ -42,7 +42,8 @@ def is_autostart_enabled() -> bool:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY) as key:
             value, _ = winreg.QueryValueEx(key, _APP_NAME)
             return bool(str(value).strip())
-    except FileNotFoundError:
+    except FileNotFoundError as exc:
+        logger.debug("is_autostart_enabled：忽略 %s", type(exc).__name__)
         return False
     except OSError:
         logger.debug("读取开机自启设置失败", exc_info=True)
@@ -64,7 +65,8 @@ def set_autostart(enabled: bool) -> tuple[bool, str]:
                 return True, "已设置开机自启"
             try:
                 winreg.DeleteValue(key, _APP_NAME)
-            except FileNotFoundError:
+            except FileNotFoundError as exc:
+                logger.debug("set_autostart：忽略 %s", type(exc).__name__)
                 pass
             return True, "已关闭开机自启"
     except OSError as exc:
@@ -79,7 +81,8 @@ def tray_available() -> bool:
     try:
         import pystray  # noqa: F401
         from PIL import Image  # noqa: F401
-    except Exception:
+    except Exception as exc:
+        logger.info("托盘不可用，关闭窗口将直接退出：%s", type(exc).__name__)
         return False
     return True
 

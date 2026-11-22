@@ -183,7 +183,8 @@ def open_data_io_dialog(page: ft.Page, refresh=None) -> ft.AlertDialog:
             finally:
                 try:
                     page.services.remove(picker)
-                except ValueError:
+                except ValueError as exc:
+                    logger.debug("open_data_io_dialog：忽略 %s", type(exc).__name__)
                     pass
             path = files[0].path if files else ""
             if not path:
