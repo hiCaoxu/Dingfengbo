@@ -6,7 +6,9 @@ import unittest
 from datetime import date
 from unittest.mock import patch
 
-_TEST_DATA_DIR = tempfile.TemporaryDirectory()
+# ignore_cleanup_errors：进程退出时 SQLite 连接池可能还握着库文件句柄，
+# Windows 下会删不掉并打出一大段 PermissionError（测试全过但看起来像失败）。
+_TEST_DATA_DIR = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
 os.environ["DINGFENGBO_DATA_DIR"] = _TEST_DATA_DIR.name
 
 from app.services.dates import parse_hours

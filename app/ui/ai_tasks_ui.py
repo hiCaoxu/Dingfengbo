@@ -170,17 +170,30 @@ def run_task_dialog(
     run()
 
 
+def _preview_value(name: str, value) -> str:
+    text = str(value).replace("\r", " ").replace("\n", " ").strip()
+    # 只把正文类字段折成一行短摘要，其它字段原样展示：用户确认的就是落库的内容，
+    # 以前整行截断到 200 字，长正文会被砍掉一半还不知道砍了什么。
+    if name in ("content", "note") and len(text) > 80:
+        return text[:80] + "…"
+    return text
+
+
+def _detail_text(draft) -> str:
+    """草稿字段摘要（含标签；正文类字段折行截短）。"""
+    parts: list[str] = []
+    for name, value in draft.fields.items():
+        if value in (None, "", "[]", False):
+            continue
+        parts.append(f"{name}={_preview_value(name, value)}")
+    return " · ".join(parts)
+
+
 def open_draft_dialog(page: ft.Page, drafts: list, on_saved=None) -> ft.AlertDialog:
     """草稿预览：逐条展示字段，确认后一次性保存并支持撤销。"""
     rows: list[ft.Control] = []
     for draft in drafts:
-        detail_parts = []
-        for name, value in draft.fields.items():
-            if value in (None, "", "[]", False):
-                continue
-            if name in ("tags",):
-                continue
-            detail_parts.append(f"{name}={value}")
+        detail = _detail_text(draft)
         rows.append(
             ft.Container(
                 ft.Column(
@@ -206,8 +219,9 @@ def open_draft_dialog(page: ft.Page, drafts: list, on_saved=None) -> ft.AlertDia
                             spacing=6,
                             vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         ),
-                        ft.Text(" · ".join(detail_parts)[:200], size=th.FONT_CAPTION,
-                                color=th.TEXT_MUTED, max_lines=2,
+                        ft.Text(detail, size=th.FONT_CAPTION,
+                                color=th.TEXT_MUTED, max_lines=3,
+                                tooltip=detail or None,
                                 overflow=ft.TextOverflow.ELLIPSIS),
                     ],
                     spacing=4,
@@ -235,6 +249,8 @@ def open_draft_dialog(page: ft.Page, drafts: list, on_saved=None) -> ft.AlertDia
             bgcolor=th.PRIMARY,
             action="撤销",
             on_action=lambda e: _undo(saved),
+            # 默认 4 秒对「刚保存完想反悔」太短：给足时间再自动消失。
+            duration=15_000,
         )
         page.snack_bar = bar
         bar.open = True

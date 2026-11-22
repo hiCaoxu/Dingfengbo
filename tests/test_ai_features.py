@@ -116,3 +116,30 @@ class ProviderPayloadTests(unittest.TestCase):
         self.assertEqual(len(captured), 2)
         self.assertEqual(captured[0]["max_tokens"], self.mod.MAX_TOKENS)
         self.assertEqual(len(created), 1, "连续两次提问应复用同一个连接池客户端")
+
+class DraftPreviewTests(unittest.TestCase):
+    """草稿预览摘要：标签要显示，长正文折成短摘要但其它字段保持完整。"""
+
+    def test_tags_and_fields_are_included(self) -> None:
+        from app.services.ai.drafts import Draft
+        from app.ui.ai_tasks_ui import _detail_text
+
+        draft = Draft(
+            "todo",
+            fields={"title": "写周报", "tags": '["工作"]', "note": "短备注", "due_date": None},
+        )
+        text = _detail_text(draft)
+        self.assertIn("title=写周报", text)
+        self.assertIn("tags=", text, "标签不该被隐藏")
+        self.assertIn("note=短备注", text)
+        self.assertNotIn("due_date", text, "空值不展示")
+
+    def test_long_content_is_folded(self) -> None:
+        from app.services.ai.drafts import Draft
+        from app.ui.ai_tasks_ui import _detail_text
+
+        long_text = "正" * 300
+        draft = Draft("note", fields={"title": "长笔记", "content": long_text})
+        text = _detail_text(draft)
+        self.assertLess(len(text), 200, "长正文应折成短摘要")
+        self.assertIn("…", text)

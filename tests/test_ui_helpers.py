@@ -1,4 +1,4 @@
-"""UI 助手组件测试：弹窗生命周期与后台查询槽。
+﻿"""UI 助手组件测试：弹窗生命周期与后台查询槽。
 
 用极简 FakePage 替代真实 Flet 页面：``run_thread``/``run_task`` 同步执行，
 使后台化与弹窗逻辑可以在无 GUI 环境下断言。
@@ -184,3 +184,25 @@ class EqualHeightRowTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class SnackDedupeTests(unittest.TestCase):
+    """同一句话 1 秒内不重复闪（自动保存与同步回调会叠在一起）。"""
+
+    def setUp(self) -> None:
+        from app.ui import widgets
+
+        self.widgets = widgets
+        widgets._last_snack = ("", 0.0)
+        self.page = FakePage()
+
+    def test_same_message_is_deduped(self) -> None:
+        self.widgets.snack(self.page, "已保存", "#000000")
+        first = self.page.snack_bar
+        self.widgets.snack(self.page, "已保存", "#000000")
+        self.assertIs(self.page.snack_bar, first, "重复提示不应重建 snackbar")
+
+    def test_different_message_replaces(self) -> None:
+        self.widgets.snack(self.page, "已保存", "#000000")
+        first = self.page.snack_bar
+        self.widgets.snack(self.page, "同步失败", "#ff0000")
+        self.assertIsNot(self.page.snack_bar, first)

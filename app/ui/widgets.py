@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 
 import flet as ft
@@ -457,7 +458,20 @@ def divider() -> ft.Container:
     return ft.Container(height=1, bgcolor=th.DIVIDER)
 
 
+_last_snack: tuple[str, float] = ("", 0.0)
+
+
 def snack(page: ft.Page, message: str, color: str = th.TEXT) -> None:
+    """底部提示条。
+
+    同一句话在 1 秒内重复调用直接忽略：自动保存/同步回调叠在一起时会连闪两条
+    一模一样的提示，看起来像界面在抖。不同内容仍然立即替换（Flet 只有一个 snack 槽）。
+    """
+    global _last_snack
+    now = time.monotonic()
+    if message == _last_snack[0] and now - _last_snack[1] < 1.0:
+        return
+    _last_snack = (message, now)
     page.snack_bar = ft.SnackBar(ft.Text(message, color=th.ON_PRIMARY, size=12), bgcolor=color)
     page.snack_bar.open = True
     page.update()

@@ -17,4 +17,12 @@ os.environ["DINGFENGBO_DATA_DIR"] = _TMP_DIR
 
 @atexit.register
 def _cleanup() -> None:
+    # 先释放引擎的连接池再删目录：Windows 上还有打开的句柄时 rmtree 会报
+    # WinError 32，退出码变成 1（测试全过但看起来像失败）。
+    try:
+        from app.db.session import engine
+
+        engine.dispose()
+    except Exception:
+        pass
     shutil.rmtree(_TMP_DIR, ignore_errors=True)
