@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
@@ -12,6 +13,46 @@ from sqlalchemy import Connection, Engine, Integer, func, inspect, select, text,
 from .models import SYNC_MODELS, Base
 
 logger = logging.getLogger(__name__)
+
+# 金额列（元 → 整数分）的一次性迁移。
+# 用 SQLite 自带的 ``PRAGMA user_version`` 记录是否已迁移：只看数值无法区分
+# 「100 元」和「100 分」，必须有一个显式标记，否则重复换算就是灾难。
+MONEY_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("transactions", "amount"),
+    ("accounts", "initial_balance"),
+    ("budgets", "amount"),
+    ("recurring_rules", "amount"),
+)
+MONEY_SCHEMA_VERSION = 1
+
+
+def _money_schema_version(connection: Connection) -> int:
+    return int(connection.exec_driver_sql("PRAGMA user_version").scalar() or 0)
+
+
+def _migrate_money_to_cents(connection: Connection) -> None:
+    """把历史「元」的浮点金额就地换算成整数分（幂等，只执行一次）。
+
+    必须在任何 ORM 写入之前运行：``MoneyCents`` 类型装饰器会在写入时把元乘 100，
+    如果先写入再迁移，这批数据会被乘两次。
+    """
+    if _money_schema_version(connection) >= MONEY_SCHEMA_VERSION:
+        return
+    existing = set(inspect(connection).get_table_names())
+    converted = 0
+    for table, column in MONEY_COLUMNS:
+        if table not in existing:
+            continue
+        columns = {item["name"] for item in inspect(connection).get_columns(table)}
+        if column not in columns:
+            continue
+        result = connection.exec_driver_sql(
+            f'UPDATE "{table}" SET "{column}" = ROUND("{column}" * 100)'
+        )
+        converted += result.rowcount or 0
+    connection.exec_driver_sql(f"PRAGMA user_version = {MONEY_SCHEMA_VERSION}")
+    if converted:
+        logger.info("金额已迁移为整数分：%d 行", converted)
 
 
 def sequence_value(connection: Connection) -> int:
@@ -193,6 +234,8 @@ def _ensure_indexes(connection: Connection) -> None:
 def initialize_schema(engine: Engine) -> None:
     """创建新表；旧版整数主键库在一个事务内迁移为 UUID。"""
     with engine.begin() as connection:
+        # 金额单位迁移必须最先做：后续所有写入都会经过 MoneyCents（元 → 分）。
+        _migrate_money_to_cents(connection)
         inspector = inspect(connection)
         existing = set(inspector.get_table_names())
         legacy_tables = [
@@ -241,6 +284,13 @@ def initialize_schema(engine: Engine) -> None:
                     if column.name != "id" and column.name in row
                 }
                 values["id"] = new_id
+                # 金额列上面已经换算成整数分；再走 ORM 绑定会被再乘 100，
+                # 因此先换回「元」交给类型装饰器重新换算。
+                for money_field in ("amount", "initial_balance"):
+                    if values.get(money_field) is not None:
+                        values[money_field] = float(
+                            Decimal(str(values[money_field])) / 100
+                        )
                 if table == "transactions":
                     old_account_id = values["account_id"]
                     values["account_id"] = account_ids.get(

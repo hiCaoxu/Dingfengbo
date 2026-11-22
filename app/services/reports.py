@@ -32,7 +32,7 @@ from ..db.models import (
 from ..db.session import session_scope
 from .dates import local_date_from_utc
 from .finance import money
-from .money import ZERO, quantize, to_float, total
+from .money import ZERO, from_cents, quantize, to_float, total
 
 PERIODS = {"week": "本周", "month": "本月", "year": "本年"}
 

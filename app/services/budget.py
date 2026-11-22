@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from ..db.models import Account, Budget, RecurringRule, Transaction
 from ..db.repo import create, update
 from ..db.session import session_scope
-from .money import ZERO, is_over, percent, quantize, to_float, total
+from .money import ZERO, from_cents, is_over, percent, quantize, to_float, total
 
 PERIOD_LABELS = {"month": "每月", "week": "每周"}
 MAX_CATCH_UP = 12  # 一次最多补生成 12 期，避免长期未启动后爆量
@@ -103,6 +103,7 @@ def spending_by_category(session: Session, start: date, end: date) -> dict[str, 
         )
         .group_by(Transaction.category)
     )
+    # SUM 拿到的是整数分，必须换算回元
     return {str(category or "其他"): to_float(total) for category, total in rows}
 
 

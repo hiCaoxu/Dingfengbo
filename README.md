@@ -123,7 +123,8 @@ tests/               31 个测试文件
 
 - 主题用模块级色板 + 运行时 `set_mode()`，界面统一按 `theme.X` 读色；静态 `from theme import X` 会把导入时的值钉死，切主题失效。
 - 界面文案新增生僻字会影响字体子集，改完跑 `python packaging\subset_font.py`（见下）。
-- 已知技术债：金额仍用 `float` + 入库取两位小数（未迁 `Decimal`，暂无分位误差故障）；Caddy TLS 仅文档就绪，未在真实域名生产演练。
+- 金额：库里存**整数分**（`models.MoneyCents` 类型装饰器，写元读元），同步载荷与 CSV/JSON 导出仍是「元」——旧客户端按元推送不会被读成 1/100；`app/services/money.py` 统一 Decimal 舍入与比较。迁移由 `PRAGMA user_version` 保证只执行一次。
+- 已知技术债：Caddy TLS 仅文档就绪，未在真实域名生产演练。
 
 ## 打包发布
 
