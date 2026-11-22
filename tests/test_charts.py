@@ -5,7 +5,7 @@ from __future__ import annotations
 import struct
 import unittest
 
-from app.services.charts import _resolve_ylim, bar_chart, line_chart
+from app.services.charts import _resolve_bar_ylim, _resolve_ylim, bar_chart, line_chart
 
 
 def _png_size(data: bytes) -> tuple[int, int]:
@@ -32,16 +32,29 @@ class ChartSizeTests(unittest.TestCase):
 
 class BarYRangeTests(unittest.TestCase):
     def test_bar_chart_supports_fixed_y_range(self) -> None:
-        """睡眠柱状图固定 5-12：尺寸稳定，且不同范围不会命中同一张缓存图。"""
-        data = bar_chart(["11-20", "11-21"], [7.2, 0.0], "睡眠时长", y_range=(5, 12))
+        """睡眠柱状图固定 6-10：尺寸稳定，且不同范围不会命中同一张缓存图。"""
+        data = bar_chart(["11-20", "11-21"], [7.2, 0.0], "睡眠时长", y_range=(6, 10))
         self.assertEqual(
             _png_size(data),
-            _png_size(bar_chart(["11-20"], [7.2], "睡眠时长", y_range=(5, 12))),
+            _png_size(bar_chart(["11-20"], [7.2], "睡眠时长", y_range=(6, 10))),
         )
         self.assertNotEqual(
             data,
             bar_chart(["11-20", "11-21"], [7.2, 0.0], "睡眠时长", y_range=(0, 12)),
         )
+
+    def test_zeros_do_not_pull_the_axis_down(self) -> None:
+        """0 表示当天没记录，不能把固定 6-10 的轴拉回 0。"""
+        self.assertEqual(_resolve_bar_ylim([7.2, 0.0, 0.0], (6, 10)), (6.0, 10.0))
+
+    def test_real_outliers_expand_the_axis(self) -> None:
+        # 睡了 4.5 小时：轴下探到 4，柱子不会整根消失
+        self.assertEqual(_resolve_bar_ylim([4.5, 7.2], (6, 10)), (4.0, 10.0))
+        # 睡了 11.3 小时：轴上探到 12
+        self.assertEqual(_resolve_bar_ylim([7.2, 11.3], (6, 10)), (6.0, 12.0))
+
+    def test_none_means_auto(self) -> None:
+        self.assertIsNone(_resolve_bar_ylim([1.0], None))
 
 
 class YRangeTests(unittest.TestCase):

@@ -144,6 +144,27 @@ def line_chart(
     return data
 
 
+def _resolve_bar_ylim(
+    values: list[float], y_range: tuple[float, float] | None
+) -> tuple[float, float] | None:
+    """柱状图纵轴：以给定范围为基准，数据越界时扩展，但**忽略 0**。
+
+    柱状图里 0 表示「当天无记录」，把它算进范围会把固定的 6-10 轴拉回 0，
+    整张图被无记录的日子压扁；而真实数据越界（例如睡了 4.5 小时）必须扩展，
+    否则那根柱子完全落在轴外，看起来像当天没记录。
+    """
+    if y_range is None:
+        return None
+    low, high = float(y_range[0]), float(y_range[1])
+    nonzero = [float(value) for value in values if value]
+    if nonzero:
+        low = min(low, math.floor(min(nonzero)))
+        high = max(high, math.ceil(max(nonzero)))
+    if high <= low:
+        high = low + 1
+    return low, high
+
+
 def bar_chart(
     labels: list[str],
     values: list[float],
@@ -157,8 +178,8 @@ def bar_chart(
     画布尺寸与横轴范围都固定：柱子数量变化时单根柱子的宽度不变，
     四张图在 2×2 网格里也保持同一像素尺寸。
 
-    ``y_range`` 为**严格**纵轴范围（不做越界扩展）：柱状图里 0 代表「当天无记录」，
-    落在轴外正好不显示；若数据超出范围也按范围裁切，保持刻度稳定可比。
+    ``y_range`` 为固定基准纵轴：范围内的值照常显示，超出范围的真实数据会把轴撑开
+    （忽略 0——0 代表「当天无记录」，不该影响刻度）。
     """
     key_values = tuple(float(value) for value in values)
     key = (cache_key, title, color, y_range) if cache_key is not None else (
@@ -176,8 +197,9 @@ def bar_chart(
         # 固定横轴边界：否则只有几天数据时 matplotlib 会把少数柱子拉宽填满画布。
         ax.set_xlim(-0.5, max(len(key_values), 1) - 0.5)
         _style(ax)
-        if y_range is not None:
-            ax.set_ylim(float(y_range[0]), float(y_range[1]))
+        bar_ylim = _resolve_bar_ylim(list(key_values), y_range)
+        if bar_ylim is not None:
+            ax.set_ylim(*bar_ylim)
         if len(labels) > 7:
             ax.tick_params(axis="x", labelrotation=45, labelsize=th.FONT_CAPTION)
         if title:

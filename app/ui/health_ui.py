@@ -292,19 +292,20 @@ def _chart_grid(page: ft.Page, data: dict) -> ft.Control:
                 [{"name": "体重 kg", "values": [w.kg for w in weights[-14:]], "color": th.PRIMARY, "fill": True}],
                 "体重趋势",
                 cache_key=_key(weights),
-                y_range=(50, 70),
+                y_range=(56, 66),
             ),
             width=width, height=height, fit=ft.BoxFit.CONTAIN,
         )
         sleep_slot.content = ft.Image(
-            # 睡眠改成柱状图：每天一根，无记录的天为 0（固定 5-12 轴下不可见）。
+            # 睡眠柱状图：纵轴固定 6-10 小时；没有记录的天为 0（不参与轴范围计算），
+            # 真实数据越界（如 4.5 小时）会把轴撑开，不会整根柱子消失。
             src=bar_chart(
                 sleep_labels,
                 sleep_hours,
                 "睡眠时长",
                 th.ACCENT,
                 cache_key=_key(sleeps),
-                y_range=(5, 12),
+                y_range=(6, 10),
             ),
             width=width, height=height, fit=ft.BoxFit.CONTAIN,
         )
