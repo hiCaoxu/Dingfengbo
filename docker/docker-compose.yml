@@ -3,6 +3,9 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      args:
+        # deploy.ps1 会探测可用镜像源后传进来（缺省用官方 PyPI）
+        PIP_INDEX: ${DINGFENGBO_PIP_INDEX:-https://pypi.org/simple}
     # tag 由 deploy.ps1 按 app/__init__.py 的 __version__ 传入，避免镜像名与版本脱节
     image: ${DINGFENGBO_SYNC_IMAGE:-dingfengbo-sync:dev}
     container_name: dingfengbo-sync

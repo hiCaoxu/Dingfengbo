@@ -9,7 +9,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY requirements-server.txt .
-RUN pip install --no-cache-dir -r requirements-server.txt
+# 依赖已锁定（requirements-server.txt）。构建机到 PyPI 的网络可能不稳：
+# 索引可用 build-arg 切换（海外/国内镜像），并给够重试与超时。
+ARG PIP_INDEX=https://pypi.org/simple
+RUN pip install --no-cache-dir --retries 10 --timeout 120 \
+    -i "$PIP_INDEX" -r requirements-server.txt
 
 COPY app ./app
 COPY server ./server

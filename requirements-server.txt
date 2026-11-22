@@ -1,9 +1,9 @@
 # 同步服务端最小依赖（Docker 镜像使用）
-# 精确锁定：镜像要可复现，服务端也没有「兼容旧 flet」这类放宽的理由。
-# 升级时改这里 + 跑一遍 docker/deploy.ps1，能明确知道线上跑的是哪一版。
-fastapi==0.163.1
+# 精确锁定到**线上容器实际运行的版本**：镜像可复现，也能一眼看出线上是哪一版。
+# 升级流程：改这里的版本 → docker/deploy.ps1 重建 → 用 /api/health 与 sync check 冒烟。
+fastapi==0.165.0
 uvicorn[standard]==0.54.0
 SQLAlchemy==2.1.9
-pydantic==2.14.3
+pydantic==2.14.4
 # /api/upload 接收 multipart
 python-multipart==0.0.34

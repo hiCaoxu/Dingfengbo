@@ -95,6 +95,14 @@ $deploy = @'
 set -e
 cd __REMOTE_DIR__
 export DINGFENGBO_SYNC_IMAGE=dingfengbo-sync:__VERSION__
+# Pick a reachable PyPI index: the official one occasionally times out from CN hosts
+# (observed: ReadTimeoutError on files.pythonhosted.org), which fails the whole build.
+if [ -z "$DINGFENGBO_PIP_INDEX" ]; then
+  if curl -m 5 -fsI https://pypi.tuna.tsinghua.edu.cn/simple/ >/dev/null 2>&1; then
+    export DINGFENGBO_PIP_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
+  fi
+fi
+echo "pip index: ${DINGFENGBO_PIP_INDEX:-https://pypi.org/simple}"
 docker compose -f docker/docker-compose.yml up -d --build
 for i in $(seq 1 30); do
   curl -fsS http://127.0.0.1:8000/api/health >/dev/null 2>&1 && echo health-ready && break
