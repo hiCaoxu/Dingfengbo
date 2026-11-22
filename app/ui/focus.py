@@ -15,6 +15,7 @@ from .. import theme as th
 from ..icons import ACTIONS, ico
 from ..services.finance import money
 from ..services.habits import check_in
+from ..services.todo_views import priority_label
 from .widgets import card, empty, equal_height_row, primary_button, snack
 
 logger = logging.getLogger(__name__)
@@ -52,7 +53,7 @@ def _todo_row(page: ft.Page, refresh, item, toggle) -> ft.Control:
                     ft.Text(
                         (item.due_date.isoformat() if item.due_date else "无截止日")
                         + (f" {item.due_time}" if item.due_time else "")
-                        + (f" · {item.priority}" if item.priority else ""),
+                        + (f" · {priority_label(item.priority)}" if item.priority else ""),
                         size=th.FONT_CAPTION,
                         color=th.DANGER if overdue else th.TEXT_MUTED,
                         max_lines=1,

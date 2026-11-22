@@ -2,8 +2,10 @@
 
 界面只负责渲染，日期/象限的判定放在这里，便于单测与保持一致口径：
 
-- 未手选象限时，按「重要 = 优先级为高」「紧急 = 到期日在今天或明天（含逾期）」推导；
-- 手选象限（``Todo.quadrant`` 为 q1..q4）优先于推导，用于用户显式调整。
+- 四象限**只按自动规则推导**：重要 = 优先级为高/中，紧急 = 到期日在今天/明天或已逾期；
+  早期「手选象限」覆盖已废弃（同一任务在不同设备上会因手选值不同而归类不一致）；
+- 优先级历史上有中文（高/中/低）与英文码（high/medium/low）两种写法，
+  统一用 :func:`normalize_priority` 收敛，写入只存英文码。
 """
 
 from __future__ import annotations
@@ -27,24 +29,49 @@ QUADRANTS: tuple[tuple[str, str, str], ...] = (
 QUADRANT_KEYS = tuple(key for key, _label, _hint in QUADRANTS)
 QUADRANT_LABELS = {key: label for key, label, _hint in QUADRANTS}
 QUADRANT_HINTS = {key: hint for key, _label, hint in QUADRANTS}
-LABEL_TO_QUADRANT = {label: key for key, label, _hint in QUADRANTS}
-AUTO_LABEL = "自动（按优先级与到期）"
 WEEK_LABELS = ("一", "二", "三", "四", "五", "六", "日")
+
+# 优先级：库内规范值是英文码（与同步/搜索/AI 草稿一致），界面展示中文。
+PRIORITY_LABELS = {"": "", "low": "低", "medium": "中", "high": "高"}
+PRIORITY_BY_LABEL = {"高": "high", "中": "medium", "低": "low"}
+_IMPORTANT_PRIORITIES = ("high", "medium")
+
+
+def normalize_priority(value: Any) -> str:
+    """把任意写法的优先级收敛成规范码（high / medium / low / 空）。
+
+    历史遗留：任务弹窗曾直接保存「高/中/低」，而象限推导与「高优先级」搜索只认
+    英文码，导致弹窗里选「高」的任务永远被判成"不重要"。写入与读取都先过这里。
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    lowered = text.lower()
+    if lowered in PRIORITY_LABELS and lowered:
+        return lowered
+    if text in PRIORITY_BY_LABEL:
+        return PRIORITY_BY_LABEL[text]
+    return lowered if lowered in _IMPORTANT_PRIORITIES or lowered == "low" else ""
+
+
+def priority_label(value: Any) -> str:
+    """规范码 → 中文标签（未知/空返回空串）。"""
+    return PRIORITY_LABELS.get(normalize_priority(value), "")
 
 
 def quadrant_of(item: Any, today: date | None = None) -> str:
-    """返回任务所在象限；``item`` 可以是 Todo 对象或同名字段字典。"""
+    """返回任务所在象限；``item`` 可以是 Todo 对象或同名字段字典。
+
+    只做自动推导：``Todo.quadrant`` 字段仅为兼容历史数据保留，不再参与判断。
+    """
 
     def field(name: str, default=None):
         if isinstance(item, dict):
             return item.get(name, default)
         return getattr(item, name, default)
 
-    manual = str(field("quadrant", "") or "")
-    if manual in QUADRANT_LABELS:
-        return manual
     today = today or date.today()
-    important = str(field("priority", "") or "") in ("high", "medium")
+    important = normalize_priority(field("priority", "")) in _IMPORTANT_PRIORITIES
     due = field("due_date")
     urgent = bool(due and due <= today + timedelta(days=URGENT_WINDOW_DAYS))
     if important and urgent:

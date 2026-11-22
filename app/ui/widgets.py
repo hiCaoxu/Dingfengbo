@@ -534,11 +534,29 @@ def form_field(label: str, value: str = "", multiline: bool = False, width: int 
     )
 
 
-def dropdown(label: str, options: list[str], value: str | None = None, width: int | None = None) -> ft.Dropdown:
+def dropdown(
+    label: str,
+    options: list,
+    value: str | None = None,
+    width: int | None = None,
+) -> ft.Dropdown:
+    """下拉框。
+
+    ``options`` 既可以传字符串（key 与显示文字相同），也可以直接传
+    ``ft.dropdown.Option`` —— 后者用于「值存英文码、界面显示中文」的场景
+    （如优先级存 high、显示「高」）。
+    """
+    items = [
+        option if isinstance(option, ft.dropdown.Option) else ft.dropdown.Option(option)
+        for option in options
+    ]
+    default: str | None = None
+    if items:
+        default = items[0].key if isinstance(items[0], ft.dropdown.Option) else None
     return ft.Dropdown(
         label=label,
-        value=value or (options[0] if options else None),
-        options=[ft.dropdown.Option(option) for option in options],
+        value=value or default,
+        options=items,
         width=width,
         border_color=th.DIVIDER,
         focused_border_color=th.PRIMARY,

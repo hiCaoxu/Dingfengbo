@@ -47,7 +47,7 @@ from ..db.session import session_scope
 from ..icons import ico
 from ..services.ai.client import AIConfigError, chat
 from ..services.ai.provider import AIError
-from ..services.todo_views import AUTO_LABEL, LABEL_TO_QUADRANT, QUADRANT_LABELS
+from ..services.todo_views import normalize_priority
 from ..services.dates import (
     diary_title,
     lunar_to_gregorian,
@@ -155,15 +155,18 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
         width=270,
     )
     due_time = form_field("到期时间 HH:MM（可选）", todo.due_time if todo else "", width=160)
-    priority = dropdown("优先级", ["", "低", "中", "高"], todo.priority if todo and todo.priority else "", width=130)
-    tags = form_field("标签（逗号分隔）", tags_text(todo.tags) if todo else "", width=220)
-    # 四象限：留空按「高优先级=重要、今明到期/逾期=紧急」自动归类
-    quadrant = dropdown(
-        "四象限",
-        [AUTO_LABEL, *QUADRANT_LABELS.values()],
-        QUADRANT_LABELS.get((todo.quadrant if todo else "") or "", AUTO_LABEL),
-        width=200,
+    # 优先级：库里存英文码，界面显示中文（normalize_priority 兼容历史的「高/中/低」）
+    priority = dropdown(
+        "优先级",
+        [
+            ft.dropdown.Option(key=code, text=label)
+            for code, label in (("", "无"), ("low", "低"), ("medium", "中"), ("high", "高"))
+        ],
+        normalize_priority(todo.priority if todo else ""),
+        width=130,
     )
+    tags = form_field("标签（逗号分隔）", tags_text(todo.tags) if todo else "", width=220)
+    # 四象限不再手选：统一按「优先级高/中 = 重要，今明到期/逾期 = 紧急」自动推导。
 
     cfg = normalize_config(parse_config(todo.repeat_config)) if todo else {}
     repeat = dropdown("循环规则", RULE_OPTIONS, REPEAT_LABELS.get(todo.repeat_rule, "不循环") if todo else "不循环", width=160)
@@ -488,8 +491,9 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
             remind_days=remind_days_json,
             remind_days_before=days_before,
             remind_time=remind_time_value,
-            priority=priority.value or "",
-            quadrant=LABEL_TO_QUADRANT.get(quadrant.value or "", ""),
+            priority=normalize_priority(priority.value),
+            # 四象限由优先级与到期日自动推导，手选值不再写入（列保留仅作兼容）。
+            quadrant="",
         )
         save_record(Todo, todo.id if todo else None, fields)
         mark_pending_write()
@@ -501,8 +505,8 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
                 title,
                 note,
                 ft.Row([due_type, due, due_time], spacing=12),
-                ft.Row([priority, quadrant], spacing=12),
-                ft.Row([tags, repeat], spacing=12),
+                ft.Row([priority, tags], spacing=12),
+                repeat,
                 custom_panel,
                 ft.Column(
                     [

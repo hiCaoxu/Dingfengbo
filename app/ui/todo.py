@@ -30,6 +30,8 @@ from ..services.todo_views import (
     counts_by_date,
     group_by_quadrant,
     month_grid,
+    normalize_priority,
+    priority_label,
     quadrant_counts,
     quadrant_of,
     shift_month,
@@ -110,7 +112,7 @@ def toggle(page: ft.Page, todo_id: str, refresh) -> None:
                         remind_days=item.remind_days,
                         remind_days_before=item.remind_days_before,
                         remind_time=item.remind_time,
-                        priority=item.priority, quadrant=item.quadrant,
+                        priority=normalize_priority(item.priority), quadrant="",
                         completed=False, is_template=False,
                     )
                 elif existing.is_deleted:
@@ -422,7 +424,7 @@ def _row_for(page, refresh, item: Todo, today: date, overdue: bool) -> ft.Contro
     if item.pomodoro_count:
         extras.append(f"番茄 {item.pomodoro_count}")
     if item.priority:
-        extras.append(item.priority)
+        extras.append(priority_label(item.priority))
     if tags_text(item.tags):
         extras.append(tags_text(item.tags))
     quadrant = quadrant_of(item, today)

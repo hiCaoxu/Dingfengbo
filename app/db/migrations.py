@@ -27,6 +27,10 @@ MONEY_COLUMNS: tuple[tuple[str, str], ...] = (
 MONEY_SCHEMA_VERSION = 1
 TIMESTAMP_SCHEMA_VERSION = 2
 TEMPLATE_FLAG_SCHEMA_VERSION = 3
+TODO_FIELD_SCHEMA_VERSION = 4
+
+# 历史上任务弹窗直接存了中文优先级，而象限推导/搜索只认英文码。
+_PRIORITY_CODES = (("高", "high"), ("中", "medium"), ("低", "low"))
 
 
 def _schema_version(connection: Connection) -> int:
@@ -288,6 +292,45 @@ def _repair_template_flags(connection: Connection) -> None:
         logger.info("已修正 %d 条状态矛盾的待办（is_template 已复位）", fixed)
 
 
+def _normalize_todo_fields(connection: Connection) -> None:
+    """把待办的优先级收敛成英文码，并清空已废弃的手选象限。
+
+    历史弹窗把「高/中/低」直接写进 ``todos.priority``，而四象限推导与
+    「高优先级」搜索只认 high/medium/low，导致这些任务永远被判成"不重要"。
+    改动的行标脏重新同步，避免别的设备再从云端把中文值拉回来。
+    """
+    if _schema_version(connection) >= TODO_FIELD_SCHEMA_VERSION:
+        return
+    existing = set(inspect(connection).get_table_names())
+    fixed = 0
+    if "todos" in existing:
+        columns = {item["name"] for item in inspect(connection).get_columns("todos")}
+        stamp = utcnow().isoformat(sep=" ")
+        if "priority" in columns:
+            for label, code in _PRIORITY_CODES:
+                result = connection.execute(
+                    text(
+                        'UPDATE "todos" SET "priority" = :code, "sync_status" = \'pending\', '
+                        '"updated_at" = :now WHERE "priority" = :label'
+                    ),
+                    {"code": code, "label": label, "now": stamp},
+                )
+                fixed += result.rowcount or 0
+        if "quadrant" in columns:
+            # 手选象限已废弃：清空后完全由自动规则推导，避免多端归类不一致。
+            result = connection.execute(
+                text(
+                    'UPDATE "todos" SET "quadrant" = \'\', "sync_status" = \'pending\', '
+                    '"updated_at" = :now WHERE "quadrant" != \'\''
+                ),
+                {"now": stamp},
+            )
+            fixed += result.rowcount or 0
+    connection.exec_driver_sql(f"PRAGMA user_version = {TODO_FIELD_SCHEMA_VERSION}")
+    if fixed:
+        logger.info("已归一 %d 条待办字段（优先级英文码 / 清空手选象限）", fixed)
+
+
 def initialize_schema(engine: Engine) -> None:
     """创建新表；旧版整数主键库在一个事务内迁移为 UUID。"""
     with engine.begin() as connection:
@@ -295,6 +338,7 @@ def initialize_schema(engine: Engine) -> None:
         _migrate_money_to_cents(connection)
         _normalize_timestamp_inversions(connection)
         _repair_template_flags(connection)
+        _normalize_todo_fields(connection)
         inspector = inspect(connection)
         existing = set(inspector.get_table_names())
         legacy_tables = [

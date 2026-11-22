@@ -10,13 +10,12 @@ from app.db.models import Todo
 from app.db.repo import create
 from app.db.session import session_scope
 from app.services.todo_views import (
-    AUTO_LABEL,
-    LABEL_TO_QUADRANT,
-    QUADRANT_KEYS,
     QUADRANT_LABELS,
     counts_by_date,
     group_by_quadrant,
     month_grid,
+    normalize_priority,
+    priority_label,
     quadrant_counts,
     quadrant_of,
     shift_month,
@@ -91,18 +90,36 @@ class QuadrantTests(unittest.TestCase):
             "q2",
         )
 
-    def test_manual_override_wins(self) -> None:
+    def test_manual_quadrant_is_ignored(self) -> None:
+        """手选象限已废弃：同一任务只按优先级与到期日自动归类。"""
         item = self.todo(priority="high", due_date=self.today, quadrant="q4")
-        self.assertEqual(quadrant_of(item, self.today), "q4")
-        # 手选的非法值退回自动推导
-        item["quadrant"] = "q9"
         self.assertEqual(quadrant_of(item, self.today), "q1")
+        item["quadrant"] = "q2"
+        self.assertEqual(quadrant_of(item, self.today), "q1")
+        # 中文优先级同样参与判断（历史数据）
+        item = self.todo(priority="高", due_date=None, quadrant="")
+        self.assertEqual(quadrant_of(item, self.today), "q2")
 
-    def test_label_mapping_round_trip(self) -> None:
-        for key, label in QUADRANT_LABELS.items():
-            self.assertIn(key, QUADRANT_KEYS)
-            self.assertEqual(LABEL_TO_QUADRANT[label], key)
-        self.assertNotIn(AUTO_LABEL, LABEL_TO_QUADRANT)
+
+class PriorityNormalizeTests(unittest.TestCase):
+    def test_chinese_labels_become_codes(self) -> None:
+        self.assertEqual(normalize_priority("高"), "high")
+        self.assertEqual(normalize_priority("中"), "medium")
+        self.assertEqual(normalize_priority("低"), "low")
+
+    def test_empty_and_unknown_fall_back_to_empty(self) -> None:
+        self.assertEqual(normalize_priority(""), "")
+        self.assertEqual(normalize_priority(None), "")
+        self.assertEqual(normalize_priority("很高"), "")
+
+    def test_codes_are_case_insensitive(self) -> None:
+        self.assertEqual(normalize_priority("HIGH"), "high")
+        self.assertEqual(normalize_priority("medium"), "medium")
+
+    def test_label_round_trip(self) -> None:
+        for code, label in (("high", "高"), ("medium", "中"), ("low", "低")):
+            self.assertEqual(priority_label(code), label)
+            self.assertEqual(normalize_priority(priority_label(code)), code)
 
 
 class CountTests(unittest.TestCase):
@@ -149,12 +166,51 @@ class TodoModelTests(unittest.TestCase):
             todo = create(session, Todo, title="新任务")
             self.assertEqual(todo.quadrant, "")
 
-    def test_quadrant_persists(self) -> None:
+    def test_manual_quadrant_value_does_not_affect_classification(self) -> None:
+        """列里残留的手选值不影响归类：无到期日 + 高优先级 → 仍是 q2。"""
         with session_scope() as session:
-            todo = create(session, Todo, title="重要任务", priority="high", quadrant="q2")
+            todo = create(session, Todo, title="重要任务", priority="high", quadrant="q4")
             todo_id = todo.id
         with session_scope() as session:
-            self.assertEqual(session.get(Todo, todo_id).quadrant, "q2")
+            item = session.get(Todo, todo_id)
+            self.assertEqual(item.quadrant, "q4")  # 列仍在（兼容历史数据）
+        self.assertEqual(quadrant_of(item, date.today()), "q2")  # 但不参与判断
+
+
+class TodoFieldMigrationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        reset_db()
+
+    def test_chinese_priority_and_manual_quadrant_are_normalized(self) -> None:
+        from app.db.migrations import initialize_schema
+        from app.db.session import engine
+
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                """
+                INSERT INTO todos
+                    (id, owner_id, created_at, updated_at, is_deleted, sync_status, sync_seq,
+                     title, note, due_date, due_time, tags, lunar_reminder, repeat_rule,
+                     repeat_config, priority, quadrant, remind_days, remind_days_before,
+                     remind_time, pomodoro_count, completed, completed_at, is_template)
+                VALUES
+                    ('legacy-pri', 'local', '2026-01-01 00:00:00', '2026-01-01 00:00:00',
+                     0, 'clean', 0, '历史优先级', '', NULL, '', '[]', '', 'none',
+                     '', '高', 'q4', '[]', -1, '', 0, 0, NULL, 0)
+                """
+            )
+            connection.exec_driver_sql("PRAGMA user_version = 3")
+
+        initialize_schema(engine)
+        with engine.connect() as connection:
+            priority, quadrant, sync_status = connection.exec_driver_sql(
+                "SELECT priority, quadrant, sync_status FROM todos WHERE id = 'legacy-pri'"
+            ).fetchone()
+            version = int(connection.exec_driver_sql("PRAGMA user_version").scalar() or 0)
+        self.assertEqual(priority, "high")
+        self.assertEqual(quadrant, "")
+        self.assertEqual(sync_status, "pending")
+        self.assertGreaterEqual(version, 4)
 
 
 class ModuleMergeTests(unittest.TestCase):
