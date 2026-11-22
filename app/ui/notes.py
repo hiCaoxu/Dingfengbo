@@ -17,6 +17,7 @@ from ..services.markdown import highlight_lines, inline_spans, parse
 from ..services.sync import mark_pending_write
 from .. import theme as th
 from .async_utils import background_section
+from . import autosave
 from .forms import tags_text
 from .state import state
 from .uploads import upload_button
@@ -44,12 +45,9 @@ _preview_timer: threading.Timer | None = None
 _preview_generation = 0
 
 # 自动保存：编辑页原先只在 on_blur 落库，输入期间若页面被重建（同步完成会整页刷新）
-# 或用 Ctrl+W 关闭窗口，未失焦的内容就会丢。这里按停顿自动落库。
+# 或用 Ctrl+W 关闭窗口，未失焦的内容就会丢。这里按停顿自动落库，
+# 调度交给 autosave 状态机（版本化快照 + 串行写库，避免 Timer 与 UI 互相清 pending）。
 _AUTOSAVE_DEBOUNCE_MS = 700
-_autosave_timer: threading.Timer | None = None
-# 待落库的编辑回调。重建编辑页时必须先 flush 再 cancel：
-# 只 cancel 等于把最后一次输入连同唯一的写库机会一起丢掉。
-_pending_autosave = None
 
 
 def _cancel_preview_timer() -> None:
@@ -59,23 +57,9 @@ def _cancel_preview_timer() -> None:
         _preview_timer = None
 
 
-def _cancel_autosave_timer() -> None:
-    global _autosave_timer
-    if _autosave_timer is not None:
-        _autosave_timer.cancel()
-        _autosave_timer = None
-
-
 def _flush_autosave() -> None:
-    """立即落库待保存的编辑，再清掉定时器。"""
-    global _pending_autosave
-    pending, _pending_autosave = _pending_autosave, None
-    if pending is not None:
-        try:
-            pending()
-        except Exception:
-            logger.debug("笔记自动保存失败", exc_info=True)
-    _cancel_autosave_timer()
+    """立即落库待保存的编辑（切页 / 整页重建前调用）。"""
+    autosave.flush_now()
 
 
 def _note_snapshot(note: Note) -> tuple[str, str, str, str]:
@@ -272,19 +256,25 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
     _flush_autosave()
     note_id, title_text, content_text, tags_raw = _note_snapshot(note)
 
-    def _autosave() -> None:
+    def _write_note(key: str, snapshot: dict) -> None:
         """一次把三个字段都落库：单字段定时器会互相取消，最后一个赢，前面的改动就丢了。"""
-        save_title(note_id, title_field.value or "")
-        save_tags(note_id, tags_field.value or "")
-        save_content(note_id, source.value or "")
+        save_title(snapshot["id"], snapshot["title"])
+        save_tags(snapshot["id"], snapshot["tags"])
+        save_content(snapshot["id"], snapshot["content"])
 
     def _schedule_save() -> None:
-        global _autosave_timer, _pending_autosave
-        _pending_autosave = _autosave
-        _cancel_autosave_timer()
-        _autosave_timer = threading.Timer(_AUTOSAVE_DEBOUNCE_MS / 1000, _flush_autosave)
-        _autosave_timer.daemon = True
-        _autosave_timer.start()
+        # 快照在 UI 线程里取：Timer 触发时控件可能已被整页重建替换掉。
+        autosave.schedule(
+            "note",
+            {
+                "id": note_id,
+                "title": title_field.value or "",
+                "tags": tags_field.value or "",
+                "content": source.value or "",
+            },
+            _write_note,
+            _AUTOSAVE_DEBOUNCE_MS,
+        )
 
     title_field = ft.TextField(
         value=title_text,
@@ -294,7 +284,7 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
         color=th.TEXT,
         text_style=ft.TextStyle(size=16, color=th.TEXT, weight="bold"),
         on_change=lambda e: _schedule_save(),
-        on_blur=lambda e: save_title(note_id, e.control.value or ""),
+        on_blur=lambda e: (_schedule_save(), _flush_autosave()),
     )
     with session_scope() as session:
         # 只为标签补全取 tags 列，避免把全部正文搬进内存。
@@ -314,7 +304,7 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
             _schedule_save(),
             _on_tags_change(e.control.value or ""),
         ),
-        on_blur=lambda e: save_tags(note_id, e.control.value or ""),
+        on_blur=lambda e: (_schedule_save(), _flush_autosave()),
     )
     suggestion_row = ft.Row([], wrap=True, spacing=6)
 
@@ -379,7 +369,7 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
             _schedule_save(),
             _update_preview(e.control.value or ""),
         ),
-        on_blur=lambda e: save_content(note_id, e.control.value or ""),
+        on_blur=lambda e: (_schedule_save(), _flush_autosave()),
     )
 
     def _render_preview(value: str, generation: int) -> None:
@@ -433,10 +423,8 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
 
     def go_back(e) -> None:
         # 返回前先落库：on_blur 在控件被替换时不一定触发，别指望它。
-        _cancel_autosave_timer()
-        save_title(note_id, title_field.value or "")
-        save_tags(note_id, tags_field.value or "")
-        save_content(note_id, source.value or "")
+        _schedule_save()
+        _flush_autosave()
         on_back(e)
 
     return ft.Column(

@@ -19,6 +19,7 @@ from ..services.diary import ensure_diary
 from ..services.sync import mark_pending_write
 from .. import theme as th
 from .async_utils import background_section
+from . import autosave
 from .state import state
 from .uploads import upload_button
 from .widgets import (
@@ -39,36 +40,25 @@ _EDITOR_LOCK = threading.Lock()
 _IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)")
 
 # 自动保存：正文原先只在 on_blur 落库，而同步完成 / 切主题 / 切日期都会整页重建，
-# 控件被替换时 on_blur 不保证触发，未失焦的文字就既没落库也没了。这里按停顿落库。
+# 控件被替换时 on_blur 不保证触发，未失焦的文字就既没落库也没了。这里按停顿落库，
+# 具体调度交给 autosave 状态机（版本化快照 + 串行写库，避免 Timer 与 UI 互相清 pending）。
 _AUTOSAVE_DEBOUNCE_MS = 700
-_autosave_timer: threading.Timer | None = None
-# 待落库的最新正文：重建编辑区时先 flush，避免「取消定时器 = 丢内容」。
-_pending_save: dict | None = None
-
-
-def _cancel_autosave_timer() -> None:
-    global _autosave_timer
-    if _autosave_timer is not None:
-        _autosave_timer.cancel()
-        _autosave_timer = None
 
 
 def flush_pending_save() -> None:
     """立即把尚未写盘的正文落库（重建编辑区 / 切换日期 / 失焦前调用）。"""
-    global _pending_save
-    pending, _pending_save = _pending_save, None
-    _cancel_autosave_timer()
-    if pending:
-        save_content(pending["id"], pending["value"])
+    autosave.flush_now()
+
+
+def _diary_writer(_key: str, snapshot: dict) -> None:
+    save_content(snapshot["id"], snapshot["value"])
 
 
 def _schedule_save(diary_id: str, value: str) -> None:
-    global _autosave_timer, _pending_save
-    _pending_save = {"id": diary_id, "value": value}
-    _cancel_autosave_timer()
-    _autosave_timer = threading.Timer(_AUTOSAVE_DEBOUNCE_MS / 1000, flush_pending_save)
-    _autosave_timer.daemon = True
-    _autosave_timer.start()
+    # 快照在 UI 线程里取好：Timer 触发时控件可能已被重建。
+    autosave.schedule(
+        "diary", {"id": diary_id, "value": value}, _diary_writer, _AUTOSAVE_DEBOUNCE_MS
+    )
 
 
 def set_selected(day: date) -> None:
@@ -100,8 +90,9 @@ def _editor_data(day: date) -> dict:
 def _editor(page: ft.Page, data: dict, refresh) -> ft.Control:
     diary_id, title, content = data["id"], data["title"], data["content"]
     # 本轮重建发生在最后一个字刚输入、定时器还没触发时：以内存里的最新值为准。
-    if _pending_save and _pending_save.get("id") == diary_id:
-        content = _pending_save.get("value") or content
+    pending = autosave.pending_snapshot("diary")
+    if pending and pending.get("id") == diary_id:
+        content = pending.get("value") or content
     has_diary = bool((content or "").strip())
     # 正文占满卡片剩余高度（不再用 min_lines 撑），和卡片同高
     field = ft.TextField(
@@ -113,7 +104,10 @@ def _editor(page: ft.Page, data: dict, refresh) -> ft.Control:
         color=th.TEXT,
         text_style=ft.TextStyle(size=13, color=th.TEXT, height=1.6),
         on_change=lambda e: _schedule_save(diary_id, e.control.value or ""),
-        on_blur=lambda e: save_content(diary_id, e.control.value),
+        on_blur=lambda e: (
+            _schedule_save(diary_id, e.control.value or ""),
+            autosave.flush_now(),
+        ),
         expand=True,
     )
     def insert_image(url: str) -> None:
