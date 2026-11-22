@@ -335,8 +335,9 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
                 for c in candidates[:8]
             ]
         suggestion_row.visible = bool(suggestion_row.controls)
+        # 只刷新这一行和整页一次：suggestion_row.update() 在 Flet 老版本会顺带
+        # 触发整页重绘，两次 page.update() 叠加会让每次击键抖两下。
         suggestion_row.update()
-        page.update()
 
     def _apply_suggestion(suggestion: str) -> None:
         value = tags_field.value or ""
@@ -351,7 +352,6 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
         suggestion_row.controls = []
         suggestion_row.visible = False
         suggestion_row.update()
-        page.update()
     def _safe_render(value: str) -> ft.Control:
         """首渲染兜底：解析/构建失败时退回纯文本并记日志，别让预览区（甚至整窗）挂掉。"""
         try:

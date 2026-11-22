@@ -73,6 +73,23 @@ def counts() -> dict[str, int]:
 # ------------------------------------------------------------------ JSON
 
 
+def _iter_rows(table: str):
+    """逐行产出导出数据（生成器）。
+
+    导出不再先把整表读成 list 再 ``json.dumps`` 整串：大库上这一步会同时驻留
+    原对象、字典列表和整段字符串，内存放大 3~4 倍。
+    """
+    model = MODEL_BY_TABLE.get(table)
+    if model is None:
+        return
+    with session_scope() as session:
+        result = session.scalars(
+            select(model).where(model.is_deleted.is_(False)).order_by(model.created_at)
+        )
+        for obj in result:
+            yield serialize(obj)["data"]
+
+
 def _atomic_write_text(target: Path, text: str) -> None:
     """先写同目录临时文件再原子替换。
 
@@ -92,13 +109,29 @@ def export_json(dest: Path | str, tables: list[str] | None = None) -> Path:
     target = Path(dest)
     target.parent.mkdir(parents=True, exist_ok=True)
     selected = tables or list(EXPORT_TABLES)
-    payload = {
-        "app": "dingfengbo",
-        "version": 1,
-        "exported_at": datetime.now().isoformat(timespec="seconds"),
-        "tables": {table: _rows(table) for table in selected},
-    }
-    _atomic_write_text(target, json.dumps(payload, ensure_ascii=False, indent=2))
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    stamp = datetime.now().isoformat(timespec="seconds")
+    try:
+        with tmp.open("w", encoding="utf-8") as handle:
+            # 手工拼 JSON：逐表逐行写入，内存占用与库大小无关。
+            handle.write("{\n")
+            handle.write('  "app": "dingfengbo",\n')
+            handle.write('  "version": 1,\n')
+            handle.write(f'  "exported_at": {json.dumps(stamp)},\n')
+            handle.write('  "tables": {\n')
+            for index, table in enumerate(selected):
+                handle.write(f'    "{table}": [')
+                first = True
+                for row in _iter_rows(table):
+                    handle.write("" if first else ",")
+                    handle.write("\n      ")
+                    handle.write(json.dumps(row, ensure_ascii=False))
+                    first = False
+                handle.write("\n    ]" + ("," if index < len(selected) - 1 else "") + "\n")
+            handle.write("  }\n}\n")
+        os.replace(tmp, target)
+    finally:
+        tmp.unlink(missing_ok=True)
     return target
 
 

@@ -71,10 +71,20 @@ def pick_and_upload(
                 return
 
             async def apply() -> None:
-                on_done(url)
-                snack(page, "图片已上传，服务器链接已填入", th.PRIMARY)
+                # 弹窗可能在后台上传期间被关掉：这时控件已从页面移除，再往里面
+                # 写内容会抛异常或写到已销毁的控件上。先确认页面仍然可用。
+                try:
+                    if page is None or getattr(page, "window", None) is None:
+                        return
+                    on_done(url)
+                    snack(page, "图片已上传，服务器链接已填入", th.PRIMARY)
+                except Exception:
+                    logger.debug("上传完成后页面已关闭，忽略结果", exc_info=True)
 
-            page.run_task(apply)
+            try:
+                page.run_task(apply)
+            except Exception:
+                logger.debug("上传结果回 UI 线程失败，页面可能已销毁", exc_info=True)
 
         page.run_thread(worker)
 

@@ -232,16 +232,29 @@ def open_links_dialog(page: ft.Page, item: TimelineItem, refresh) -> ft.AlertDia
         width=560,
     )
 
-    def _close() -> None:
-        from .widgets import close_modal
-
+    def _mark_closed() -> None:
+        """标记弹窗已关闭并取消防抖计时（Esc / 点遮罩走的是 on_dismiss）。"""
         pending["closed"] = True
         timer = pending["timer"]
         if timer is not None:
             timer.cancel()
+
+    def _close() -> None:
+        from .widgets import close_modal
+
+        _mark_closed()
         close_modal(page, dialog)
         if refresh is not None:
             refresh()
+
+    # Esc、点遮罩关闭不会经过「关闭」按钮：不挂 on_dismiss 的话 closed 永远是 False，
+    # 在途的搜索会继续往已移除的控件里写结果。
+    def _on_dismiss(_=None) -> None:
+        _mark_closed()
+        if refresh is not None:
+            refresh()
+
+    dialog.on_dismiss = _on_dismiss
 
     return dialog
 
