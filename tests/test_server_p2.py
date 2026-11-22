@@ -34,7 +34,7 @@ class PublicBaseTests(unittest.TestCase):
         return SimpleNamespace(
             headers={"host": host},
             base_url=f"http://{host}/",
-            url=SimpleNamespace(port=port),
+            url=SimpleNamespace(port=port, scheme="http"),
         )
 
     def test_configured_public_url_wins(self) -> None:
@@ -47,14 +47,16 @@ class PublicBaseTests(unittest.TestCase):
                 self.server._public_base(self._request("evil.example")), "https://df.example"
             )
 
-    def test_untrusted_host_is_not_echoed(self) -> None:
+    def test_public_host_is_echoed(self) -> None:
+        """公网 IP/域名必须原样回显：不回显就会生成 http://127.0.0.1:8000 这种
+        「只有本机能打开」的图片地址（真实踩过的坑）。"""
         import os
 
         from unittest import mock
 
         with mock.patch.dict(os.environ, {"DINGFENGBO_SERVER_PUBLIC_URL": ""}):
-            base = self.server._public_base(self._request("evil.example"))
-        self.assertNotIn("evil.example", base)
+            base = self.server._public_base(self._request("43.142.92.115:8000"))
+        self.assertEqual(base, "http://43.142.92.115:8000")
 
     def test_loopback_host_is_echoed(self) -> None:
         import os
@@ -63,7 +65,17 @@ class PublicBaseTests(unittest.TestCase):
 
         with mock.patch.dict(os.environ, {"DINGFENGBO_SERVER_PUBLIC_URL": ""}):
             base = self.server._public_base(self._request("127.0.0.1:8000"))
-        self.assertIn("127.0.0.1", base)
+        self.assertEqual(base, "http://127.0.0.1:8000")
+
+    def test_malformed_host_falls_back_to_relative(self) -> None:
+        """冒号/空白/`user@` 这类非法 Host 不回显，返回相对地址由客户端补全。"""
+        import os
+
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, {"DINGFENGBO_SERVER_PUBLIC_URL": ""}):
+            for host in ("bad host", "user@evil.com", "javascript:alert(1)", ""):
+                self.assertEqual(self.server._public_base(self._request(host)), "", host)
 
 
 class StaticFileHeaderTests(unittest.TestCase):

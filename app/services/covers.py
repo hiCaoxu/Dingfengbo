@@ -222,11 +222,34 @@ def _download(url: str, client: httpx.Client) -> tuple[bytes, str]:
     raise ValueError("重定向次数过多")
 
 
+def fetch_image_bytes(url: str, timeout: float = 10.0) -> tuple[bytes, str]:
+    """下载网络图片并返回 ``(字节, 后缀)``，供「转存到同步服务器」复用。
+
+    与封面缓存走同一套防护：只允许公网 http(s)、手动跟随重定向逐跳校验、
+    限制总字节数、按文件头魔数确认确实是图片。失败抛 :class:`ValueError`（消息可展示）。
+    """
+    if not is_safe_remote_url(url):
+        raise ValueError("不接受内网/非公网图片地址")
+    with httpx.Client(timeout=timeout, follow_redirects=False) as client:
+        data, content_type = _download(url, client)
+    if not data:
+        raise ValueError("图片内容为空")
+    suffix = _image_suffix(data)
+    if not suffix:
+        raise ValueError("链接内容不是图片（JPG/PNG/GIF/WEBP/BMP）")
+    return data, suffix
+
+
 def cached_cover(
     url: str, cache_dir: Path | None = None, timeout: float = 8.0
 ) -> Path | None:
     """下载并缓存网络封面；命中缓存直接返回本地文件。"""
     target_dir = Path(cache_dir or COVERS_DIR)
+    # 库里可能存着 http://127.0.0.1:8000/... 这种「只有本机能打开」的历史地址：
+    # 先按当前同步服务地址改写主机，再走公网校验（否则会被当成内网地址直接拒绝）。
+    from .images import absolute_url
+
+    url = absolute_url(url)
     if not is_safe_remote_url(url):
         logger.info("拒绝非公网封面地址：%s", urlsplit(url).hostname or url)
         return None

@@ -78,6 +78,11 @@ from ..services.todo_rules import (
     serialize_config,
 )
 from ..services.covers import normalize as normalize_cover
+from ..services.images import (
+    UploadError as ImageUploadError,
+    absolute_url as absolute_image_url,
+    import_remote as import_remote_image,
+)
 from ..services.health import (
     calorie_of,
     estimate_exercise_calories,
@@ -980,7 +985,10 @@ def open_entertainment_dialog(page: ft.Page, item: Entertainment | None = None, 
     title = form_field("标题 *", item.title if item else "")
     kind = dropdown("类型", ENTERTAINMENT_KINDS, item.kind if item else "电影")
     status = dropdown("状态", ["想看", "在看", "看完"], item.status if item else "想看")
-    cover = form_field("封面 URL 或本地路径", item.cover if item else "")
+    # 历史数据里可能存着 http://127.0.0.1:8000/... 这类只有本机能打开的地址：
+    # 打开弹窗时按当前同步服务地址纠正显示，保存后即被修正。
+    initial_cover = absolute_image_url(item.cover or "") if item else ""
+    cover = form_field("封面 URL 或本地路径", initial_cover)
     rating = form_field("评分（0-10，可选）", str(item.rating) if item and item.rating else "")
     note = form_field("简短备注", item.note if item else "", multiline=True)
 
@@ -995,6 +1003,55 @@ def open_entertainment_dialog(page: ft.Page, item: Entertainment | None = None, 
         spacing=8,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
+
+    rehost = {"busy": False}
+
+    def rehost_remote(_=None) -> None:
+        """把外链封面转存到同步服务器：外链图床会防盗链/过期，换设备也未必能看。
+
+        只对「外部 http(s) 图片」动手；原本就在本服务器上的地址（改一下主机名即可）
+        直接改，不重新下载。失败保留原地址并提示，不阻断保存。
+        """
+        raw = normalize_cover(cover.value or "")
+        if not raw.lower().startswith(("http://", "https://")):
+            return
+        target = absolute_image_url(raw)
+        if target != raw:
+            fill_cover(target)
+            return
+        if rehost["busy"]:
+            return
+        rehost["busy"] = True
+        snack(page, "正在把网络封面转存到服务器…", th.TEXT_MUTED)
+
+        def worker() -> None:
+            try:
+                url = import_remote_image(raw)
+            except ImageUploadError as exc:
+                async def fail() -> None:
+                    rehost["busy"] = False
+                    snack(page, str(exc), th.ACCENT)
+                page.run_task(fail)
+                return
+            except Exception:
+                logger.exception("转存封面失败")
+
+                async def fail_unexpected() -> None:
+                    rehost["busy"] = False
+                    snack(page, "转存封面失败，已保留原地址", th.ACCENT)
+                page.run_task(fail_unexpected)
+                return
+
+            async def apply() -> None:
+                rehost["busy"] = False
+                fill_cover(url)
+                snack(page, "封面已转存到服务器", th.PRIMARY)
+
+            page.run_task(apply)
+
+        page.run_thread(worker)
+
+    cover.on_blur = rehost_remote
 
     def save(_):
         if not (title.value or "").strip():
@@ -1011,8 +1068,9 @@ def open_entertainment_dialog(page: ft.Page, item: Entertainment | None = None, 
             return
         fields = dict(
             title=title.value.strip(), kind=kind.value, status=status.value,
-            # 清洗「复制文件地址」带来的首尾引号、file:// 前缀等，否则渲染必然失败。
-            cover=normalize_cover(cover.value or ""),
+            # 清洗「复制文件地址」带来的首尾引号、file:// 前缀等，否则渲染必然失败；
+            # 再把「只有本机能开」的地址换成当前同步服务地址，保证多端都能看到封面。
+            cover=absolute_image_url(normalize_cover(cover.value or "")),
             rating=score, note=note.value or "",
         )
         if not _save_or_alert(page, Entertainment, item.id if item else None, fields):

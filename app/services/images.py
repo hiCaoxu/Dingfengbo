@@ -12,8 +12,10 @@
 from __future__ import annotations
 
 import io
+import ipaddress
 import logging
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from PIL import Image, ImageOps
@@ -35,6 +37,62 @@ Image.MAX_IMAGE_PIXELS = MAX_PIXELS
 
 class UploadError(RuntimeError):
     """上传失败：消息面向用户，可直接放进提示条。"""
+
+
+def server_base() -> str:
+    """当前配置的同步服务地址（去掉尾部斜杠）。"""
+    settings = load_settings()
+    return str(settings.get("server_url") or DEFAULT_SERVER_URL).strip().rstrip("/")
+
+
+def _is_local_host(host: str) -> bool:
+    """是否本机/内网地址（这类地址换台设备就访问不到）。"""
+    name = (host or "").lower().strip("[]")
+    if not name:
+        return True
+    if name in {"localhost", "127.0.0.1", "::1", "0.0.0.0"} or name.endswith(".local"):
+        return True
+    try:
+        address = ipaddress.ip_address(name)
+    except ValueError:
+        return False
+    return address.is_loopback or address.is_private or address.is_link_local
+
+
+def absolute_url(url: str, base: str | None = None) -> str:
+    """把图片地址规范成「换台设备也能打开」的绝对地址。
+
+    服务端未配置公网地址时会返回相对路径（``/files/x.jpg``），也可能因为反代/旧版本
+    返回 ``http://127.0.0.1:8000/...``。这两种都只对当前机器有效，而记录会同步到
+    其它设备——所以这里统一用**本机配置的同步服务地址**补全/替换主机部分。
+
+    外部图床（https://img.example.com/...）保持原样：那是用户明确指定的外链。
+    """
+    text = (url or "").strip()
+    if not text:
+        return ""
+    base = (base if base is not None else server_base()).rstrip("/")
+    base_parts = urlsplit(base)
+    if text.startswith(("http://", "https://")):
+        parts = urlsplit(text)
+        if _is_local_host(parts.hostname or "") and not _is_local_host(base_parts.hostname or ""):
+            # 服务端报了本机地址（127.0.0.1 / 局域网 IP），但本机实际配置的是公网服务：
+            # 换成公网地址，否则这条记录同步出去后别的设备打不开图。
+            return urlunsplit((base_parts.scheme or "http", base_parts.netloc, parts.path,
+                               parts.query, parts.fragment))
+        return text
+    if text.startswith("/"):
+        return f"{base}{text}" if base else text
+    if not base:
+        return text
+    return f"{base}/{text.lstrip('/')}"
+
+
+def _filename_for(url: str, suffix: str) -> str:
+    name = Path(urlsplit(url).path).name or "image"
+    if "." not in name:
+        name += suffix or ".jpg"
+    return name
 
 
 def _to_rgb(image: Image.Image) -> Image.Image:
@@ -116,6 +174,7 @@ def upload_bytes(data: bytes, filename: str = "image.jpg") -> str:
         raise UploadError("服务器返回内容无法解析") from exc
     if not url:
         raise UploadError("服务器没有返回图片链接")
+    url = absolute_url(url, base)
     logger.info("图片已上传：%d → %d 字节", len(data), len(payload))
     return url
 
@@ -132,3 +191,27 @@ def upload_path(path: str | Path) -> str:
     except OSError as exc:
         raise UploadError("读取图片失败，请检查文件权限") from exc
     return upload_bytes(data, file.name)
+
+
+def import_remote(source: str) -> str:
+    """把网络图片转存到同步服务器，返回服务器链接。
+
+    为什么要转存：外链图床会防盗链、会过期，而且同步到其它设备后未必还能访问；
+    落一份到自己的同步服务上，封面才是稳定且跨设备可见的。
+
+    下载复用 :mod:`covers` 那套带 SSRF 防护的实现（只允许公网地址、限大小、按魔数
+    判断真图），失败时抛 :class:`UploadError` 且消息可直接展示。
+    """
+    from .covers import fetch_image_bytes  # 延迟导入：covers 也可能用到本模块
+
+    text = absolute_url(source)
+    if not text.lower().startswith(("http://", "https://")):
+        raise UploadError("不是可访问的网络图片地址")
+    try:
+        data, suffix = fetch_image_bytes(text)
+    except ValueError as exc:
+        raise UploadError(str(exc) or "下载网络图片失败") from exc
+    except Exception as exc:  # 网络/解析异常统一转成用户可读错误
+        logger.warning("转存网络图片失败：%s", type(exc).__name__)
+        raise UploadError("下载网络图片失败，请检查链接或稍后重试") from exc
+    return upload_bytes(data, _filename_for(text, suffix))

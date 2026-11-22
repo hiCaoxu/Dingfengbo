@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import threading
 import time
 from collections import defaultdict, deque
@@ -493,28 +494,29 @@ def _image_suffix(data: bytes) -> str:
     return ""
 
 
-def _public_base(request: Request) -> str:
-    """对外可访问的站点前缀；反向代理/自定义域名时用环境变量覆盖。
+_HOST_PATTERN = re.compile(r"^[A-Za-z0-9.\-]+(:\d{1,5})?$|^\[[0-9A-Fa-f:]+\](:\d{1,5})?$")
 
-    未配置时**不能直接回显请求里的 Host**：Host 由客户端控制，攻击者可以把
-    上传接口的返回值污染成自己的域名（并随记录同步进用户数据）。这里只接受
-    与监听地址一致的 Host，否则回落到服务端自己的地址。
+
+def _public_base(request: Request) -> str:
+    """上传后返回给客户端的站点前缀。
+
+    优先级：``DINGFENGBO_SERVER_PUBLIC_URL``（反代/域名场景的权威配置）→ 请求的 Host
+    → 空串（返回相对地址，由客户端按自己配置的服务地址补全）。
+
+    **为什么可以回显 Host**：未配置反代时，Host 正是客户端拨号用的地址，直接回显才能
+    得到「跨设备可访问」的链接；不回显反而会造出 ``http://127.0.0.1:8000/files/…``
+    这种只有本机能打开的地址（真实踩过的坑）。防护改为「格式白名单」：只接受合法
+    主机名/IP 形式，带空格、换行、``user@`` 之类的值一律丢弃，回落到相对地址。
     """
     configured = os.environ.get("DINGFENGBO_SERVER_PUBLIC_URL", "").strip().rstrip("/")
     if configured:
         return configured
-    host = (request.headers.get("host") or "").strip().lower()
-    allowed = {
-        (os.environ.get("DINGFENGBO_SERVER_PUBLIC_HOST") or "").strip().lower(),
-        f"127.0.0.1:{request.url.port or 8000}",
-        f"localhost:{request.url.port or 8000}",
-    }
-    allowed.discard("")
-    if host in allowed:
-        return str(request.base_url).rstrip("/")
-    # 不信任 Host：用监听地址拼一个固定前缀（反代场景请配置 PUBLIC_URL）。
-    port = request.url.port or 8000
-    return f"http://127.0.0.1:{port}" if port else "http://127.0.0.1"
+    host = (request.headers.get("host") or "").strip()
+    if not host or not _HOST_PATTERN.match(host):
+        logger.warning("上传请求的 Host 不合法（%r），返回相对地址", host[:40])
+        return ""
+    scheme = request.url.scheme or "http"
+    return f"{scheme}://{host.lower()}"
 
 
 @app.post("/api/upload")
