@@ -65,6 +65,36 @@ def new_sync_id() -> str:
     return str(uuid4())
 
 
+def column_fill_value(column) -> Any:
+    """非空列在「缺值 / 收到 NULL」时的兜底值。
+
+    模型里 ``Mapped[str]`` 的列在新建库上是 NOT NULL，但历史云端库是由更早的模型
+    建出来的，这些列可以是 NULL（SQLite 的 ``ALTER TABLE ADD COLUMN`` 也无法补
+    NOT NULL）。同步载荷把 NULL 带进来时，写进本地非空列会直接 IntegrityError，
+    因此迁移回填与入站解析都要按「模型默认值 → 类型零值」的顺序取兜底。
+    """
+    default = getattr(column, "default", None)
+    if default is not None and getattr(default, "is_scalar", False):
+        argument = getattr(default, "arg", None)
+        if argument is not None and not callable(argument):
+            return argument
+    try:
+        python_type = column.type.python_type
+    except (NotImplementedError, AttributeError):
+        python_type = str
+    if python_type is bool:
+        return False
+    if python_type in (int, float):
+        return 0
+    if python_type is str:
+        return ""
+    if python_type is datetime:
+        return utcnow()
+    if python_type is date:
+        return date.today()
+    return ""
+
+
 class Base(DeclarativeBase):
     pass
 

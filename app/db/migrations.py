@@ -10,7 +10,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 from sqlalchemy import Connection, Engine, Integer, func, inspect, select, text, update
 
-from .models import SYNC_MODELS, Base, Diary, utcnow
+from .models import SYNC_MODELS, Base, Diary, column_fill_value, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,8 @@ TEMPLATE_FLAG_SCHEMA_VERSION = 3
 TODO_FIELD_SCHEMA_VERSION = 4
 DIARY_UNIQUE_SCHEMA_VERSION = 5
 INDEX_SCHEMA_VERSION = 6
+# 7 = 按模型定义重建「列可为 NULL」的表（补齐 NOT NULL），并把历史 NULL 回填成默认值
+NULLABLE_SCHEMA_VERSION = 7
 
 # 只有本地意义的表：它们没有 owner_id / sync_seq，不该建同步复合索引。
 _LOCAL_ONLY_TABLES = ("foods", "sync_sequences", "sync_issues", "sync_conflicts", "todo_reminders")
@@ -62,6 +64,106 @@ def _drop_zombie_indexes(connection: Connection) -> None:
     connection.exec_driver_sql(f"PRAGMA user_version = {INDEX_SCHEMA_VERSION}")
     if dropped:
         logger.info("已清理 %d 个本地表僵尸索引", dropped)
+
+
+def _nullable_offenders(inspector, table) -> list:
+    """模型声明非空、但库里这一列允许 NULL 的列。"""
+    actual = {item["name"]: item for item in inspector.get_columns(table.name)}
+    return [
+        column
+        for column in table.columns
+        if not column.nullable and actual.get(column.name, {}).get("nullable")
+    ]
+
+
+def _rebuild_table_strict(connection: Connection, table) -> None:
+    """按模型定义重建单表（补上 NOT NULL），数据原样搬过去。
+
+    与日记表重建同一套路：先把旧表改名，删掉被 RENAME 带过来的命名索引（否则新建
+    同名表时 CREATE INDEX 会撞名），再用模型 DDL 建新表、回灌数据、删旧表。
+    模型里没有任何外键，因此重建单表不会牵扯级联约束。
+    """
+    legacy = f"__nullable_{table.name}"
+    connection.exec_driver_sql(f'DROP TABLE IF EXISTS "{legacy}"')
+    connection.exec_driver_sql(f'ALTER TABLE "{table.name}" RENAME TO "{legacy}"')
+    # 先取完 PRAGMA 结果再执行 DDL：边遍历结果集边改 schema 会报 table is locked。
+    stale_indexes = [
+        str(row[1])
+        for row in connection.exec_driver_sql(f'PRAGMA index_list("{legacy}")')
+        if str(row[3]) == "c"
+    ]
+    for name in stale_indexes:
+        connection.exec_driver_sql(f'DROP INDEX IF EXISTS "{name}"')
+    table.create(connection)
+    old_columns = {item["name"] for item in inspect(connection).get_columns(legacy)}
+    # 逐列生成取值表达式：旧表有的列用 COALESCE（NULL 回填默认值），旧表没有的列
+    # （比如更早版本还没有 sync_seq）直接给默认值——新表这些列是 NOT NULL，
+    # 缺列又没默认值会直接 IntegrityError。
+    target = ", ".join(f'"{column.name}"' for column in table.columns)
+    selections: list[str] = []
+    parameters: list[Any] = []
+    for column in table.columns:
+        if column.name in old_columns:
+            selections.append(f'COALESCE("{column.name}", ?)')
+        else:
+            selections.append("?")
+        parameters.append(column_fill_value(column))
+    connection.exec_driver_sql(
+        f'INSERT INTO "{table.name}" ({target}) SELECT {", ".join(selections)} FROM "{legacy}"',
+        tuple(parameters),
+    )
+    connection.exec_driver_sql(f'DROP TABLE "{legacy}"')
+
+
+def _normalize_nullable_columns(connection: Connection, *, fresh: bool = False) -> None:
+    """把「模型非空、库里可空」的列补齐（历史云端库就是这种形态）。
+
+    这些列在本地新库上是 NOT NULL，但云端的 ``cloud.db`` 由更早版本的模型创建，
+    SQLite 的 ``ALTER TABLE ADD COLUMN`` 又没法后补 NOT NULL，于是同一张表在两端
+    DDL 不一致：云端可以存 NULL，客户端拉下来写进非空列直接 IntegrityError。
+    这里按模型定义重建受影响的表，并把历史 NULL 回填成模型默认值。
+
+    ``fresh`` 表示库是空的、刚刚由 ``create_all`` 按当前模型建出来——这种情况下
+    不可能有可空偏差，直接打版本号即可，省掉每张表一轮 PRAGMA 检查
+    （测试里每个用例都会建一次库，这一圈扫描很显眼）。
+    """
+    if _schema_version(connection) >= NULLABLE_SCHEMA_VERSION:
+        return
+    if fresh:
+        connection.exec_driver_sql(f"PRAGMA user_version = {NULLABLE_SCHEMA_VERSION}")
+        return
+    # 快速路径：先比「DDL 里 NOT NULL 的个数」与模型要求的个数。建表语句本身就是
+    # 模型生成的，个数一致就说明没有列漏掉约束；只有对不上才逐列 PRAGMA 检查。
+    # 这条路径让每个用例的建库开销保持在一两次查询的量级。
+    ddl = {
+        str(name): (sql or "")
+        for name, sql in connection.exec_driver_sql(
+            "SELECT name, sql FROM sqlite_master WHERE type='table'"
+        ).all()
+    }
+    inspector = inspect(connection)
+    existing = set(ddl)
+    rebuilt = 0
+    for table in Base.metadata.sorted_tables:
+        if table.name not in existing:
+            continue
+        expected = sum(1 for column in table.columns if not column.nullable)
+        if ddl[table.name].count("NOT NULL") == expected:
+            continue
+        offenders = _nullable_offenders(inspector, table)
+        if not offenders:
+            continue
+        for column in offenders:
+            fill = column_fill_value(column)
+            connection.exec_driver_sql(
+                f'UPDATE "{table.name}" SET "{column.name}" = ? WHERE "{column.name}" IS NULL',
+                (fill,),
+            )
+        _rebuild_table_strict(connection, table)
+        rebuilt += 1
+    connection.exec_driver_sql(f"PRAGMA user_version = {NULLABLE_SCHEMA_VERSION}")
+    if rebuilt:
+        logger.info("已按模型定义重建 %d 张表（补齐非空约束并回填 NULL）", rebuilt)
 
 # 历史上任务弹窗直接存了中文优先级，而象限推导/搜索只认英文码。
 _PRIORITY_CODES = (("高", "high"), ("中", "medium"), ("低", "low"))
@@ -463,9 +565,15 @@ def initialize_schema(engine: Engine, *, assign_sequences: bool = True) -> None:
             and _uses_integer_ids(connection, model.__tablename__)
         ]
         if not legacy_tables:
+            fresh_database = not existing
             Base.metadata.create_all(connection)
             _add_missing_columns(connection)
             _ensure_indexes(connection)
+            # 必须在建表/补列之后：这两步产出的才是「当前模型」的 DDL，
+            # 反过来先重建会把旧版整数主键库当成已迁移，UUID 迁移就被跳过了。
+            _normalize_nullable_columns(connection, fresh=fresh_database)
+            if not fresh_database:
+                _ensure_indexes(connection)  # 重建表会带走复合索引，幂等补回
             if assign_sequences:
                 _assign_missing_sequences(connection)
             return
@@ -525,6 +633,8 @@ def initialize_schema(engine: Engine, *, assign_sequences: bool = True) -> None:
         for table in legacy_tables:
             connection.execute(text(f"DROP TABLE {_quote(f'_legacy_uuid_{table}')}"))
         _add_missing_columns(connection)
+        _ensure_indexes(connection)
+        _normalize_nullable_columns(connection)
         _ensure_indexes(connection)
         if assign_sequences:
             _assign_missing_sequences(connection)

@@ -20,6 +20,7 @@ from .models import (
     SyncConflict,
     SyncIssue,
     SyncMixin,
+    column_fill_value,
     table_label,
     utcnow,
 )
@@ -512,7 +513,12 @@ def apply_remote(
             if column.name in _NOT_COPIED_FIELDS:
                 continue
             if column.name in data:
-                setattr(obj, column.name, _parse(column, data[column.name]))
+                value = _parse(column, data[column.name])
+                # 云端库可能还没跑「补 NOT NULL」迁移（或由更早版本写入过 NULL）：
+                # 往本地非空列写 NULL 会直接 IntegrityError，整页拉取就此中断。
+                if value is None and not column.nullable:
+                    value = column_fill_value(column)
+                setattr(obj, column.name, value)
         obj.sync_status = "clean"
         applied.append(
             {"table": table, "data": data, "changed": True, "record_id": obj.id}
