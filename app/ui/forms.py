@@ -19,6 +19,7 @@ from ..config import (
     DEFAULT_SERVER_URL,
     load_settings,
     save_settings,
+    secrets_protection,
 )
 from ..db.models import (
     Account,
@@ -918,6 +919,19 @@ def open_entertainment_dialog(page: ft.Page, item: Entertainment | None = None, 
 
 def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh_status=None):
     settings = load_settings()
+
+    def _protection_note() -> str:
+        """把「敏感字段到底怎么存的」直接告诉用户，而不是只在日志里警告。"""
+        level = secrets_protection()
+        if level == "dpapi":
+            return "同步令牌与 AI Key 已用 Windows DPAPI 按当前用户加密保存。"
+        if level == "base64":
+            return (
+                "⚠ 当前环境不可用 DPAPI，令牌 / Key 只做了 base64 混淆（等同明文），"
+                "请勿把 settings.json 放到共享目录或云盘。"
+            )
+        return "尚未配置同步令牌 / AI Key。"
+
     server = form_field("同步服务地址", settings.get("server_url", DEFAULT_SERVER_URL))
     token = form_field("同步令牌", settings.get("sync_token", ""))
     token.password = True
@@ -1203,6 +1217,10 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
         # 开机自启写注册表（失败只提示，不影响其他设置保存）
         from ..services import system_integration
 
+        # 模块显隐/排序改了要立刻重建左侧导航，否则用户会以为设置没生效。
+        from . import theme_switch as _theme_switch
+
+        _theme_switch.refresh_nav()
         previous_autostart = bool(settings.get("autostart", False))
         if bool(autostart.value) != previous_autostart:
             ok, message = system_integration.set_autostart(bool(autostart.value))
@@ -1235,6 +1253,11 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
                 # 同步
                 _group("同步"),
                 server, token,
+                ft.Text(
+                    _protection_note(),
+                    size=th.FONT_CAPTION, color=th.TEXT_MUTED, max_lines=2,
+                    overflow=ft.TextOverflow.ELLIPSIS,
+                ),
                 ft.Row([ft.TextButton("测试同步连接", on_click=test_sync), sync_probe_text],
                        spacing=10, wrap=True),
                 enabled,

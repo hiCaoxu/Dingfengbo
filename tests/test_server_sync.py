@@ -36,6 +36,25 @@ def note_change(title: str, updated_at: datetime) -> dict:
     }
 
 
+def diary_change(day: str, content: str, updated_at: datetime, record_id: str | None = None) -> dict:
+    timestamp = updated_at.isoformat()
+    return {
+        "table": "diaries",
+        "data": {
+            "id": record_id or str(uuid4()),
+            "owner_id": "local",
+            "created_at": timestamp,
+            "updated_at": timestamp,
+            "is_deleted": False,
+            "sync_status": "pending",
+            "sync_seq": 0,
+            "date": day,
+            "title": content,
+            "content": content,
+        },
+    }
+
+
 def _boot_server(temp_dir: str):
     """在临时目录里重新加载 server.main（库 + 图片目录都指向 temp_dir）。"""
     env = {
@@ -100,6 +119,50 @@ class ServerSyncTests(unittest.TestCase):
             self.assertEqual(local.owner_id, "local")
         self.assertEqual(self.server.pull(self.server.PullRequest(), "Bearer token-b")["changes"], [])
         local_engine.dispose()
+
+    def test_business_key_merge_advances_sequence(self) -> None:
+        """同日日记被业务键合并后，序列号必须推进，否则其它设备永远拉不到这次修改。"""
+        first = diary_change("2026-05-01", "A 版", datetime(2026, 1, 1))
+        payload = self.server.push(self.server.PushRequest(changes=[first]), "Bearer token-a")
+        self.assertEqual(payload["accepted"][0]["data"]["sync_seq"], 1)
+
+        second = diary_change("2026-05-01", "B 版", datetime(2026, 1, 2))
+        payload = self.server.push(self.server.PushRequest(changes=[second]), "Bearer token-a")
+        merged = payload["accepted"][0]
+        # 合并进的是第一行（保留本地 id），但必须拿到新的序列号
+        self.assertEqual(merged["record_id"], first["data"]["id"])
+        self.assertEqual(merged["data"]["sync_seq"], 2)
+
+        pulled = self.server.pull(
+            self.server.PullRequest(cursors={"diaries": {"sequence": 1}}), "Bearer token-a"
+        )
+        self.assertEqual([change["data"]["content"] for change in pulled["changes"]], ["B 版"])
+
+    def test_stale_push_is_reported_as_superseded(self) -> None:
+        """被云端更新版本覆盖的推送必须回执，否则客户端会永久停在待同步队列。"""
+        newer = note_change("新版本", datetime(2026, 1, 2))
+        self.server.push(self.server.PushRequest(changes=[newer]), "Bearer token-a")
+
+        stale = note_change("旧版本", datetime(2026, 1, 1))
+        stale["data"]["id"] = newer["data"]["id"]
+        payload = self.server.push(self.server.PushRequest(changes=[stale]), "Bearer token-a")
+
+        self.assertEqual(payload["rejected"], [])
+        self.assertEqual(len(payload["superseded"]), 1)
+        self.assertEqual(payload["superseded"][0]["id"], newer["data"]["id"])
+        # 同时进 accepted：客户端据此把这条记录从待同步队列里出队
+        self.assertEqual(len(payload["accepted"]), 1)
+        self.assertFalse(payload["accepted"][0]["changed"])
+
+    def test_duplicate_diary_in_one_batch_does_not_fail_whole_push(self) -> None:
+        """同一批里两条同日日记（并发/重试）不能整批 500。"""
+        first = diary_change("2026-06-01", "甲", datetime(2026, 1, 1))
+        second = diary_change("2026-06-01", "乙", datetime(2026, 1, 2))
+        payload = self.server.push(
+            self.server.PushRequest(changes=[first, second]), "Bearer token-a"
+        )
+        self.assertEqual(len(payload["accepted"]) + len(payload["rejected"]), 2)
+        self.assertEqual(payload["rejected"], [])
 
     def test_keyset_pagination_returns_every_record_with_same_timestamp(self) -> None:
         timestamp = datetime(2026, 1, 1)

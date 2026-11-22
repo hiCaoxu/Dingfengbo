@@ -10,7 +10,18 @@ from datetime import date, datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Date, DateTime, Float, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -212,9 +223,24 @@ class Habit(SyncMixin, Base):
 
 
 class HabitLog(SyncMixin, Base):
-    """习惯打卡记录：同一天同一习惯只保留一条（由服务层 upsert 保证）。"""
+    """习惯打卡记录：同一天同一习惯只保留一条（由服务层 upsert 保证）。
+
+    唯一索引只约束未删除行（部分索引）：并发 push 或历史脏数据可能在库里留下
+    重复的墓碑行，全表唯一会让迁移直接失败；而「同一天只保留一条活跃记录」才是
+    业务承诺。旧库的重复行在 migrations._ensure_indexes 里收敛。
+    """
 
     __tablename__ = "habit_logs"
+    __table_args__ = (
+        Index(
+            "uq_habit_logs_active",
+            "owner_id",
+            "habit_id",
+            "date",
+            unique=True,
+            sqlite_where=text("is_deleted = 0"),
+        ),
+    )
 
     habit_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
@@ -313,6 +339,20 @@ SYNC_MODELS = (
 )
 
 MODEL_BY_TABLE = {m.__tablename__: m for m in SYNC_MODELS}
+
+# 同步的两条高频查询都是 (owner_id, 单列) 组合：
+#   pull:  WHERE owner_id=? AND sync_seq > ? ORDER BY sync_seq
+#   queue: WHERE owner_id=? AND sync_status = ?
+# 只有单列索引时 SQLite 会先按 sync_seq 扫全局、再过滤租户，多租户服务端等于
+# 每张表都全表扫一遍。这里补上复合索引，新建库由 create_all 直接建。
+for _model in SYNC_MODELS:
+    Index(f"ix_{_model.__tablename__}_owner_sync_seq", _model.owner_id, _model.sync_seq)
+    Index(
+        f"ix_{_model.__tablename__}_owner_sync_status",
+        _model.owner_id,
+        _model.sync_status,
+    )
+del _model
 
 # 表名 → 中文名：界面展示与 AI 上下文共用同一份，避免两处各自维护而漂移。
 TABLE_LABELS = {

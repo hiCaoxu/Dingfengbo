@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import gc
 import json
 import logging
 import os
@@ -17,6 +18,7 @@ import re
 import shutil
 import sqlite3
 import tempfile
+import time
 import zipfile
 from contextlib import closing
 from datetime import date, datetime, timedelta
@@ -182,6 +184,33 @@ def reset_sync_cursors() -> None:
         logger.exception("重置同步游标失败")
 
 
+def _atomic_replace(source: Path, target: Path) -> None:
+    """把 source 覆盖到 target：优先原子替换，Windows 句柄占用时退化为覆盖复制。
+
+    ``os.replace`` 需要目标文件的 DELETE 权限；只要同进程还有别的连接（或测试里
+    故意留着的句柄）打开着目标库，Windows 就会返回 WinError 5。这里先做几次短重试
+    （句柄多半是 Python 侧刚释放、GC 还没跑），实在不行再退化为原地覆盖——此时
+    WAL 已 checkpoint 且临时文件已校验，属于「可接受的最后手段」。
+    """
+    last_error: OSError | None = None
+    for _attempt in range(3):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError as exc:
+            last_error = exc
+            gc.collect()
+            time.sleep(0.05)
+        except OSError as exc:
+            last_error = exc
+            break
+    logger.warning("原子替换失败（%s），退化为原地覆盖：%s", last_error, target)
+    try:
+        shutil.copyfile(source, target)
+    finally:
+        source.unlink(missing_ok=True)
+
+
 def restore_database(backup_path: Path | str, db_path: Path | None = None) -> dict:
     """从备份恢复：先校验、再备份当前库、最后替换文件。
 
@@ -209,6 +238,21 @@ def restore_database(backup_path: Path | str, db_path: Path | None = None) -> di
     except Exception:
         logger.debug("释放数据库连接失败", exc_info=True)
 
+    # 顺序很重要：
+    # 1) 先把备份复制到同目录临时文件（不动现有库）；
+    # 2) 把现有库的 WAL 折叠回主文件（checkpoint），此后删除 -wal/-shm 才不会丢已提交事务；
+    # 3) os.replace 原子替换 —— 任何一步失败，现有库仍是完整可用的。
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(target.suffix + ".restore-tmp")
+    try:
+        shutil.copy2(source, tmp)
+        with closing(sqlite3.connect(target, timeout=15)) as live:
+            live.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            live.commit()
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+
     for suffix in ("-wal", "-shm"):
         stale = Path(str(target) + suffix)
         if stale.exists():
@@ -217,8 +261,7 @@ def restore_database(backup_path: Path | str, db_path: Path | None = None) -> di
             except OSError:
                 logger.warning("删除 %s 失败", stale)
 
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, target)
+    _atomic_replace(tmp, target)
     logger.info("已从备份恢复数据库：%s", source.name)
     # 恢复进来的是另一份库，库内 sync_seq 与 settings 里的同步游标不再对应，
     # 必须一起重置；否则「同步成功但数据全空」会一直持续下去。

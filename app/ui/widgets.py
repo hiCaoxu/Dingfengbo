@@ -67,11 +67,15 @@ def equal_height_row(
     spacing: int = 14,
     height: int | float | None = None,
     wrap: bool = False,
+    expand: int | None = None,
 ) -> ft.Row:
     """同行卡片：统一垂直拉伸 + 可选统一高度，避免一张高一张矮、底边不齐。
 
     子控件自身若已有固定高度，``height`` 会覆盖它；否则仅靠 STRETCH 让
     Row 内所有卡片被拉成同一高度（以最高者为基准）。
+
+    ``expand`` 让整行在父 Column 里按比例瓜分剩余高度（仪表盘铺满窗口用）：
+    不传则保持原来的「按内容高度排布、从顶部堆叠」行为。
     """
     if height is not None:
         for control in controls:
@@ -83,6 +87,7 @@ def equal_height_row(
         wrap=wrap,
         run_spacing=spacing,
         vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+        expand=expand,
     )
     if height is not None:
         row.height = height
@@ -352,12 +357,11 @@ def busy_button(
 
 def primary_button(text: str, on_click: Callable, icon: str | None = None, **kwargs) -> ft.Button:
     # Flet 0.80 起 ElevatedButton 已弃用（1.0 移除），Button 参数完全兼容。
-    return ft.Button(
-        content=ft.Row(
-            [ft.Icon(ico(icon), size=16), ft.Text(text, size=12)] if icon else [ft.Text(text, size=12)],
-            spacing=6,
-            tight=True,
-        ),
+    label = ft.Text(text, size=12)
+    controls: list[ft.Control] = [ft.Icon(ico(icon), size=16)] if icon else []
+    controls.append(label)
+    button = ft.Button(
+        content=ft.Row(controls, spacing=6, tight=True),
         bgcolor=th.PRIMARY,
         color=th.ON_PRIMARY,
         elevation=0,
@@ -365,6 +369,25 @@ def primary_button(text: str, on_click: Callable, icon: str | None = None, **kwa
         style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=8), padding=ft.Padding.symmetric(vertical=10, horizontal=14)),
         **kwargs,
     )
+    # 动态改文案的入口：ft.Button 没有 text 属性，文案只来自 content 里的 Text。
+    button.label_control = label
+    return button
+
+
+def set_button_text(button: ft.Control, text: str) -> None:
+    """更新 ``primary_button`` 的文案。
+
+    直接写 ``button.text = ...`` 只是给控件挂了个无人读取的属性，界面上永远不变；
+    必须改 content 里那个 Text 的 value。
+    """
+    label = getattr(button, "label_control", None)
+    if label is None:
+        return
+    label.value = text
+    try:
+        button.update()
+    except Exception:
+        logger.debug("按钮文案更新失败", exc_info=True)
 
 
 def ghost_button(text: str, on_click: Callable, icon: str | None = None) -> ft.TextButton:
@@ -526,7 +549,15 @@ def dropdown(label: str, options: list[str], value: str | None = None, width: in
     )
 
 
-def modal(page: ft.Page, title: str, body: ft.Control, actions: list[ft.Control], width: int = 560) -> ft.AlertDialog:
+def modal(
+    page: ft.Page,
+    title: str,
+    body: ft.Control,
+    actions: list[ft.Control],
+    width: int = 560,
+    modal: bool = False,
+    on_dismiss=None,
+) -> ft.AlertDialog:
     dialog = ft.AlertDialog(
         bgcolor=th.CARD,
         title=ft.Text(title, size=th.FONT_SECTION_TITLE, color=th.TEXT, weight="bold"),
@@ -534,6 +565,8 @@ def modal(page: ft.Page, title: str, body: ft.Control, actions: list[ft.Control]
         actions=actions,
         actions_alignment=ft.MainAxisAlignment.END,
         shape=ft.RoundedRectangleBorder(radius=12),
+        modal=modal,
+        on_dismiss=on_dismiss,
     )
     open_dialog(page, dialog)
     return dialog

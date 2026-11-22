@@ -94,17 +94,42 @@ def _nth_weekday(year: int, month: int, weekday: int, nth: str) -> date | None:
     return matches[index] if index < len(matches) else matches[-1]
 
 
+def _as_int(value, default: int) -> int:
+    """把配置里的任意值收敛成 int；坏值回退默认值（同步数据不可信）。"""
+    try:
+        if isinstance(value, bool):
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _int_list(raw) -> list[int]:
+    """把任意形态的配置值收敛成整数列表；非列表/非数字一律忽略。
+
+    ``repeat_config`` 来自同步载荷，可以是任意 JSON。直接 ``sorted()`` 混合类型会抛
+    ``TypeError``，``int("abc")`` 会抛 ``ValueError``——两者都会让待办列表渲染崩溃。
+    """
+    if not isinstance(raw, (list, tuple, set)):
+        return []
+    values: list[int] = []
+    for item in raw:
+        if isinstance(item, bool):
+            continue
+        try:
+            values.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    return values
+
+
 def _month_targets(year: int, month: int, config: dict, mode: str) -> list[date]:
     days = calendar.monthrange(year, month)[1]
     if mode == "day":
-        wanted = sorted(
-            {
-                int(day)
-                for day in config.get("month_days") or []
-                if str(day).isdigit() and 1 <= int(day) <= 31
-            }
-        )
-        targets = [date(year, month, day) for day in wanted if day <= days]
+        wanted = sorted({day for day in _int_list(config.get("month_days")) if 1 <= day <= 31})
+        # 目标日大于当月天数时夹到月末，与内置「按月」的 next_due 保持一致；
+        # 否则「每月 31 日」的循环一年只触发 7 次，2/4/6/9/11 月直接消失。
+        targets = [date(year, month, min(day, days)) for day in wanted]
         if config.get("month_last_day"):
             targets.append(date(year, month, days))
         return sorted(set(targets))
@@ -112,7 +137,7 @@ def _month_targets(year: int, month: int, config: dict, mode: str) -> list[date]
         found = _nth_weekday(
             year,
             month,
-            int(config.get("month_weekday") or 0),
+            _as_int(config.get("month_weekday"), 0) % 7,
             str(config.get("month_nth") or "first"),
         )
         return [found] if found else []
@@ -142,13 +167,9 @@ def _skip_blocked(value: date, config: dict) -> date:
 
 
 def _next_week(value: date, config: dict, interval: int) -> date | None:
-    weekdays = sorted(
-        {
-            int(day)
-            for day in config.get("weekdays") or []
-            if str(day).lstrip("-").isdigit() and 0 <= int(day) <= 6
-        }
-    ) or [value.weekday()]
+    weekdays = sorted({day for day in _int_list(config.get("weekdays")) if 0 <= day <= 6}) or [
+        value.weekday()
+    ]
     week_start = value - timedelta(days=value.weekday())
     for block in range(MAX_STEPS):
         base = week_start + timedelta(weeks=block * interval)
@@ -240,16 +261,15 @@ def describe(raw_config: dict | None) -> str:
 
     if unit == "week":
         days = "、".join(
-            WEEKDAY_LABELS[int(day)]
-            for day in sorted(config.get("weekdays") or [])
-            if str(day).isdigit() and 0 <= int(day) <= 6
+            WEEKDAY_LABELS[day]
+            for day in sorted({d for d in _int_list(config.get("weekdays")) if 0 <= d <= 6})
         )
         if days:
             text += f" · {days}"
     elif unit == "month":
         mode = str(config.get("month_mode") or "day")
         if mode == "day":
-            parts = [f"{int(day)}日" for day in config.get("month_days") or [] if str(day).isdigit()]
+            parts = [f"{day}日" for day in sorted(_int_list(config.get("month_days")))]
             if config.get("month_last_day"):
                 parts.append("最后一天")
             if parts:
@@ -257,19 +277,19 @@ def describe(raw_config: dict | None) -> str:
         elif mode == "weekday":
             text += (
                 f" · {NTH_LABELS.get(str(config.get('month_nth')), '第一个')}"
-                f"{WEEKDAY_LABELS[int(config.get('month_weekday') or 0) % 7]}"
+                f"{WEEKDAY_LABELS[_as_int(config.get('month_weekday'), 0) % 7]}"
             )
         else:
             text += " · " + ("最后一个工作日" if str(config.get("month_nth")) == "last" else "第一个工作日")
     elif unit == "year":
-        month = int(config.get("year_month") or 1)
+        month = _as_int(config.get("year_month"), 1)
         if str(config.get("year_mode")) == "weekday":
             text += (
                 f" · {month}月{NTH_LABELS.get(str(config.get('year_nth')), '第一个')}"
-                f"{WEEKDAY_LABELS[int(config.get('year_weekday') or 0) % 7]}"
+                f"{WEEKDAY_LABELS[_as_int(config.get('year_weekday'), 0) % 7]}"
             )
         else:
-            text += f" · {month}月{int(config.get('year_day') or 1)}日"
+            text += f" · {month}月{_as_int(config.get('year_day'), 1)}日"
 
     if config.get("skip_weekends"):
         text += " · 跳过双休日"

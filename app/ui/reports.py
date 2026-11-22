@@ -93,7 +93,7 @@ def _render(page: ft.Page, refresh, report: dict) -> ft.Control:
                         _metric("新建", f"{todo['created']} 项", "本期新增任务"),
                         _metric("未完成", f"{todo['pending']} 项", f"逾期 {todo['overdue']} 项",
                                 th.ACCENT if todo["overdue"] else None),
-                        _metric("完成率", f"{todo['completion_rate']}%", "完成 / 全部"),
+                        _metric("完成率", f"{todo['completion_rate']}%", "完成 / 本期应完成"),
                     ]
                 ),
                 ft.ProgressBar(value=min(1.0, todo["completion_rate"] / 100),

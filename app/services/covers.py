@@ -13,15 +13,17 @@ Flet 的 ``Image`` 走 Flutter 默认 UA 直接请求网络，豆瓣等图床有
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import logging
 import os
 import re
+import socket
 import threading
 import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 
@@ -116,31 +118,103 @@ def _referer(url: str) -> str:
     return f"{parts.scheme}://{parts.netloc}/" if parts.scheme and parts.netloc else ""
 
 
+def _blocked_host(host: str) -> bool:
+    """目标是否指向本机/内网/保留地址。
+
+    封面地址来自用户输入，也可能来自同步或 AI 生成的记录。不校验的话，应用会替
+    任意地址发起请求（SSRF），可用来探测 127.0.0.1 上的服务或云元数据端点。
+    """
+    host = (host or "").strip().strip("[]")
+    if not host:
+        return True
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        # 解析不了就交给 httpx 按网络错误处理，这里不额外拦截。
+        return False
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except (ValueError, IndexError):
+            continue
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            return True
+    return False
+
+
+def is_safe_remote_url(url: str) -> bool:
+    """只允许 http(s) 公网地址；用于过滤封面上限与协议。"""
+    text = str(url or "")
+    if len(text) > 2048:
+        return False
+    parts = urlsplit(text)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return False
+    return not _blocked_host(parts.hostname or "")
+
+
+def _read_capped(response: httpx.Response) -> bytes:
+    """流式读取并限制总字节数，避免先整包读进内存再判断大小。"""
+    chunks: list[bytes] = []
+    size = 0
+    for chunk in response.iter_bytes():
+        size += len(chunk)
+        if size > _MAX_BYTES:
+            raise ValueError("封面内容过大")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _download(url: str, client: httpx.Client) -> tuple[bytes, str]:
+    """手动跟随重定向，每一跳都重新校验目标地址（自动跟随会让内网校验形同虚设）。"""
+    current = url
+    for _hop in range(4):
+        with client.stream(
+            "GET", current, headers={"User-Agent": _USER_AGENT, "Referer": _referer(current)}
+        ) as response:
+            if response.status_code in (301, 302, 303, 307, 308):
+                location = response.headers.get("location", "")
+                if not location:
+                    raise ValueError("重定向缺少 Location")
+                current = urljoin(current, location)
+                if not is_safe_remote_url(current):
+                    raise ValueError("重定向到内网/非法地址")
+                continue
+            response.raise_for_status()
+            content_type = response.headers.get("content-type", "")
+            return _read_capped(response), content_type
+    raise ValueError("重定向次数过多")
+
+
 def cached_cover(
     url: str, cache_dir: Path | None = None, timeout: float = 8.0
 ) -> Path | None:
     """下载并缓存网络封面；命中缓存直接返回本地文件。"""
     target_dir = Path(cache_dir or COVERS_DIR)
+    if not is_safe_remote_url(url):
+        logger.info("拒绝非公网封面地址：%s", urlsplit(url).hostname or url)
+        return None
     key = hashlib.sha256(url.encode("utf-8")).hexdigest()[:24]
     if target_dir.exists():
         for existing in target_dir.glob(f"{key}.*"):
             if existing.suffix != ".tmp":
                 return existing
 
-    now = time.time()
     if _recently_failed(url):
         return None
 
     try:
-        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
-            response = client.get(
-                url,
-                headers={"User-Agent": _USER_AGENT, "Referer": _referer(url)},
-            )
-            response.raise_for_status()
-            data = response.content
-        if not data or len(data) > _MAX_BYTES:
-            raise ValueError("封面内容为空或过大")
+        with httpx.Client(timeout=timeout, follow_redirects=False) as client:
+            data, content_type = _download(url, client)
+        if not data:
+            raise ValueError("封面内容为空")
     except Exception:
         # 只记录域名与状态，避免把带签名的完整 URL 写进日志。
         logger.info("封面下载失败：%s", urlsplit(url).netloc or url)
@@ -148,7 +222,7 @@ def cached_cover(
         return None
 
     target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / f"{key}{_extension(url, response.headers.get('content-type', ''))}"
+    target = target_dir / f"{key}{_extension(url, content_type)}"
     tmp = target.with_suffix(target.suffix + ".tmp")
     try:
         tmp.write_bytes(data)

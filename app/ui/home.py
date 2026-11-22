@@ -160,20 +160,32 @@ def _heatmap_cell(day: date, count: int, on_open) -> ft.Container:
     )
 
 
-def _heatmap_card(year: int, on_open, set_year, height: int | None = None) -> ft.Container:
-    today = date.today()
-    current_year = today.year
-    # 当年只画到今天：未来日期没有数据，画出来只是空行；历史年份取自然年。
-    end = today if year == current_year else date(year, 12, 31)
+def _heatmap_window(year: int, today: date) -> tuple[date, date, date]:
+    """热力图时间窗：当年铺满过去 12 个月，历史年份取自然年。
+
+    窗口在 load() 与渲染两侧共用，保证聚合与绘制用的是同一段时间。
+    """
+    end = today if year == today.year else date(year, 12, 31)
     start = date(year, 1, 1)
-    if year == current_year:
-        # 当年热力图铺满过去 12 个月；未来年份已在切换按钮上禁用。
-        start_year, start_month = shift_month(current_year, today.month, -11)
+    if year == today.year:
+        start_year, start_month = shift_month(today.year, today.month, -11)
         start = date(start_year, start_month, 1)
     anchor = start - timedelta(days=start.weekday())
-    counts = _activity_counts(since=anchor)
+    return start, end, anchor
+
+
+def _heatmap_card(
+    year: int,
+    counts: dict[date, int],
+    start: date,
+    end: date,
+    on_open,
+    set_year,
+    height: int | None = None,
+    expand: int | None = None,
+) -> ft.Container:
     weeks: list[list[date]] = []
-    cursor = anchor
+    cursor = start - timedelta(days=start.weekday())
     while cursor <= end:
         weeks.append([cursor + timedelta(days=i) for i in range(7)])
         cursor += timedelta(days=7)
@@ -221,9 +233,14 @@ def _heatmap_card(year: int, on_open, set_year, height: int | None = None) -> ft
                 legend,
             ],
             spacing=8,
+            # 高度随窗口拉伸时正文撑满卡片；窗口偏矮则卡片内部滚动，
+            # 图例不会顶出边界叠到下方统计卡上。
+            expand=True,
+            scroll=ft.ScrollMode.AUTO,
         ),
         title="活跃度热力图",
         height=height,
+        expand=expand,
         trailing=ft.Row(
             [
                 ft.TextButton(f"{year - 1}", on_click=lambda e: set_year(year - 1)),
@@ -232,7 +249,7 @@ def _heatmap_card(year: int, on_open, set_year, height: int | None = None) -> ft
                 ft.TextButton(
                     f"{year + 1}",
                     on_click=lambda e: set_year(year + 1),
-                    visible=year < current_year,
+                    visible=year < date.today().year,
                 ),
             ],
             spacing=2,
@@ -344,6 +361,8 @@ def build(page: ft.Page, refresh, on_open_diary, on_open_note, navigate=None) ->
             "todo_today": todo_today,
             "todo_soon": todo_soon,
             "note": note,
+            # 热力图聚合（6 次 GROUP BY + 已完成待办）必须在后台算完再交给 UI 线程。
+            "heatmap": _heatmap_data(today),
         }
 
     def render(payload: dict) -> ft.Control:
@@ -355,14 +374,22 @@ def build(page: ft.Page, refresh, on_open_diary, on_open_note, navigate=None) ->
             page, refresh, on_open_diary, on_open_note,
             payload["summary"], payload["assets"],
             payload["todo_today"], payload["todo_soon"], payload["note"],
+            payload["heatmap"],
         )
 
     return background_section(page, load, render, "加载首页…", token=_HOME_TOKEN)
 
 
+def _heatmap_data(today: date) -> tuple[date, date, dict[date, int]]:
+    start, end, anchor = _heatmap_window(_HOME_STATE["year"], today)
+    return start, end, _activity_counts(since=anchor)
+
+
 def _render_home(page, refresh, on_open_diary, on_open_note,
-                 summary, assets, todo_today, todo_soon, note) -> ft.Control:
+                 summary, assets, todo_today, todo_soon, note,
+                 heatmap) -> ft.Control:
     today = date.today()
+    heat_start, heat_end, heat_counts = heatmap
 
     def set_date(value: date):
         _HOME_STATE["selected_date"] = value
@@ -471,6 +498,12 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
     )
 
+    def fill_card_body(control):
+        """卡片外层按比例拉伸后，正文 Column 也撑满剩余高度（内部自带滚动兜底）。"""
+        if isinstance(control, ft.Column):
+            control.expand = True
+        return control
+
     return ft.Column(
         [
             page_header(
@@ -478,13 +511,16 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
                 f"数据概览 · {today.isoformat()} {weekday_cn(today)}",
                 actions=[_view_switch(refresh)],
             ),
+            # 上区与下区按 13:7 瓜分剩余高度，整页铺满窗口：卡片不再堆在页面上部、
+            # 下方留一大块空白。窗口变矮时各卡片内部滚动，而不是把内容裁掉。
             ft.Row(
                 [
                     ft.Column(
                         [
-                            # 热力图标题行含年份切换 TextButton，实测约 260px；给足高度并让
-                            # 卡片内部滚动兜底，避免图例顶出边界、叠到下方统计卡上。
-                            _heatmap_card(_HOME_STATE["year"], open_day, set_year, height=272),
+                            _heatmap_card(
+                                _HOME_STATE["year"], heat_counts, heat_start, heat_end,
+                                open_day, set_year, expand=1,
+                            ),
                             equal_height_row(
                                 [
                                     _stat_card("本月收入", money(summary["income"]), height=96),
@@ -499,25 +535,27 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
                         expand=True,
                         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                     ),
-                    # 日历高度 = 热力图 272 + 间距 12 + 统计卡 96，与左列严格对齐
-                    _calendar_card(_HOME_STATE["selected_date"], set_date, width=280, height=380),
+                    # 日历不设固定高度：随同行 STRETCH 拉伸，与左列严格等高
+                    _calendar_card(_HOME_STATE["selected_date"], set_date, width=280),
                 ],
                 spacing=12,
                 vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+                expand=13,
             ),
             equal_height_row(
                 [
-                    card(todo_rows(todo_today, "今天没有任务"), title="今日任务", expand=1, height=180),
-                    card(todo_rows(todo_soon, "最近 7 天没有任务"), title="最近 7 天", expand=1, height=180),
-                    card(note_body, title="随机笔记", on_click=open_note if note else None,
-                         expand=1, height=180),
+                    card(fill_card_body(todo_rows(todo_today, "今天没有任务")),
+                         title="今日任务", expand=1),
+                    card(fill_card_body(todo_rows(todo_soon, "最近 7 天没有任务")),
+                         title="最近 7 天", expand=1),
+                    card(fill_card_body(note_body), title="随机笔记",
+                         on_click=open_note if note else None, expand=1),
                 ],
                 spacing=12,
-                height=180,
+                expand=7,
             ),
             card(quick, title="快捷入口", padding=ft.Padding.symmetric(vertical=8, horizontal=16)),
         ],
-        spacing=8,
+        spacing=12,
         expand=True,
-        scroll=ft.ScrollMode.AUTO,
     )

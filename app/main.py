@@ -497,7 +497,9 @@ def main(page: ft.Page) -> None:
         if system_integration.tray_available():
             try:
                 system_integration.start_tray(page, on_quit=lambda: page.window.close())
-                if system_integration.tray_running():
+                # 等一小会儿确认托盘真的起来了：pystray 在 setup 阶段失败时线程会
+                # 直接退出，若此时已经把窗口藏起来，用户就再也找不回界面了。
+                if system_integration.tray_running(wait=0.6):
                     page.window.skip_task_bar = True
                     page.window.visible = False
                     page.update()
@@ -512,6 +514,7 @@ def main(page: ft.Page) -> None:
             logger.debug("最小化窗口失败", exc_info=True)
 
     theme_switch.bind(apply_theme)
+    theme_switch.bind_nav(_render_nav)
     _render_nav()
     page.add(ft.Row([nav_box, ft.Column([header, body], expand=True)], expand=True, spacing=0))
     fit_header()

@@ -227,7 +227,7 @@ def open_links_dialog(page: ft.Page, item: TimelineItem, refresh) -> ft.AlertDia
         ),
         [
             ft.TextButton("关闭", on_click=lambda e: _close()),
-            primary_button("关联选中记录", add, "link"),
+            primary_button("关联选中记录", add, "LINK_OUTLINED"),
         ],
         width=560,
     )
@@ -331,7 +331,7 @@ def _render(page, refresh, navigate, on_open_note, on_open_diary, data) -> ft.Co
                     ft.Row(
                         [
                             ft.Container(
-                                ft.Icon(ico(MODULE_ICONS.get(item.module, "circle")), size=14,
+                                ft.Icon(ico(MODULE_ICONS.get(item.module, "CIRCLE_OUTLINED")), size=14,
                                         color=th.PRIMARY),
                                 width=26, height=26, bgcolor=th.PRIMARY_LIGHT,
                                 border_radius=8, alignment=ft.Alignment.CENTER,
@@ -396,7 +396,9 @@ def _render(page, refresh, navigate, on_open_note, on_open_diary, data) -> ft.Co
     )
 
     timeline_card = card(
-        ft.Column(rows, spacing=6, scroll=ft.ScrollMode.AUTO),
+        # 用 ListView 而不是一次性把整列控件建出来：近一年跨模块的条目可达数千，
+        # Column 会在 UI 线程同步构建全部行，切到「近一年」时明显卡住。
+        ft.ListView(controls=rows, spacing=6, expand=True),
         title="生活时间线",
         expand=1,
     )

@@ -2,6 +2,9 @@
 
 导出默认落到数据目录的 exports 下（不需要文件选择框），导入提供路径输入
 与「浏览…」（tkinter 文件对话框，失败时退回手输路径）。
+
+所有导出/导入都是整库读写，动辄几百毫秒到数秒，一律放后台线程执行；
+导入是破坏性操作（按最后写入获胜合并），因此先确认、再自动备份当前库。
 """
 
 from __future__ import annotations
@@ -9,12 +12,13 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 import flet as ft
 
 from .. import theme as th
 from ..config import DATA_DIR
-from ..db.backup import open_folder
+from ..db.backup import backup_database, open_folder
 from ..db.models import table_label
 from ..services.data_io import (
     EXPORT_TABLES,
@@ -25,7 +29,7 @@ from ..services.data_io import (
     import_csv,
     import_json,
 )
-from .widgets import close_modal, form_field, modal, primary_button, snack
+from .widgets import close_modal, confirm, form_field, modal, primary_button, snack
 
 logger = logging.getLogger(__name__)
 
@@ -88,48 +92,93 @@ def open_data_io_dialog(page: ft.Page, refresh=None) -> ft.AlertDialog:
     )
     path_field = form_field("导入文件路径（JSON 或 CSV）", "")
 
-    def do_export_json(_) -> None:
+    busy = {"value": False}
+    action_buttons: list[ft.Control] = []
+
+    def set_busy(state: bool) -> None:
+        busy["value"] = state
+        for button in action_buttons:
+            button.disabled = state
         try:
-            EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-            path = export_json(EXPORT_DIR / f"dingfengbo-{stamp}.json")
-        except Exception as exc:
-            logger.exception("导出 JSON 失败")
-            result.value = f"导出失败：{exc}"
-            result.color = th.ACCENT
             page.update()
+        except Exception:
+            logger.debug("导入导出按钮状态刷新失败，页面可能已销毁", exc_info=True)
+
+    def run_action(
+        work: Callable[[], object],
+        on_done: Callable[[object, Exception | None], None],
+    ) -> None:
+        """后台执行整库读写，回到 UI 线程收尾并恢复按钮。"""
+        if busy["value"]:
+            snack(page, "上一个操作还没结束，请稍候", th.ACCENT)
             return
-        result.value = f"已导出 JSON：{path}"
-        result.color = th.PRIMARY
+        set_busy(True)
+
+        def worker() -> None:
+            try:
+                payload, error = work(), None
+            except Exception as exc:  # 交给 UI 线程统一提示
+                logger.warning("数据操作失败：%s", exc)
+                payload, error = None, exc
+
+            async def finish() -> None:
+                set_busy(False)
+                on_done(payload, error)
+
+            try:
+                page.run_task(finish)
+            except Exception:
+                logger.debug("数据操作结果回 UI 线程失败，页面可能已销毁", exc_info=True)
+
+        page.run_thread(worker)
+
+    def _set_result(text: str, ok: bool = True) -> None:
+        result.value = text
+        result.color = th.PRIMARY if ok else th.ACCENT
         page.update()
 
-    def do_export_markdown(_) -> None:
-        try:
+    def do_export_json(_) -> None:
+        def work():
+            EXPORT_DIR.mkdir(parents=True, exist_ok=True)
             stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-            files = export_markdown(EXPORT_DIR / f"markdown-{stamp}")
-        except Exception as exc:
-            logger.exception("导出 Markdown 失败")
-            result.value = f"导出失败：{exc}"
-            result.color = th.ACCENT
-            page.update()
-            return
-        result.value = f"已导出 {len(files)} 个 Markdown 文件到 {files[0].parent if files else EXPORT_DIR}"
-        result.color = th.PRIMARY
-        page.update()
+            return export_json(EXPORT_DIR / f"dingfengbo-{stamp}.json")
+
+        def done(payload, error) -> None:
+            if error is not None:
+                _set_result(f"导出失败：{error}", ok=False)
+                return
+            _set_result(f"已导出 JSON：{payload}")
+
+        run_action(work, done)
+
+    def do_export_markdown(_) -> None:
+        def work():
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            return export_markdown(EXPORT_DIR / f"markdown-{stamp}")
+
+        def done(payload, error) -> None:
+            if error is not None:
+                _set_result(f"导出失败：{error}", ok=False)
+                return
+            folder = payload[0].parent if payload else EXPORT_DIR
+            _set_result(f"已导出 {len(payload or [])} 个 Markdown 文件到 {folder}")
+
+        run_action(work, done)
 
     def do_export_csv(_) -> None:
         table = export_table.value or "transactions"
-        try:
-            path = export_csv(table, EXPORT_DIR / f"{table}.csv")
-        except Exception as exc:
-            logger.exception("导出 CSV 失败")
-            result.value = f"导出失败：{exc}"
-            result.color = th.ACCENT
-            page.update()
-            return
-        result.value = f"已导出：{path}"
-        result.color = th.PRIMARY
-        page.update()
+
+        def work():
+            EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+            return export_csv(table, EXPORT_DIR / f"{table}.csv")
+
+        def done(payload, error) -> None:
+            if error is not None:
+                _set_result(f"导出失败：{error}", ok=False)
+                return
+            _set_result(f"已导出：{payload}")
+
+        run_action(work, done)
 
     def do_browse(_) -> None:
         def worker() -> None:
@@ -139,6 +188,8 @@ def open_data_io_dialog(page: ft.Page, refresh=None) -> ft.AlertDialog:
                 if path:
                     path_field.value = path
                     page.update()
+                    return
+                snack(page, "没有选到文件，可直接粘贴路径", th.TEXT_MUTED)
 
             try:
                 page.run_task(apply)
@@ -156,33 +207,60 @@ def open_data_io_dialog(page: ft.Page, refresh=None) -> ft.AlertDialog:
         if not path.exists():
             snack(page, f"文件不存在：{path}", th.ACCENT)
             return
-        try:
-            if path.suffix.lower() == ".json":
+        suffix = path.suffix.lower()
+        if suffix not in (".json", ".csv"):
+            snack(page, "只支持 .json 与 .csv", th.ACCENT)
+            return
+        table = import_table.value or "transactions"
+        target = table_label(table) if suffix == ".csv" else "全部数据"
+        confirm(
+            page,
+            f"将把 {path.name} 导入到「{target}」。\n"
+            "合并规则是「最后写入获胜」，本地较新的记录不会被覆盖；"
+            "但导入前会自动备份当前库，以便随时回退。\n确定继续？",
+            lambda: _run_import(path, suffix, table),
+        )
+
+    def _run_import(path: Path, suffix: str, table: str) -> None:
+        def work():
+            # 先备份再动库：导入是不可撤销的合并操作。
+            backup = backup_database(label="pre-import")
+            if suffix == ".json":
                 outcome = import_json(path)
                 message = f"导入完成：写入/更新 {outcome['imported']} 条"
-            elif path.suffix.lower() == ".csv":
-                table = import_table.value or "transactions"
+                if outcome["skipped"]:
+                    message += f"，跳过 {outcome['skipped']} 条"
+            else:
                 outcome = import_csv(table, path)
                 message = (
-                    f"导入 {table_label(table)}：成功 {outcome['imported']}，跳过 {outcome['skipped']}"
+                    f"导入 {table_label(table)}：成功 {outcome['imported']}，"
+                    f"跳过 {outcome['skipped']}"
                 )
                 if outcome["errors"]:
                     message += "（" + "；".join(outcome["errors"][:2]) + "）"
-            else:
-                snack(page, "只支持 .json 与 .csv", th.ACCENT)
+            return message, backup
+
+        def done(payload, error) -> None:
+            if error is not None:
+                _set_result(f"导入失败：{error}", ok=False)
                 return
-        except Exception as exc:
-            logger.exception("导入失败")
-            snack(page, f"导入失败：{exc}", th.ACCENT)
-            return
-        snack(page, message, th.PRIMARY)
-        if refresh is not None:
-            refresh()
+            message, backup = payload
+            _set_result(f"{message}；导入前已备份为 {backup.name}")
+            if refresh is not None:
+                refresh()
+
+        run_action(work, done)
 
     def open_dir(_) -> None:
         EXPORT_DIR.mkdir(parents=True, exist_ok=True)
         if not open_folder(EXPORT_DIR):
             snack(page, f"导出目录：{EXPORT_DIR}", th.TEXT_MUTED)
+
+    export_json_button = primary_button("导出 JSON（全量）", do_export_json, "DOWNLOAD_OUTLINED")
+    export_md_button = primary_button("导出 Markdown", do_export_markdown, "DOWNLOAD_OUTLINED")
+    export_csv_button = ft.TextButton("导出 CSV", on_click=do_export_csv)
+    import_button = primary_button("开始导入", do_import, "UPLOAD_OUTLINED")
+    action_buttons.extend([export_json_button, export_md_button, export_csv_button, import_button])
 
     body = ft.Column(
         [
@@ -191,10 +269,9 @@ def open_data_io_dialog(page: ft.Page, refresh=None) -> ft.AlertDialog:
             ft.Text("导出", size=th.FONT_CARD_TITLE, color=th.TEXT, weight="bold"),
             ft.Row(
                 [
-                    primary_button("导出 JSON（全量）", do_export_json, "download"),
-                    primary_button("导出 Markdown", do_export_markdown, "download"),
-                    ft.Row([export_table, ft.TextButton("导出 CSV", on_click=do_export_csv)],
-                           spacing=6),
+                    export_json_button,
+                    export_md_button,
+                    ft.Row([export_table, export_csv_button], spacing=6),
                 ],
                 spacing=8,
                 wrap=True,
@@ -202,13 +279,7 @@ def open_data_io_dialog(page: ft.Page, refresh=None) -> ft.AlertDialog:
             ft.Container(height=1, bgcolor=th.DIVIDER),
             ft.Text("导入", size=th.FONT_CARD_TITLE, color=th.TEXT, weight="bold"),
             ft.Row([path_field, ft.TextButton("浏览…", on_click=do_browse)], spacing=8),
-            ft.Row(
-                [
-                    import_table,
-                    primary_button("开始导入", do_import, "upload"),
-                ],
-                spacing=8,
-            ),
+            ft.Row([import_table, import_button], spacing=8),
             ft.Text(
                 "JSON 导入按「最后写入获胜」合并，适合换机或从旧备份恢复；导入的行会重新进入待同步队列。"
                 "CSV 按列名匹配、缺列用默认值，已有记录按 ID 或业务键（日期 / 习惯+日期）去重，"

@@ -131,6 +131,65 @@ def _add_missing_columns(connection: Connection) -> None:
             logger.info("已为存量库补充列：%s.%s", table.name, column.name)
 
 
+_COMPOSITE_INDEXES = (
+    ("ix_%s_owner_sync_seq", "owner_id", "sync_seq"),
+    ("ix_%s_owner_sync_status", "owner_id", "sync_status"),
+)
+
+
+def _ensure_indexes(connection: Connection) -> None:
+    """给存量库补复合索引，并收敛历史重复打卡后建唯一索引。
+
+    ``create_all`` 只建缺失的表，不会给已存在的表补索引；升级后的老库需要这一步
+    才能拿到与新建库一致的索引。习惯打卡的重复行必须先收敛，否则唯一索引建不上。
+    """
+    existing = set(inspect(connection).get_table_names())
+    for table in Base.metadata.tables.values():
+        if table.name not in existing:
+            continue
+        for template, first, second in _COMPOSITE_INDEXES:
+            connection.execute(
+                text(
+                    f"CREATE INDEX IF NOT EXISTS {_quote(template % table.name)} "
+                    f"ON {_quote(table.name)} ({_quote(first)}, {_quote(second)})"
+                )
+            )
+    if "habit_logs" not in existing:
+        return
+    duplicates = connection.execute(
+        text(
+            "SELECT owner_id, habit_id, date, COUNT(*) AS n FROM habit_logs "
+            "GROUP BY owner_id, habit_id, date HAVING n > 1"
+        )
+    ).all()
+    for owner_id, habit_id, day, _count in duplicates:
+        keep = connection.execute(
+            text(
+                "SELECT id FROM habit_logs WHERE owner_id = :o AND habit_id = :h "
+                "AND date = :d AND is_deleted = 0 "
+                "ORDER BY updated_at DESC, id DESC LIMIT 1"
+            ),
+            {"o": owner_id, "h": habit_id, "d": day},
+        ).scalar()
+        if keep is None:
+            continue
+        connection.execute(
+            text(
+                "UPDATE habit_logs SET is_deleted = 1, sync_status = 'pending' "
+                "WHERE owner_id = :o AND habit_id = :h AND date = :d "
+                "AND is_deleted = 0 AND id != :keep"
+            ),
+            {"o": owner_id, "h": habit_id, "d": day, "keep": keep},
+        )
+        logger.info("已收敛历史重复打卡：habit=%s date=%s", habit_id, day)
+    connection.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_habit_logs_active "
+            "ON habit_logs (owner_id, habit_id, date) WHERE is_deleted = 0"
+        )
+    )
+
+
 def initialize_schema(engine: Engine) -> None:
     """创建新表；旧版整数主键库在一个事务内迁移为 UUID。"""
     with engine.begin() as connection:
@@ -145,6 +204,7 @@ def initialize_schema(engine: Engine) -> None:
         if not legacy_tables:
             Base.metadata.create_all(connection)
             _add_missing_columns(connection)
+            _ensure_indexes(connection)
             _assign_missing_sequences(connection)
             return
         if "transactions" in legacy_tables and "accounts" not in legacy_tables:
@@ -196,4 +256,5 @@ def initialize_schema(engine: Engine) -> None:
         for table in legacy_tables:
             connection.execute(text(f"DROP TABLE {_quote(f'_legacy_uuid_{table}')}"))
         _add_missing_columns(connection)
+        _ensure_indexes(connection)
         _assign_missing_sequences(connection)

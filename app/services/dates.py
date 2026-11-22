@@ -95,6 +95,13 @@ def parse_lunar(value: str, default_year: int | None = None) -> tuple[int, int, 
     if not value:
         return None
     year = default_year or date.today().year
+    # 「2027年九月初九」这种写法：年份后面跟的是中文月份，不是数字串，
+    # 先单独把年份摘出来；否则下面的「剥掉年份」分支会把年份一起丢掉，
+    # 解析结果退化成今年，到期日整体错一年。
+    m = re.match(r"^(\d{4})\s*年\s*", value)
+    if m:
+        year = int(m.group(1))
+        value = value[m.end():]
     m = re.fullmatch(r"(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})日?", value)
     if m:
         year, month, day = (int(x) for x in m.groups())

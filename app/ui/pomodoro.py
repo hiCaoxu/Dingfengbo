@@ -15,7 +15,7 @@ from ..db.session import session_scope
 from ..services.notify import notify
 from ..services.sync import mark_pending_write
 from .. import theme as th
-from .widgets import confirm, dismiss, dropdown, modal, primary_button, snack
+from .widgets import confirm, dismiss, dropdown, modal, primary_button, set_button_text, snack
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +101,7 @@ def _run_timer(
                     status_text.value = "已停止"
                     status_text.color = th.TEXT_MUTED
                 start_btn.disabled = False
-                start_btn.text = "开始"
+                set_button_text(start_btn, "开始")
                 stop_btn.disabled = True
                 page.update()
                 if finished and refresh is not None:
@@ -146,7 +146,7 @@ def open_pomodoro_dialog(page: ft.Page, refresh=None):
     def stop(_=None):
         _session["active"] = False
         # 立即恢复按钮状态：计时线程要等下一次 tick 才会发现已停止。
-        start_btn.text = "开始"
+        set_button_text(start_btn, "开始")
         start_btn.disabled = False
         stop_btn.disabled = True
         status_text.value = "已停止"
@@ -180,7 +180,7 @@ def open_pomodoro_dialog(page: ft.Page, refresh=None):
         status_text.color = th.PRIMARY
         start_btn.disabled = True
         # 运行中把按钮文案改掉，弹窗里一眼能看出计时没停。
-        start_btn.text = "计时中…"
+        set_button_text(start_btn, "计时中…")
         stop_btn.disabled = False
         page.update()
         _run_timer(
@@ -214,5 +214,9 @@ def open_pomodoro_dialog(page: ft.Page, refresh=None):
             start_btn,
         ],
         width=520,
+        # 计时期间不允许点遮罩/Esc 关掉：否则 _session["active"] 残留为 True，
+        # 「停止」按钮随弹窗一起消失，再打开又被拒，只能干等本轮结束。
+        modal=True,
+        on_dismiss=lambda e: stop(),
     )
     return dialog

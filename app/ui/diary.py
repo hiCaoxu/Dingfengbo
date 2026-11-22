@@ -23,6 +23,7 @@ from .state import state
 from .uploads import upload_button
 from .widgets import (
     card,
+    confirm,
     dismiss,
     divider,
     empty,
@@ -36,6 +37,38 @@ _state = state.diary
 _EDITOR_LOCK = threading.Lock()
 # 正文里的 Markdown 图片：![](...)
 _IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)")
+
+# 自动保存：正文原先只在 on_blur 落库，而同步完成 / 切主题 / 切日期都会整页重建，
+# 控件被替换时 on_blur 不保证触发，未失焦的文字就既没落库也没了。这里按停顿落库。
+_AUTOSAVE_DEBOUNCE_MS = 700
+_autosave_timer: threading.Timer | None = None
+# 待落库的最新正文：重建编辑区时先 flush，避免「取消定时器 = 丢内容」。
+_pending_save: dict | None = None
+
+
+def _cancel_autosave_timer() -> None:
+    global _autosave_timer
+    if _autosave_timer is not None:
+        _autosave_timer.cancel()
+        _autosave_timer = None
+
+
+def flush_pending_save() -> None:
+    """立即把尚未写盘的正文落库（重建编辑区 / 切换日期 / 失焦前调用）。"""
+    global _pending_save
+    pending, _pending_save = _pending_save, None
+    _cancel_autosave_timer()
+    if pending:
+        save_content(pending["id"], pending["value"])
+
+
+def _schedule_save(diary_id: str, value: str) -> None:
+    global _autosave_timer, _pending_save
+    _pending_save = {"id": diary_id, "value": value}
+    _cancel_autosave_timer()
+    _autosave_timer = threading.Timer(_AUTOSAVE_DEBOUNCE_MS / 1000, flush_pending_save)
+    _autosave_timer.daemon = True
+    _autosave_timer.start()
 
 
 def set_selected(day: date) -> None:
@@ -57,6 +90,8 @@ def _editor_data(day: date) -> dict:
     建库路径串行化，避免同一天插入两次触发 (owner_id, date) 唯一约束。
     """
     with _EDITOR_LOCK:
+        # 先落库待保存的正文，再读库：否则重建读到的还是上一次写盘的内容。
+        flush_pending_save()
         with session_scope() as session:
             diary = ensure_diary(session, day)
             return {"id": diary.id, "title": diary.title, "content": diary.content}
@@ -64,6 +99,9 @@ def _editor_data(day: date) -> dict:
 
 def _editor(page: ft.Page, data: dict, refresh) -> ft.Control:
     diary_id, title, content = data["id"], data["title"], data["content"]
+    # 本轮重建发生在最后一个字刚输入、定时器还没触发时：以内存里的最新值为准。
+    if _pending_save and _pending_save.get("id") == diary_id:
+        content = _pending_save.get("value") or content
     has_diary = bool((content or "").strip())
     # 正文占满卡片剩余高度（不再用 min_lines 撑），和卡片同高
     field = ft.TextField(
@@ -74,6 +112,7 @@ def _editor(page: ft.Page, data: dict, refresh) -> ft.Control:
         filled=False,
         color=th.TEXT,
         text_style=ft.TextStyle(size=13, color=th.TEXT, height=1.6),
+        on_change=lambda e: _schedule_save(diary_id, e.control.value or ""),
         on_blur=lambda e: save_content(diary_id, e.control.value),
         expand=True,
     )
@@ -81,7 +120,9 @@ def _editor(page: ft.Page, data: dict, refresh) -> ft.Control:
         text = field.value or ""
         separator = "\n" if text and not text.endswith("\n") else ""
         field.value = f"{text}{separator}![]({url})\n"
-        save_content(diary_id, field.value)
+        # 先同步待保存缓冲再 flush：否则重建时 _editor 会用缓冲里的旧正文覆盖新图。
+        _schedule_save(diary_id, field.value)
+        flush_pending_save()
         # 重建卡片，让下方配图区立刻出现新图片
         refresh()
 
@@ -116,7 +157,7 @@ def _editor(page: ft.Page, data: dict, refresh) -> ft.Control:
                     spacing=6,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
-                ft.Text("光标离开正文即自动保存", size=th.FONT_CAPTION, color=th.TEXT_MUTED),
+                ft.Text("输入停顿即自动保存，切页/同步完成也不会丢字", size=th.FONT_CAPTION, color=th.TEXT_MUTED),
                 divider(),
                 field,
                 *([image_strip] if image_strip else []),
@@ -216,7 +257,11 @@ def _life_panel(page: ft.Page, refresh, events: list[dict]) -> ft.Control:
                 icon_button(ACTIONS["edit"], lambda e, ev=event: form_dialog(ev), "编辑", compact=True),
                 icon_button(
                     ACTIONS["delete"],
-                    lambda e, i=event["id"]: (life.delete_event(i), refresh()),
+                    lambda e, i=event["id"], t=event["title"]: confirm(
+                        page,
+                        f"删除人生大事「{t}」？",
+                        lambda: (life.delete_event(i), refresh()),
+                    ),
                     "删除",
                     compact=True,
                 ),
@@ -396,12 +441,16 @@ def _list_view(refresh, data) -> ft.Control:
         width=240,
         border_color=th.DIVIDER,
         focused_border_color=th.PRIMARY,
-        on_change=lambda e: (_state.__setitem__("query", e.control.value or ""), refresh()),
+        hint_text="输入后回车检索",
+        # 只记状态、不触发整页重建：以前每敲一个字都会重建整页（含这个输入框），
+        # 焦点随之丢失，实际只能「敲一个字→点回输入框」。
+        on_change=lambda e: _state.__setitem__("query", e.control.value or ""),
+        on_submit=lambda e: refresh(),
     )
     return card(
         ft.Column(
             [
-                field,
+                ft.Row([field, ft.TextButton("检索", on_click=lambda e: refresh())], spacing=6),
                 divider(),
                 ft.Column(
                     [

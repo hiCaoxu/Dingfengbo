@@ -31,14 +31,17 @@ def _not_configured(page: ft.Page, refresh=None) -> None:
     open_settings_dialog(page, refresh, refresh)
 
 
-def ensure_consent(page: ft.Page, refs: list[str], on_agree) -> bool:
-    """首次把引用数据发给第三方模型前的知情确认；已确认返回 True。"""
-    if not refs or load_settings().get("ai_data_notice_ack"):
+def ensure_consent(page: ft.Page, scope: str, on_agree) -> bool:
+    """首次把本地数据发给第三方模型前的知情确认；已确认/无数据返回 True。
+
+    ``scope`` 是**本次实际会外发的数据范围**，必须包含 source=focus/report 这类
+    任务隐式带上的统计——只看 @引用会让「今日建议/写周报」绕过确认。
+    """
+    if not scope or load_settings().get("ai_data_notice_ack"):
         return True
     provider = AI_PROVIDERS.get(load_settings().get("ai_provider", "custom"), {}).get(
         "name", "自定义服务"
     )
-    tables = "、".join(f"@{get_label(name)}" for name in refs)
 
     def close(_):
         dismiss(page, dialog)
@@ -53,7 +56,7 @@ def ensure_consent(page: ft.Page, refs: list[str], on_agree) -> bool:
         title=ft.Text("数据将发送至第三方大模型", size=th.FONT_SECTION_TITLE,
                       color=th.TEXT, weight="bold"),
         content=ft.Text(
-            f"本次任务引用了 {tables}，其近期记录会发送至 {provider}。"
+            f"本次任务会把{scope}通过网络发送至 {provider}。"
             "该提示只出现一次，取消则不会发送任何内容。",
             size=th.FONT_BODY,
             color=th.TEXT_MUTED,
@@ -78,8 +81,8 @@ def run_task_dialog(
         return
     request = build_request(key, extra)
     title = request.task.label if request.task else "AI 任务"
-    if request.refs and not ensure_consent(
-        page, request.refs, lambda: run_task_dialog(page, key, extra, on_saved, refresh)
+    if request.sends_data and not ensure_consent(
+        page, request.data_scope, lambda: run_task_dialog(page, key, extra, on_saved, refresh)
     ):
         return
 
@@ -261,7 +264,7 @@ def open_draft_dialog(page: ft.Page, drafts: list, on_saved=None) -> ft.AlertDia
         ),
         [
             ft.TextButton("取消", on_click=lambda e: close_modal(page, dialog)),
-            primary_button("保存到本地", save, "save"),
+            primary_button("保存到本地", save, "SAVE_OUTLINED"),
         ],
         width=640,
     )

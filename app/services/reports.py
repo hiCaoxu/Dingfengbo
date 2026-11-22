@@ -80,7 +80,7 @@ def _todo_section(session: Session, start: date, end: date) -> dict[str, Any]:
             if start <= day <= end:
                 completed += 1
                 completed_titles.append(item.title)
-        if item.created_at and start <= item.created_at.date() <= end:
+        if item.created_at and start <= local_date_from_utc(item.created_at) <= end:
             created += 1
         if not item.completed:
             tags.update(_tags_of(item.tags))
@@ -89,13 +89,21 @@ def _todo_section(session: Session, start: date, end: date) -> dict[str, Any]:
         1 for item in rows if not item.completed and item.due_date and item.due_date < today
     )
     pending = sum(1 for item in rows if not item.completed)
-    total = completed + pending
+    # 本期「应完成」= 本期完成的 + 到期日落在本期内但尚未完成的。
+    # 用全库未完成数当分母，会把"积压 100 项、本周完成 5 项"算成 5%，完全失真。
+    due_in_period_pending = sum(
+        1
+        for item in rows
+        if not item.completed and item.due_date and start <= item.due_date <= end
+    )
+    denominator = completed + due_in_period_pending
     return {
         "completed": completed,
         "created": created,
         "pending": pending,
         "overdue": overdue,
-        "completion_rate": round(completed / total * 100) if total else 0,
+        "due_in_period": denominator,
+        "completion_rate": round(completed / denominator * 100) if denominator else 0,
         "top_tags": tags.most_common(5),
         "completed_titles": completed_titles[:10],
     }
@@ -127,9 +135,9 @@ def _note_section(session: Session, start: date, end: date) -> dict[str, Any]:
     updated = 0
     tags: Counter[str] = Counter()
     for item in rows:
-        if item.created_at and start <= item.created_at.date() <= end:
+        if item.created_at and start <= local_date_from_utc(item.created_at) <= end:
             created += 1
-        if item.updated_at and start <= item.updated_at.date() <= end:
+        if item.updated_at and start <= local_date_from_utc(item.updated_at) <= end:
             updated += 1
         tags.update(_tags_of(item.tags))
     return {
@@ -260,8 +268,15 @@ def _habit_section(session: Session, start: date, end: date) -> dict[str, Any]:
 
 def _budget_section(session: Session, start: date, end: date) -> dict[str, Any]:
     month = f"{end.year:04d}-{end.month:02d}"
+    # 与「记账 → 预算」同一口径：长期预算（month=""）也参与，月度条目覆盖长期条目。
+    # 只查 month == 本月 会让"只设了长期预算"的用户在报告里永远看到 0。
     budgets = list(
-        session.scalars(select(Budget).where(Budget.is_deleted.is_(False), Budget.month == month))
+        session.scalars(
+            select(Budget).where(
+                Budget.is_deleted.is_(False),
+                (Budget.month == month) | (Budget.month == ""),
+            )
+        )
     )
     if not budgets:
         return {"month": month, "total": 0.0, "expense": 0.0, "remaining": 0.0, "categories": []}
@@ -276,15 +291,28 @@ def _budget_section(session: Session, start: date, end: date) -> dict[str, Any]:
         .group_by(Transaction.category)
     )
     actual = {str(category or "其他"): float(value or 0) for category, value in spent}
-    total = sum(float(item.amount or 0) for item in budgets if not item.category)
+    monthly: dict[str, float] = {}
+    standing: dict[str, float] = {}
+    total_monthly = 0.0
+    total_standing = 0.0
+    for item in budgets:
+        amount = float(item.amount or 0)
+        if item.category:
+            bucket = monthly if item.month else standing
+            bucket[item.category] = bucket.get(item.category, 0.0) + amount
+        elif item.month:
+            total_monthly += amount
+        else:
+            total_standing += amount
+    category_budgets = {**standing, **monthly}
+    total = total_monthly or total_standing
     categories = [
         {
-            "category": item.category,
-            "budget": round(float(item.amount or 0), 2),
-            "actual": round(actual.get(item.category, 0.0), 2),
+            "category": category,
+            "budget": round(amount, 2),
+            "actual": round(actual.get(category, 0.0), 2),
         }
-        for item in budgets
-        if item.category
+        for category, amount in sorted(category_budgets.items(), key=lambda kv: -kv[1])
     ]
     expense = round(sum(actual.values()), 2)
     return {

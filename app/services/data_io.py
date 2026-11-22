@@ -14,7 +14,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy import update as sql_update
 
 from ..db.models import MODEL_BY_TABLE, Account, table_label
@@ -86,15 +86,44 @@ def export_json(dest: Path | str, tables: list[str] | None = None) -> Path:
     return target
 
 
+_DATE_FORMATS = ("%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d", "%Y年%m月%d日", "%d/%m/%Y", "%m/%d/%Y")
+
+
+def _coerce_date(value: Any) -> date | None:
+    """宽松解析日期：兼容 Excel/本地化导出的 `2026/1/1`、`2026.01.01` 等写法。
+
+    只认常见分隔符与「年月日」；解析不出来返回 None，由调用方决定是跳过还是报错——
+    直接把字符串塞进 Date 列会触发 SQLAlchemy 的 StatementError，整行失败且提示含糊。
+    """
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        pass
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(text[:19], fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
 def _coerce(column, value: Any) -> Any:
-    if value in (None, ""):
+    if value in (None, "", "None"):
         return None
     python_type = column.type.python_type
     try:
         if python_type is datetime:
-            return datetime.fromisoformat(str(value))
+            text = str(value).strip()
+            try:
+                return datetime.fromisoformat(text[:19])
+            except ValueError:
+                parsed = _coerce_date(value)
+                return datetime.combine(parsed, datetime.min.time()) if parsed else None
         if python_type is date:
-            return date.fromisoformat(str(value)[:10])
+            return _coerce_date(value)
         if python_type is bool:
             return str(value).strip().lower() in ("1", "true", "yes", "是", "y")
         if python_type is float:
@@ -157,6 +186,8 @@ def import_json(path: Path | str) -> dict[str, Any]:
         raise ValueError("文件格式不正确：缺少 tables 字段")
     applied: list[dict] = []
     skipped = 0
+    superseded = 0
+    unchanged = 0
     errors: list[str] = []
     tables_seen: set[str] = set()
     queued = 0
@@ -175,20 +206,31 @@ def import_json(path: Path | str) -> dict[str, Any]:
                     skipped += 1
                     errors.append(f"{table_label(table)} 第 {index} 条：缺少 updated_at，已跳过")
                     continue
+                # 导入是「恢复」语义：文件里的记录一律视为未删除，否则会写进墓碑行，
+                # 用户看到「导入成功」但界面上什么都没有。
+                data["is_deleted"] = False
                 try:
                     # 单条一个 savepoint：某条落库失败只回滚它自己，后面的行继续。
                     with session.begin_nested():
-                        applied.extend(
-                            apply_remote(
-                                session, [{"table": table, "data": data}], owner_id="local"
-                            )
+                        result = apply_remote(
+                            session, [{"table": table, "data": data}], owner_id="local"
                         )
+                    if any(item.get("superseded") for item in result):
+                        superseded += 1
+                    elif result and not result[0].get("changed"):
+                        unchanged += 1
+                    applied.extend(result)
                 except Exception as exc:
                     logger.warning("导入 %s 第 %d 条失败：%s", table, index, exc)
                     skipped += 1
                     errors.append(f"{table_label(table)} 第 {index} 条：{type(exc).__name__}")
         queued = _requeue_pending(session, applied)
     imported = sum(1 for item in applied if item.get("changed"))
+    skipped += superseded + unchanged
+    if superseded:
+        errors.append(f"{superseded} 条因本地版本更新被跳过（未覆盖较新数据）")
+    elif unchanged:
+        errors.append(f"{unchanged} 条与本地版本一致，未重复写入")
     if queued:
         from .sync import mark_pending_write
 
@@ -197,6 +239,8 @@ def import_json(path: Path | str) -> dict[str, Any]:
         "imported": imported,
         "tables": len(tables_seen),
         "skipped": skipped,
+        "superseded": superseded,
+        "unchanged": unchanged,
         "queued": queued,
         "errors": errors[:10],
     }
@@ -221,21 +265,30 @@ def export_csv(table: str, dest: Path | str) -> Path:
     return target
 
 
-def _prepare_row(model, mapping: dict[str, Any]) -> dict[str, Any]:
-    """把 CSV 行转成模型字段；只接受模型已有列。"""
+def _prepare_row(model, mapping: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """把 CSV 行转成模型字段；只接受模型已有列。
+
+    返回 (字段, 无法解析的列名)。日期/时间列有值却解析不出来时必须报错而不是静默
+    丢弃——后者会把「到期日」变成空，用户看到的是数据"导进来了但日期没了"。
+    同步元数据与软删除标记不允许由文件决定（与 JSON 导入保持同一白名单）。
+    """
     values: dict[str, Any] = {}
+    bad: list[str] = []
     for column in model.__table__.columns:
+        if column.name in _IMPORT_BLOCKED_FIELDS:
+            continue
         if column.name not in mapping:
             continue
         raw = mapping[column.name]
+        if str(raw).strip() == "":
+            continue
         coerced = _coerce(column, raw)
-        if coerced is None and column.name not in ("due_date", "due_time", "completed_at",
-                                                   "body_fat", "distance_km", "rating",
-                                                   "to_account_id", "last_generated",
-                                                   "next_date"):
+        if coerced is None:
+            if column.type.python_type in (date, datetime):
+                bad.append(column.name)
             continue
         values[column.name] = coerced
-    return values
+    return values, bad
 
 
 # CSV 没有可靠的 id（用户经常手工编辑再导入），按业务键找已有行：
@@ -247,7 +300,7 @@ _CSV_NATURAL_KEYS: dict[str, tuple[str, ...]] = {
     "habits": ("name",),
     "habit_logs": ("habit_id", "date"),
     "accounts": ("name",),
-    "transactions": ("date", "amount", "note"),
+    "transactions": ("date", "kind", "category", "amount", "note"),
     "weights": ("date",),
     "sleeps": ("date",),
     "exercises": ("date", "kind"),
@@ -268,7 +321,12 @@ def _find_csv_duplicate(session, model, table: str, values: dict[str, Any]):
     for key in keys:
         if key not in values or values[key] in (None, ""):
             return None
-        conditions.append(getattr(model, key) == values[key])
+        column = getattr(model, key)
+        if key == "amount":
+            # 金额是 REAL：直接 == 既不可靠，也会把 12.00 与 12.000000001 判成同一条。
+            conditions.append(func.round(column, 2) == round(float(values[key]), 2))
+        else:
+            conditions.append(column == values[key])
     return session.scalar(select(model).where(*conditions))
 
 
@@ -285,7 +343,11 @@ def import_csv(table: str, path: Path | str) -> dict[str, Any]:
         reader = csv.DictReader(handle)
         for index, row in enumerate(reader, start=2):
             try:
-                values = _prepare_row(model, row)
+                values, bad = _prepare_row(model, row)
+                if bad:
+                    skipped += 1
+                    errors.append(f"第 {index} 行：无法解析 {'、'.join(bad)}")
+                    continue
                 if not values:
                     skipped += 1
                     continue
@@ -303,7 +365,8 @@ def import_csv(table: str, path: Path | str) -> dict[str, Any]:
                         continue
                     values["account_id"] = account_id
                     values.setdefault("kind", "expense")
-                    values.setdefault("date", date.today().isoformat())
+                    # 必须是 date 对象：SQLite 的 Date 列只接受 Python date。
+                    values.setdefault("date", date.today())
                 if table == "todos" and not str(values.get("title") or "").strip():
                     skipped += 1
                     continue
@@ -368,18 +431,45 @@ def _table_markdown(headers: list[str], rows: list[list[str]]) -> str:
     return "\n".join(lines)
 
 
+_RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL"} | {
+    f"{prefix}{i}" for prefix in ("COM", "LPT") for i in range(1, 10)
+}
+
+
+def _safe_filename(text: str, fallback: str, used: set[str]) -> str:
+    """生成 Windows 可用的文件名：去掉非法字符/保留名，并对同名自动加序号。
+
+    同名笔记若直接写同一个文件会互相覆盖，导出结果静默少一条——这是「导出丢数据」
+    的典型来源，所以这里按 `used` 集合去重。
+    """
+    cleaned = "".join(ch for ch in str(text or "") if ch not in '\\/:*?"<>|').strip().strip(".")
+    cleaned = cleaned[:40] or fallback
+    if cleaned.upper() in _RESERVED_NAMES:
+        cleaned = f"_{cleaned}"
+    candidate = cleaned
+    index = 2
+    while candidate.lower() in used:
+        candidate = f"{cleaned}-{index}"
+        index += 1
+    used.add(candidate.lower())
+    return candidate
+
+
 def export_markdown(dest_dir: Path | str, tables: list[str] | None = None) -> list[Path]:
     """导出 Markdown：待办/收支为表格，日记/笔记按篇落文件。"""
     folder = Path(dest_dir)
     folder.mkdir(parents=True, exist_ok=True)
     selected = [table for table in (tables or MARKDOWN_TABLES) if table in MODEL_BY_TABLE]
     written: list[Path] = []
+    used_diary_names: set[str] = set()
+    used_note_names: set[str] = set()
     for table in selected:
         rows = _rows(table)
         if table == "diaries":
             for row in rows:
                 day = str(row.get("date") or "")[:10] or "未知日期"
-                path = folder / f"日记-{day}.md"
+                stem = _safe_filename(f"日记-{day}", "日记-未知日期", used_diary_names)
+                path = folder / f"{stem}.md"
                 path.write_text(
                     f"# {row.get('title') or day}\n\n{row.get('content') or ''}\n", encoding="utf-8"
                 )
@@ -387,8 +477,8 @@ def export_markdown(dest_dir: Path | str, tables: list[str] | None = None) -> li
         elif table == "notes":
             for index, row in enumerate(rows, start=1):
                 title = str(row.get("title") or "未命名笔记")
-                safe = "".join(ch for ch in title if ch not in '\\/:*?"<>|')[:40] or f"笔记{index}"
-                path = folder / f"笔记-{safe}.md"
+                stem = _safe_filename(f"笔记-{title}", f"笔记{index}", used_note_names)
+                path = folder / f"{stem}.md"
                 tags = row.get("tags") or "[]"
                 path.write_text(
                     f"# {title}\n\n> 标签：{tags}\n\n{row.get('content') or ''}\n",

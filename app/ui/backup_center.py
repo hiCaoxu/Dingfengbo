@@ -236,7 +236,7 @@ def open_backup_center(page: ft.Page, refresh=None) -> ft.AlertDialog:
 
         run_action(work, done)
 
-    backup_button = primary_button("立即备份", do_backup, "save")
+    backup_button = primary_button("立即备份", do_backup, "SAVE_OUTLINED")
     export_button = ft.TextButton("导出完整数据 (zip)", on_click=export_all)
     fixed_buttons.extend([backup_button, export_button])
 

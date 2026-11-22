@@ -18,12 +18,59 @@ from ..db.repo import (
     mark_rejected,
     pending_changes,
     purge_deleted,
+    record_superseded,
     sync_queue_stats,
 )
 from ..db.session import session_scope
 from ..services.clock import set_clock_offset
 
 logger = logging.getLogger(__name__)
+
+# 自动同步暂停开关：恢复备份期间必须让所有同步路径（启动/周期/写后/手动）都停下。
+# 只靠 UI 层"不要再启动新线程"不够——检查与应用之间还有窗口，正在跑的线程也可能
+# 在库被整库替换后才提交。因此校验下沉到 sync_once 里，进入临界区前后各看一次。
+_auto_pause = threading.Event()
+_auto_pause_reason = ""
+
+
+def pause_auto_sync(reason: str = "") -> None:
+    global _auto_pause_reason
+    _auto_pause_reason = reason
+    _auto_pause.set()
+
+
+def resume_auto_sync() -> None:
+    global _auto_pause_reason
+    _auto_pause_reason = ""
+    _auto_pause.clear()
+
+
+def auto_sync_paused() -> bool:
+    return _auto_pause.is_set()
+
+
+def _parse_iso(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _remember_superseded(session, item: dict) -> None:
+    """把「云端版本更新、本次推送被丢弃」写进本地冲突表，用户可在同步明细里核对。"""
+    table = str(item.get("table") or "")
+    record_id = str(item.get("id") or "")
+    if not table or not record_id:
+        return
+    record_superseded(
+        session,
+        table,
+        record_id,
+        _parse_iso(item.get("local_updated_at")),
+        _parse_iso(item.get("remote_updated_at")),
+    )
 
 
 class SyncClient:
@@ -137,6 +184,7 @@ class SyncClient:
         cursors = self._load_cursors(settings)
         selected = self.selected_tables(settings)
         while True:
+            before = {table: dict(cursor) for table, cursor in cursors.items()}
             response = client.post(
                 self._endpoint("/api/sync/pull"),
                 json={"cursors": cursors, "limit": 200},
@@ -168,6 +216,18 @@ class SyncClient:
             # 选择性同步的过滤不应被误判成「分页无进展」：判定要看服务端原始返回。
             if not raw_changes:
                 raise RuntimeError("同步服务返回了无效的分页状态")
+            # 服务端按「任意表还有下一页」置 has_more。若被过滤掉的是未勾选的表，
+            # 它的游标永远不会推进，has_more 就会一直为真——必须在这种情况下退出，
+            # 否则同一页会被无限重拉（CPU/流量打满，且 sync 锁永不释放）。
+            if all(
+                (cursors.get(table) or {}).get("sequence")
+                == (before.get(table) or {}).get("sequence")
+                for table in cursors
+            ):
+                logger.warning(
+                    "同步分页无进展（可能是未勾选的表积压超过一页），本轮回退退出"
+                )
+                break
 
     def _push(self, client: httpx.Client) -> None:
         selected = self.selected_tables(load_settings())
@@ -188,17 +248,25 @@ class SyncClient:
         self._observe_server_time(payload)
         accepted = payload.get("accepted", [])
         rejected = payload.get("rejected", []) or []
+        superseded = payload.get("superseded", []) or []
         with session_scope() as session:
             mark_clean(session, accepted)
             # 每轮都复算，避免上一轮的被拒数一直挂在状态栏上。
             self.rejected_count = mark_rejected(session, rejected) if rejected else 0
+            for item in superseded:
+                _remember_superseded(session, item)
         if rejected:
             logger.warning("同步被拒 %d 条：%s", len(rejected), rejected[:3])
+        if superseded:
+            logger.warning("同步被云端更新版本覆盖 %d 条（本地改动已出队）", len(superseded))
 
     def sync_once(self) -> str:
         if not self._lock.acquire(blocking=False):
             return self.status
         try:
+            if _auto_pause.is_set():
+                self.status = f"同步已暂停（{_auto_pause_reason or '恢复备份中'}）"
+                return self.status
             settings = load_settings()
             if not settings.get("sync_enabled", True):
                 self.status = "同步已关闭"

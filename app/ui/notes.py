@@ -47,6 +47,9 @@ _preview_generation = 0
 # 或用 Ctrl+W 关闭窗口，未失焦的内容就会丢。这里按停顿自动落库。
 _AUTOSAVE_DEBOUNCE_MS = 700
 _autosave_timer: threading.Timer | None = None
+# 待落库的编辑回调。重建编辑页时必须先 flush 再 cancel：
+# 只 cancel 等于把最后一次输入连同唯一的写库机会一起丢掉。
+_pending_autosave = None
 
 
 def _cancel_preview_timer() -> None:
@@ -61,6 +64,18 @@ def _cancel_autosave_timer() -> None:
     if _autosave_timer is not None:
         _autosave_timer.cancel()
         _autosave_timer = None
+
+
+def _flush_autosave() -> None:
+    """立即落库待保存的编辑，再清掉定时器。"""
+    global _pending_autosave
+    pending, _pending_autosave = _pending_autosave, None
+    if pending is not None:
+        try:
+            pending()
+        except Exception:
+            logger.debug("笔记自动保存失败", exc_info=True)
+    _cancel_autosave_timer()
 
 
 def _note_snapshot(note: Note) -> tuple[str, str, str, str]:
@@ -235,7 +250,8 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
     generation = _preview_generation
     # 切换笔记时立即作废上一篇的在途渲染，否则旧正文会被写进新笔记的预览区。
     _cancel_preview_timer()
-    _cancel_autosave_timer()
+    # 先 flush 再重建：把「上一个编辑页里已输入但还没到写盘时间」的内容落库。
+    _flush_autosave()
     note_id, title_text, content_text, tags_raw = _note_snapshot(note)
 
     def _autosave() -> None:
@@ -245,9 +261,10 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
         save_content(note_id, source.value or "")
 
     def _schedule_save() -> None:
-        global _autosave_timer
+        global _autosave_timer, _pending_autosave
+        _pending_autosave = _autosave
         _cancel_autosave_timer()
-        _autosave_timer = threading.Timer(_AUTOSAVE_DEBOUNCE_MS / 1000, _autosave)
+        _autosave_timer = threading.Timer(_AUTOSAVE_DEBOUNCE_MS / 1000, _flush_autosave)
         _autosave_timer.daemon = True
         _autosave_timer.start()
 

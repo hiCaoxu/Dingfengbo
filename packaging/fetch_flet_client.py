@@ -1,4 +1,9 @@
-"""下载并缓存 PyInstaller 所需的 Flet 桌面客户端压缩包。"""
+"""下载并缓存 PyInstaller 所需的 Flet 桌面客户端压缩包。
+
+版本优先级：环境变量 FLET_VERSION > 已安装的 flet_desktop 版本 > 0.86.5 兜底。
+以前这里是硬编码 0.86.5，和 requirements.txt / 实际安装版本三方不一致，
+构建出来的客户端可能与运行时协议不匹配。
+"""
 
 from __future__ import annotations
 
@@ -7,7 +12,17 @@ import sys
 import urllib.request
 from pathlib import Path
 
-FLET_VERSION = "0.86.5"
+
+def _installed_version() -> str:
+    try:
+        import flet_desktop
+
+        return str(getattr(flet_desktop, "__version__", "") or "")
+    except Exception:
+        return ""
+
+
+FLET_VERSION = os.environ.get("FLET_VERSION") or _installed_version() or "0.86.5"
 ARTIFACT = "flet-windows.zip"
 DEST = Path(__file__).with_name(ARTIFACT)
 URL = os.environ.get(

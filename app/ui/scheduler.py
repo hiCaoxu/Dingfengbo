@@ -14,7 +14,12 @@ import flet as ft
 from ..db.session import session_scope
 from ..services.notify import notify
 from ..services.reminders import collect_due
-from ..services.sync import sync_client
+from ..services.sync import (
+    auto_sync_paused as _core_auto_paused,
+    pause_auto_sync as _core_pause,
+    resume_auto_sync as _core_resume,
+    sync_client,
+)
 from .. import theme as th
 from .widgets import snack
 
@@ -66,6 +71,8 @@ def pause_auto_sync(reason: str) -> None:
     global _pause_reason
     _pause_reason = reason
     _paused.set()
+    # 同步层自己也要停：只在 UI 层"不启动新线程"挡不住已经越过检查的那一次。
+    _core_pause(reason)
     logger.info("自动同步已暂停：%s", reason)
 
 
@@ -74,12 +81,13 @@ def resume_auto_sync() -> None:
     if not _paused.is_set():
         return
     _paused.clear()
+    _core_resume()
     _pause_reason = ""
     logger.info("自动同步已恢复")
 
 
 def auto_sync_paused() -> bool:
-    return _paused.is_set()
+    return _paused.is_set() or _core_auto_paused()
 
 
 def _run_sync_async() -> None:
@@ -118,6 +126,11 @@ def _start_reminder_loop(delay: int = REMINDER_INTERVAL) -> None:
 
 
 def _reminder_tick() -> None:
+    if _paused.is_set():
+        # 恢复备份期间不动库：提醒线程也会写 todo_reminders，撞上整库替换会写坏数据，
+        # 或在 Windows 上占住文件让替换失败。
+        _start_reminder_loop()
+        return
     try:
         with session_scope() as session:
             due = collect_due(session)
@@ -130,9 +143,21 @@ def _reminder_tick() -> None:
                 notify(item["title"], item["body"])
             except Exception:
                 logger.exception("系统提醒发送失败：%s", item.get("todo_id"))
+                _forget_reminder(item)
         _show_reminder_snack(len(due))
         logger.info("已发送 %d 条待办提醒", len(due))
     _start_reminder_loop()
+
+
+def _forget_reminder(item: dict) -> None:
+    """弹窗失败时撤销登记，下一分钟重试（仍在 12 小时补发窗口内才会被重新收集）。"""
+    try:
+        from ..services.reminders import forget
+
+        with session_scope() as session:
+            forget(session, item["todo_id"], item["fire_at"])
+    except Exception:
+        logger.debug("撤销提醒登记失败", exc_info=True)
 
 
 def _show_reminder_snack(count: int) -> None:

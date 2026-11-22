@@ -13,8 +13,12 @@ Set-Location $root
 $target = "$User@$HostIp"
 $sshOpts = @("-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new")
 
-& ssh @sshOpts $target "mkdir -p '$RemoteDir/docker'"
+& ssh @sshOpts $target "mkdir -p '$RemoteDir/docker' '$RemoteDir/data'"
 if ($LASTEXITCODE -ne 0) { throw "SSH failed" }
+# 容器以 uid 10001 运行，宿主目录必须归它所有，否则首次部署会因
+# unable to open database file 陷入重启循环（docker 以 root 建目录时是 755/root）。
+& ssh @sshOpts $target "chown -R 10001:10001 '$RemoteDir/data'"
+if ($LASTEXITCODE -ne 0) { throw "数据目录授权失败" }
 
 & scp @sshOpts -r app server run_server.py requirements-server.txt .dockerignore "$target`:$RemoteDir/"
 if ($LASTEXITCODE -ne 0) { throw "Copy source failed" }

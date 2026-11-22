@@ -5,15 +5,28 @@ from __future__ import annotations
 import flet as ft
 
 _FALLBACK = "CIRCLE_OUTLINED"
+_VARIANT_SUFFIXES = ("_OUTLINED", "_SHARP", "_ROUND", "_FILLED")
 
 
 def ico(name: str) -> str:
-    """取线性图标名；低版本 Flet 缺少对应常量时回退到线性圆点。"""
-    value = getattr(ft.Icons, name, None)
-    if value is None:
-        alt = name.replace("_OUTLINED", "_SHARP")
-        value = getattr(ft.Icons, alt, None)
-    return value or getattr(ft.Icons, _FALLBACK, ft.Icons.CIRCLE)
+    """取线性图标名；低版本 Flet 缺少对应常量时回退到线性圆点。
+
+    调用方偶尔会传小写（如 ``"fitness_center"``）或不带变体后缀的名字。
+    ``getattr`` 大小写敏感，不统一转大写就会静默回退成空心圆，图标语义全丢；
+    而裸名（``"LINK"``）通常存在实心版本，因此优先补 ``_OUTLINED`` 再退回裸名，
+    保持全项目"线性图标"的一致风格。
+    """
+    key = (name or "").upper()
+    candidates: list[str] = []
+    if key and not key.endswith(_VARIANT_SUFFIXES):
+        candidates.append(f"{key}_OUTLINED")
+    candidates.append(key)
+    for candidate in candidates:
+        value = getattr(ft.Icons, candidate, None)
+        if value is not None:
+            return value
+    alt = key.replace("_OUTLINED", "_SHARP")
+    return getattr(ft.Icons, alt, None) or getattr(ft.Icons, _FALLBACK, ft.Icons.CIRCLE)
 
 
 NAV = {

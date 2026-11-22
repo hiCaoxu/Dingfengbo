@@ -12,7 +12,7 @@ import unittest
 import flet as ft
 
 from app.ui.async_utils import background_section
-from app.ui.widgets import close_modal, confirm, modal, open_dialog
+from app.ui.widgets import close_modal, confirm, equal_height_row, modal, open_dialog
 
 
 def _walk(control):
@@ -158,6 +158,28 @@ class BackgroundSectionTests(unittest.TestCase):
 
         holder = background_section(page, lambda: [], bad_renderer)
         self.assertIsNotNone(holder)
+
+
+class EqualHeightRowTests(unittest.TestCase):
+    """同行卡片：固定高度与按比例分配高度两种模式的契约。"""
+
+    def test_height_forces_equal_card_height(self) -> None:
+        first, second = ft.Container(), ft.Container()
+        row = equal_height_row([first, second], height=180)
+        self.assertEqual(row.height, 180)
+        self.assertEqual((first.height, second.height), (180, 180))
+
+    def test_expand_shares_parent_height_without_fixed_height(self) -> None:
+        # 数据概览靠 expand 让整行瓜分窗口剩余高度，卡片自身不能再带固定高度
+        row = equal_height_row([ft.Container(), ft.Container()], expand=7)
+        self.assertEqual(row.expand, 7)
+        self.assertIsNone(row.height)
+        self.assertTrue(all(control.height is None for control in row.controls))
+
+    def test_default_keeps_content_sized_layout(self) -> None:
+        row = equal_height_row([ft.Container()])
+        self.assertIsNone(row.expand)
+        self.assertIsNone(row.height)
 
 
 if __name__ == "__main__":

@@ -147,6 +147,19 @@ def collect_due(session: Session, now: datetime | None = None) -> list[dict]:
     return fired
 
 
+def forget(session: Session, todo_id: str, fire_at: datetime) -> None:
+    """撤销一次已登记但没能送达的提醒，让下一轮重新收集并重试。
+
+    ``collect_due`` 是先登记再返回给调用方弹窗；如果弹窗环节抛异常（PowerShell
+    被策略拦截、无窗口句柄等），这条提醒会被误记为"已发送"，之后再也不会出现。
+    """
+    session.execute(
+        delete(TodoReminder).where(
+            TodoReminder.todo_id == todo_id, TodoReminder.fire_at == fire_at
+        )
+    )
+
+
 def _prune(session: Session, now: datetime) -> None:
     cutoff = now - timedelta(days=PRUNE_DAYS)
     session.execute(delete(TodoReminder).where(TodoReminder.created_at < cutoff))

@@ -85,6 +85,9 @@ def tray_available() -> bool:
 
 _tray_icon = None
 _tray_thread: threading.Thread | None = None
+# pystray 的 run() 在 setup 阶段抛错（无 explorer/权限/无图标）时线程会直接退出。
+# 必须把"线程已启动"和"真的跑起来了"区分开，否则主窗口会被隐藏且再也叫不回来。
+_tray_failed = threading.Event()
 
 
 def _icon_image():
@@ -102,6 +105,7 @@ def start_tray(page, on_quit=None) -> bool:
     global _tray_icon, _tray_thread
     if _tray_icon is not None or not tray_available():
         return False
+    _tray_failed.clear()
     try:
         import pystray
     except Exception:
@@ -133,18 +137,35 @@ def start_tray(page, on_quit=None) -> bool:
         return False
 
     def run() -> None:
+        global _tray_icon
         try:
             _tray_icon.run()
         except Exception:
             logger.exception("托盘线程异常")
+            _tray_failed.set()
+            _tray_icon = None
+            # 窗口可能已经被隐藏：尽力把主窗口恢复出来，别让用户只能杀进程。
+            try:
+                _schedule(lambda: _show(page))
+            except Exception:
+                logger.debug("托盘失败后恢复窗口失败", exc_info=True)
 
     _tray_thread = threading.Thread(target=run, name="dingfengbo-tray", daemon=True)
     _tray_thread.start()
     return True
 
 
-def tray_running() -> bool:
-    return _tray_icon is not None
+def tray_running(wait: float = 0.0) -> bool:
+    """托盘是否真的可用。
+
+    ``wait`` > 0 时最多等这么久来观察 run() 是否立刻失败——关闭窗口前调用，
+    避免"图标没建起来却把窗口藏了"导致程序彻底失联。
+    """
+    if _tray_icon is None:
+        return False
+    if wait > 0 and not _tray_failed.is_set():
+        _tray_failed.wait(wait)
+    return _tray_icon is not None and not _tray_failed.is_set()
 
 
 def stop_tray() -> None:

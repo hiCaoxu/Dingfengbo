@@ -104,6 +104,26 @@ _SETTINGS_CACHE: tuple[tuple[int, int], dict[str, Any]] | None = None
 _B64_PREFIX = "b64:"
 _DPAPI_PREFIX = "dpapi:"
 
+# 上次读取时哪些敏感字段「解密失败」。换机器/换 Windows 账户后 DPAPI 解不开，
+# load_settings 只能返回空串；此时任何一次后台保存都不能把磁盘上的原密文抹掉。
+_DECRYPT_FAILED: set[str] = set()
+
+
+def _is_protected(value: str) -> bool:
+    return value.startswith((_DPAPI_PREFIX, _B64_PREFIX))
+
+
+def secrets_protection() -> str:
+    """敏感字段当前的保护级别：dpapi / base64（弱）/ none（未配置）。"""
+    raw = _raw_disk_settings()
+    protected = [str(raw.get(key) or "") for key in ("sync_token", "ai_api_key")]
+    protected = [value for value in protected if value]
+    if not protected:
+        return "none"
+    if all(value.startswith(_DPAPI_PREFIX) for value in protected):
+        return "dpapi"
+    return "base64"
+
 # DPAPI 可用性只探测一次：不可用时（非 Windows / 受策略限制）退回 base64 混淆。
 _DPAPI_AVAILABLE: bool | None = None
 
@@ -179,6 +199,15 @@ def _obfuscate_token(value: str) -> str:
     return _B64_PREFIX + base64.urlsafe_b64encode(raw).decode("ascii")
 
 
+def _raw_disk_settings() -> dict[str, Any]:
+    """按原样读取 settings.json（不解密），用于安全地保留原密文。"""
+    try:
+        data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def _deobfuscate_token(value: str) -> str:
     if value.startswith(_DPAPI_PREFIX):
         payload = _b64_decode(value[len(_DPAPI_PREFIX):])
@@ -218,10 +247,20 @@ def load_settings() -> dict[str, Any]:
             logger.exception("读取设置文件失败，使用默认设置")
     token = settings.get("sync_token")
     if token:
-        settings["sync_token"] = _deobfuscate_token(str(token))
+        raw_token = str(token)
+        settings["sync_token"] = _deobfuscate_token(raw_token)
+        if settings["sync_token"] or not _is_protected(raw_token):
+            _DECRYPT_FAILED.discard("sync_token")
+        else:
+            _DECRYPT_FAILED.add("sync_token")
     ai_key = settings.get("ai_api_key")
     if ai_key:
-        settings["ai_api_key"] = _deobfuscate_token(str(ai_key))
+        raw_key = str(ai_key)
+        settings["ai_api_key"] = _deobfuscate_token(raw_key)
+        if settings["ai_api_key"] or not _is_protected(raw_key):
+            _DECRYPT_FAILED.discard("ai_api_key")
+        else:
+            _DECRYPT_FAILED.add("ai_api_key")
     if stamp is not None:
         _SETTINGS_CACHE = (stamp, copy.deepcopy(settings))
     return settings
@@ -231,12 +270,21 @@ def save_settings(settings: dict[str, Any]) -> None:
     global _SETTINGS_CACHE
     with _SETTINGS_LOCK:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
+        raw = _raw_disk_settings()
         merged = load_settings()
         merged.update(settings)
-        if merged.get("sync_token"):
-            merged["sync_token"] = _obfuscate_token(str(merged["sync_token"]))
-        if merged.get("ai_api_key"):
-            merged["ai_api_key"] = _obfuscate_token(str(merged["ai_api_key"]))
+        for key in ("sync_token", "ai_api_key"):
+            if key in settings:
+                # 调用方显式给了新值（包括清空）：按新值处理。
+                merged[key] = _obfuscate_token(str(settings[key])) if settings[key] else ""
+            elif key in _DECRYPT_FAILED and raw.get(key):
+                # 解密失败且本次没改这一项：保留磁盘上的原密文，否则一次后台
+                # 保存游标就会把原机上还能用的密钥永久抹掉。
+                merged[key] = str(raw[key])
+            elif merged.get(key):
+                merged[key] = _obfuscate_token(str(merged[key]))
+            else:
+                merged[key] = str(raw.get(key) or "")
         tmp = SETTINGS_PATH.with_suffix(".tmp")
         tmp.write_text(
             json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8"

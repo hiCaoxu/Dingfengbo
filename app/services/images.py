@@ -26,7 +26,11 @@ MAX_EDGE = 1600  # 压缩后最长边（像素）
 QUALITY = 82  # JPEG 质量
 MAX_UPLOAD_BYTES = 12 * 1024 * 1024
 UPLOAD_TIMEOUT = 30.0
+# 解压炸弹防线：先看像素数再 load()，避免一张几 MB 的高压缩比图片把内存吃光。
+MAX_PIXELS = 40_000_000
 _SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+
+Image.MAX_IMAGE_PIXELS = MAX_PIXELS
 
 
 class UploadError(RuntimeError):
@@ -49,6 +53,10 @@ def compress(data: bytes) -> bytes:
     """压到长边 MAX_EDGE，转 JPEG；动图或无法识别时原样返回。"""
     try:
         image = Image.open(io.BytesIO(data))
+        width, height = image.size
+        if width * height > MAX_PIXELS:
+            logger.info("图片像素过大（%dx%d），按原文件上传", width, height)
+            return data
         image.load()
     except Exception:
         logger.info("图片无法识别，按原文件上传")

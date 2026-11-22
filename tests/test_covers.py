@@ -52,11 +52,21 @@ class ResolveTests(unittest.TestCase):
 
 
 class _FakeResponse:
+    status_code = 200
     content = b"\x89PNG\r\n\x1a\n" + b"0" * 64
     headers = {"content-type": "image/png"}
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args) -> bool:
+        return False
+
     def raise_for_status(self) -> None:
         return None
+
+    def iter_bytes(self):
+        yield self.content
 
 
 class _FakeClient:
@@ -71,7 +81,7 @@ class _FakeClient:
     def __exit__(self, *args) -> bool:
         return False
 
-    def get(self, url, headers=None):  # noqa: ARG002
+    def stream(self, method, url, headers=None):  # noqa: ARG002
         return _FakeResponse()
 
 
@@ -99,7 +109,7 @@ class CacheTests(unittest.TestCase):
 
     def test_failure_is_remembered(self) -> None:
         class _Boom(_FakeClient):
-            def get(self, url, headers=None):
+            def stream(self, method, url, headers=None):  # noqa: ARG002
                 raise RuntimeError("网络不可达")
 
         url = "https://example.com/broken.jpg"

@@ -23,6 +23,15 @@ PERIOD_LABELS = {"month": "每月", "week": "每周"}
 MAX_CATCH_UP = 12  # 一次最多补生成 12 期，避免长期未启动后爆量
 
 
+def _cents(value: float | None) -> int:
+    """金额换算成整数分。
+
+    全项目金额是 float，直接比较会把 ``1.10 + 2.20 > 3.30`` 判成真（浮点表示误差），
+    于是"刚好花完"被报成超支、提示金额算出 ¥0.00。所有比较与展示统一先落到分。
+    """
+    return int(round(float(value or 0) * 100))
+
+
 def occurrence_id(rule_id: str, due: date) -> str:
     """周期交易的确定性主键：同一 (规则, 到期日) 在任何设备都会算出同一个 id。
 
@@ -136,22 +145,26 @@ def overview(today: date | None = None) -> dict[str, Any]:
     items = []
     for category, amount in sorted(categories.items(), key=lambda item: -item[1]):
         used = actual.get(category, 0.0)
+        budget_cents = _cents(amount)
+        used_cents = _cents(used)
         items.append(
             {
                 "category": category,
-                "budget": round(amount, 2),
-                "used": round(used, 2),
-                "remaining": round(amount - used, 2),
-                "percent": round(used / amount * 100) if amount else 0,
-                "over": used > amount,
+                "budget": budget_cents / 100,
+                "used": used_cents / 100,
+                "remaining": (budget_cents - used_cents) / 100,
+                "percent": round(used_cents / budget_cents * 100) if budget_cents else 0,
+                "over": used_cents > budget_cents,
             }
         )
+    total_cents = _cents(total_budget)
+    expense_cents = _cents(month_expense)
     return {
         "month": month_key(today),
-        "total_budget": round(total_budget, 2),
-        "expense": round(month_expense, 2),
-        "remaining": round(total_budget - month_expense, 2) if total_budget else 0.0,
-        "percent": round(month_expense / total_budget * 100) if total_budget else 0,
+        "total_budget": total_cents / 100,
+        "expense": expense_cents / 100,
+        "remaining": (total_cents - expense_cents) / 100 if total_cents else 0.0,
+        "percent": round(expense_cents / total_cents * 100) if total_cents else 0,
         "categories": items,
         "uncategorized": round(
             sum(value for category, value in actual.items() if category not in categories), 2
@@ -276,13 +289,15 @@ def generate_due(today: date | None = None) -> int:
                         note=f"[周期] {rule.name}",
                     )
                     created += 1
-                rule.last_generated = due
-                rule.next_date = next_occurrence(rule, due)
+                # 走 repo.update 而不是直接赋属性：直接改不会 mark_dirty，
+                # 规则行会停在 clean 状态、永远不会被推送到服务端，
+                # 另一台设备就按旧的 next_date 反复进入补生成流程。
+                update(session, rule, last_generated=due, next_date=next_occurrence(rule, due))
                 guard += 1
             if guard == MAX_CATCH_UP:
                 # 长期未启动：直接跳到下一个未来日期，避免下次启动继续补历史。
                 while rule.next_date and rule.next_date <= today:
-                    rule.next_date = next_occurrence(rule, rule.next_date)
+                    update(session, rule, next_date=next_occurrence(rule, rule.next_date))
     if created:
         mark_pending_write()
     return created

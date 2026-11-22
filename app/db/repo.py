@@ -331,6 +331,11 @@ def _parse(column, value: Any) -> Any:
 
 _VERSION_AGNOSTIC_FIELDS = {"owner_id", "sync_status", "sync_seq"}
 
+# 落库时不允许由载荷决定的字段：同步元数据由各自一侧（客户端队列 / 服务端序列）
+# 单独维护。服务端若把客户端带上的 sync_seq 抄进被合并的行，会打乱全局序列；
+# 客户端若把服务端序列抄回来也没有意义（游标只用服务端返回值）。
+_NOT_COPIED_FIELDS = {"sync_seq", "sync_status"}
+
 # 业务键合并：两个客户端各自新建的同一天记录 id 不同，但业务上是同一行。
 # Diary 按日期唯一；HabitLog 按 (习惯, 日期) 唯一（「同天只保留一条」的承诺）。
 _MERGE_KEYS: dict[type, tuple[str, ...]] = {
@@ -357,7 +362,10 @@ def _find_merge_target(session: Session, model, owner: str, data: dict[str, Any]
                 return None
         else:
             conditions.append(column == str(raw))
-    return session.scalar(select(model).where(*conditions))
+    return session.scalar(
+        # 优先复用未删除的行：历史墓碑可能和活跃行共享同一个业务键。
+        select(model).where(*conditions).order_by(model.is_deleted, model.updated_at.desc())
+    )
 
 
 def _same_version(obj: SyncMixin, model, data: dict[str, Any]) -> bool:
@@ -377,7 +385,15 @@ def _same_version(obj: SyncMixin, model, data: dict[str, Any]) -> bool:
 def apply_remote(
     session: Session, changes: Iterable[dict], owner_id: str | None = None
 ) -> list[dict]:
-    """最后写入获胜；桌面端将远端租户 ID 规范化为本地所有者。"""
+    """最后写入获胜；桌面端将远端租户 ID 规范化为本地所有者。
+
+    返回的每条都会带上 ``record_id``（**实际落库行**的主键）。业务键合并时本地会
+    保留自己的主键，而载荷里的 ``id`` 是远端 id；服务端要按 ``record_id`` 分配
+    ``sync_seq``，否则合并后的行拿不到新序列号，别的设备永远拉不到这次修改。
+
+    ``superseded=True`` 表示"本地（服务端）已有更新版本，本次推送被丢弃"——
+    调用方必须把它回执给客户端，否则那条记录会在客户端永久停留在待同步队列。
+    """
     applied: list[dict] = []
     for change in changes:
         table = change.get("table")
@@ -402,19 +418,36 @@ def apply_remote(
             continue
         if obj.updated_at and obj.updated_at >= remote_time:
             if obj.updated_at == remote_time and _same_version(obj, model, data):
-                applied.append({"table": table, "data": data, "changed": False})
+                applied.append(
+                    {"table": table, "data": data, "changed": False, "record_id": obj.id}
+                )
             elif obj.updated_at > remote_time:
-                # 远端版本更旧：本地获胜，但留下冲突记录供用户核对。
+                # 远端版本更旧：本地获胜，但留下冲突记录供用户核对，并回执让客户端出队。
                 _record_conflict(session, str(table), record_id, obj.updated_at, remote_time)
+                applied.append(
+                    {
+                        "table": table,
+                        "data": data,
+                        "changed": False,
+                        "superseded": True,
+                        "record_id": obj.id,
+                        "local_updated_at": obj.updated_at,
+                        "remote_updated_at": remote_time,
+                    }
+                )
             continue
         for column in model.__table__.columns:
             # 按业务键（日期 / 习惯+日期）合并出的本地行保留本地主键，避免被远端 id 改写行身份。
             if column.name == "id" and merged:
                 continue
+            if column.name in _NOT_COPIED_FIELDS:
+                continue
             if column.name in data:
                 setattr(obj, column.name, _parse(column, data[column.name]))
         obj.sync_status = "clean"
-        applied.append({"table": table, "data": data, "changed": True})
+        applied.append(
+            {"table": table, "data": data, "changed": True, "record_id": obj.id}
+        )
     session.flush()
     return applied
 
@@ -437,6 +470,21 @@ def _record_conflict(
     row.local_updated_at = local_time
     row.remote_updated_at = remote_time
     row.created_at = utcnow()
+
+
+def record_superseded(
+    session: Session,
+    table_name: str,
+    record_id: str,
+    server_time: datetime | None,
+    pushed_time: datetime | None,
+) -> None:
+    """记一次「推送被云端更新版本覆盖」，供同步明细的冲突页展示。
+
+    被覆盖的记录已由调用方从待同步队列出队，这里只负责留痕，避免用户以为
+    自己的改动"同步成功了"却看不到任何提示。
+    """
+    _record_conflict(session, str(table_name), str(record_id), server_time, pushed_time)
 
 
 def list_conflicts(session: Session, limit: int = 50) -> list[dict]:
@@ -476,13 +524,21 @@ def clear_conflicts(session: Session) -> int:
 
 
 def max_updated_at(session: Session, owner_id: str = "local") -> str | None:
-    """返回本地最大更新时间，用于 pull 的 since 参数。"""
-    values: list[datetime] = []
-    for model in MODEL_BY_TABLE.values():
-        stmt = select(model.updated_at).where(model.owner_id == owner_id)
-        found = session.scalars(stmt).all()
-        values.extend(v for v in found if v)
-    return max(values).isoformat() if values else None
+    """返回本地最大更新时间，用于 pull 的 since 参数。
+
+    每条表下推一条 ``MAX(updated_at)``（UNION ALL 合并），而不是把该租户所有行的
+    时间戳取回 Python 再求最大值——`/api/sync/check` 是最高频的探活接口，
+    数据量增长后全表搬运会直接拖慢"测试连接"。
+    """
+    statements = [
+        select(func.max(model.updated_at).label("latest")).where(model.owner_id == owner_id)
+        for model in MODEL_BY_TABLE.values()
+    ]
+    latest: datetime | None = None
+    for value in session.execute(union_all(*statements)).scalars():
+        if value is not None and (latest is None or value > latest):
+            latest = value
+    return latest.isoformat() if latest else None
 
 
 TOMBSTONE_RETENTION_DAYS = 30

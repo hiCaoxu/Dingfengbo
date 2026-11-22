@@ -18,6 +18,7 @@ from ..services.finance import money
 from ..services.sync import mark_pending_write
 from .widgets import (
     close_modal,
+    confirm,
     divider,
     dropdown,
     empty,
@@ -239,6 +240,14 @@ def open_recurring_dialog(page: ft.Page, refresh) -> ft.AlertDialog:
         page.update()
 
     def remove(rule_id: str) -> None:
+        # 与任务/笔记/记账的删除保持一致：先确认再软删。
+        confirm(
+            page,
+            "删除这条周期规则？已生成的交易不受影响。",
+            lambda: _remove_confirmed(rule_id),
+        )
+
+    def _remove_confirmed(rule_id: str) -> None:
         budget_service.delete_rule(rule_id)
         reload()
         refresh()

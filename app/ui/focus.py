@@ -192,7 +192,7 @@ def render(
                 ft.Container(expand=True),
                 ft.Row(
                     [
-                        primary_button("记录锻炼", lambda e: navigate("health"), "fitness_center"),
+                        primary_button("记录锻炼", lambda e: navigate("health"), "FITNESS_CENTER_OUTLINED"),
                         ft.TextButton("查看健康", on_click=lambda e: navigate("health")),
                     ],
                     spacing=4,
@@ -227,7 +227,7 @@ def render(
                 ft.Container(expand=True),
                 ft.Row(
                     [
-                        primary_button("记一笔", lambda e: navigate("finance"), "payments"),
+                        primary_button("记一笔", lambda e: navigate("finance"), "PAYMENTS_OUTLINED"),
                         ft.TextButton("记账概览", on_click=lambda e: navigate("finance")),
                     ],
                     spacing=4,

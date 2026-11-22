@@ -149,7 +149,7 @@ def build(page: ft.Page, refresh) -> ft.Control:
                         lambda e, i=index: quote(i),
                         lambda e, i=index: undo(i),
                         (lambda e, d=drafts: open_draft_dialog(page, d, refresh))
-                        if any(draft.valid for draft in drafts)
+                        if any(draft.valid and not draft.saved for draft in drafts)
                         else None,
                     )
                 )
@@ -197,27 +197,43 @@ def build(page: ft.Page, refresh) -> ft.Control:
 
         def worker() -> None:
             try:
-                text = work()
-            except AIConfigError as exc:
-                text = f"⚠️ {exc}"
-            except AIError as exc:
-                text = f"⚠️ {exc}"
-            except Exception as exc:
-                logger.exception("AI 调用异常")
-                text = f"⚠️ 出错了：{exc}"
+                try:
+                    text = work()
+                except AIConfigError as exc:
+                    text = f"⚠️ {exc}"
+                except AIError as exc:
+                    text = f"⚠️ {exc}"
+                except Exception as exc:
+                    logger.exception("AI 调用异常")
+                    text = f"⚠️ 出错了：{exc}"
 
-            drafts = [] if text.startswith("⚠️") else extract_drafts(text)
+                # 模型可能返回 content=null；以前这里会在 try 之外抛 AttributeError，
+                # 线程静默退出、busy 永远为 True，界面就卡在「正在思考…」。
+                text = text or "（模型没有返回内容）"
+                drafts = [] if text.startswith("⚠️") else extract_drafts(text)
 
-            async def apply() -> None:
+                async def apply() -> None:
+                    state.ai.busy = False
+                    # 有可保存草稿时，正文只展示 JSON 前的说明部分，避免一大段原始 JSON。
+                    display = text
+                    if drafts:
+                        display = strip_json_blocks(text) or text
+                        display += f"\n\n（已解析出 {len(drafts)} 条草稿，可点「保存为记录」）"
+                    append("assistant", display, drafts)
+
+                page.run_task(apply)
+            except Exception:
+                # 兜底：任何解析/渲染异常都必须复位 busy，否则用户再也发不出消息。
+                logger.exception("AI 回复处理失败")
                 state.ai.busy = False
-                # 有可保存草稿时，正文只展示 JSON 前的说明部分，避免一大段原始 JSON。
-                display = text
-                if drafts:
-                    display = strip_json_blocks(text) or text
-                    display += f"\n\n（已解析出 {len(drafts)} 条草稿，可点「保存为记录」）"
-                append("assistant", display, drafts)
 
-            page.run_task(apply)
+                async def fail() -> None:
+                    append("assistant", "⚠️ 回复处理失败，请重试")
+
+                try:
+                    page.run_task(fail)
+                except Exception:
+                    logger.debug("AI 失败提示调度失败", exc_info=True)
 
         page.run_thread(worker)
 
@@ -307,7 +323,7 @@ def build(page: ft.Page, refresh) -> ft.Control:
     )
     input_field.on_submit = send
 
-    send_btn = primary_button("发送", send, "SEND")
+    send_btn = primary_button("发送", send, "SEND_OUTLINED")
 
     def run_task(key: str, needs_input: bool) -> None:
         extra = (input_field.value or "").strip() if needs_input else ""

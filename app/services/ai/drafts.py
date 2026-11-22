@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -19,6 +20,7 @@ from sqlalchemy import select
 from ...db.models import Account, Entertainment, Note, Todo, Transaction, table_label
 from ...db.repo import create
 from ...db.session import session_scope
+from ..covers import is_safe_remote_url
 from ..expense_rules import suggest_category
 
 logger = logging.getLogger(__name__)
@@ -49,6 +51,8 @@ class Draft:
     fields: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
     reason: str = ""
+    # 已经保存过：避免同一批草稿被重复点「保存为记录」写多份。
+    saved: bool = False
 
     @property
     def table(self) -> str:
@@ -183,12 +187,22 @@ def _normalize(item: dict[str, Any], today: date) -> Draft:
             amount = round(float(item.get("amount") or 0), 2)
         except (TypeError, ValueError):
             amount = 0.0
+        # NaN/Inf 能通过 float()，但 NaN 写库会触发 NOT NULL（SQLite 把 NaN 存成 NULL），
+        # Inf 会污染后续所有 SUM/报表，必须在入口拦掉。
+        if not math.isfinite(amount):
+            return Draft(kind, raw=item, reason="金额不是有限数值")
         if amount <= 0:
             return Draft(kind, raw=item, reason="金额无效")
-        tx_kind = str(item.get("kind") or "expense").strip().lower()
-        tx_kind = {"支出": "expense", "收入": "income", "expense": "expense", "income": "income"}.get(
-            tx_kind, "expense"
-        )
+        if amount > 1_000_000_000:
+            return Draft(kind, raw=item, reason="金额过大")
+        raw_kind = str(item.get("kind") or "expense").strip().lower()
+        tx_kind = {
+            "支出": "expense", "收入": "income",
+            "expense": "expense", "income": "income",
+        }.get(raw_kind, "")
+        if not tx_kind:
+            # 以前未知类型（含模型幻觉出的 transfer）会静默变成支出，账目就错了。
+            return Draft(kind, raw=item, reason=f"不支持的类型：{raw_kind}")
         category = str(item.get("category") or "").strip() or suggest_category(
             str(item.get("note") or "")
         )
@@ -206,6 +220,11 @@ def _normalize(item: dict[str, Any], today: date) -> Draft:
     title = str(item.get("title") or "").strip()
     if not title:
         return Draft(kind, raw=item, reason="缺少标题")
+    # 封面会由列表页自动发起 GET：模型输出（可被 @引用里的提示注入诱导）不能
+    # 直接把应用变成任意地址的请求器，非公网/非 http(s) 一律丢弃。
+    cover = str(item.get("cover") or "")
+    if cover and not is_safe_remote_url(cover):
+        cover = ""
     return Draft(
         kind,
         fields={
@@ -213,7 +232,7 @@ def _normalize(item: dict[str, Any], today: date) -> Draft:
             "kind": str(item.get("kind") or "电影")[:24],
             "status": str(item.get("status") or "想看")[:16],
             "note": str(item.get("note") or "")[:2000],
-            "cover": str(item.get("cover") or ""),
+            "cover": cover,
         },
         raw=item,
     )
@@ -238,14 +257,19 @@ def describe(drafts: list[Draft]) -> str:
 
 
 def save(drafts: list[Draft]) -> list[dict[str, Any]]:
-    """落库（只保存校验通过的草稿），返回 [{id, table, title}]，供撤销使用。"""
+    """落库（只保存校验通过的草稿），返回 [{id, table, title}]，供撤销使用。
+
+    已保存过的草稿会被跳过并打上 ``saved`` 标记：同一个 AI 回复上重复点
+    「保存为记录」不应该再插入第二份任务/笔记/交易。
+    """
     saved: list[dict[str, Any]] = []
+    written: list[Draft] = []
     with session_scope() as session:
         account = session.scalar(
             select(Account).where(Account.is_deleted.is_(False)).order_by(Account.created_at)
         )
         for draft in drafts:
-            if not draft.valid:
+            if not draft.valid or draft.saved:
                 continue
             fields = dict(draft.fields)
             if draft.type == "todo":
@@ -263,6 +287,10 @@ def save(drafts: list[Draft]) -> list[dict[str, Any]]:
             else:
                 continue
             saved.append({"id": created.id, "table": draft.table, "title": draft.title})
+            written.append(draft)
+    # 提交成功后才置位：事务回滚时草稿仍应可再次保存。
+    for draft in written:
+        draft.saved = True
     if saved:
         from ..sync import mark_pending_write
 

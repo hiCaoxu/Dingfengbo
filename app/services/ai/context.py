@@ -48,6 +48,10 @@ TABLE_BY_LABEL.setdefault("待办", "todos")
 
 # 每次引用最多读取的记录条数。
 CONTEXT_LIMIT = 30
+# 字符预算：笔记/日记正文没有长度上限，30 条全文足以超出模型上下文，
+# 或者在 120s 超时前先把请求撑成几 MB。超出的部分截断并明确标注。
+_ROW_MAX_CHARS = 320
+_TOTAL_MAX_CHARS = 12000
 
 # 同步元数据字段：序列化时跳过，避免噪音。
 _SKIP_FIELDS = {"id", "owner_id", "is_deleted", "sync_status", "sync_seq"}
@@ -78,18 +82,26 @@ def serialize_row(obj) -> str:
             continue
         label = _FIELD_LABELS.get(column.name, column.name)
         parts.append(f"{label}={value}")
-    return "；".join(parts)
+    text = "；".join(parts)
+    if len(text) > _ROW_MAX_CHARS:
+        return text[:_ROW_MAX_CHARS] + "…（已截断）"
+    return text
 
 
 def read_context(table_names: list[str], limit: int = CONTEXT_LIMIT) -> str:
     """读取引用表最近 limit 条非删除记录，返回供 AI 阅读的文本上下文。"""
     sections: list[str] = []
+    total = 0
+    truncated = False
     with session_scope() as session:
         for name in table_names:
             entry = TABLE_BY_NAME.get(name)
             if entry is None:
                 continue
             label, model = entry
+            if total >= _TOTAL_MAX_CHARS:
+                truncated = True
+                break
             rows = list(
                 session.scalars(
                     select(model)
@@ -99,8 +111,17 @@ def read_context(table_names: list[str], limit: int = CONTEXT_LIMIT) -> str:
                 )
             )
             body = "\n".join(f"- {serialize_row(r)}" for r in rows) if rows else "（暂无数据）"
-            sections.append(f"【{label}】\n{body}")
-    return "\n\n".join(sections)
+            chunk = f"【{label}】\n{body}"
+            if total + len(chunk) > _TOTAL_MAX_CHARS:
+                sections.append(f"【{label}】\n（上下文已达长度上限，余下记录省略）")
+                truncated = True
+                break
+            sections.append(chunk)
+            total += len(chunk)
+    text = "\n\n".join(sections)
+    if truncated:
+        text += "\n\n（上下文已按长度上限截断，只发送了最近的一部分记录）"
+    return text
 
 
 def parse_refs(text: str) -> list[str]:

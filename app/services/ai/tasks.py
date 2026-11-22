@@ -11,6 +11,7 @@ from datetime import date
 
 from ..focus import brief_text, today_focus
 from ..reports import build_report, report_prompt
+from ...db.models import table_label
 
 BASE_SYSTEM = (
     "你是「定风波」个人工作台的 AI 助手。用户可能通过「@表名」引用待办、日记、笔记、"
@@ -122,6 +123,10 @@ class TaskRequest:
     refs: list[str] = field(default_factory=list)
     draft: bool = False
     task: AITask | None = None
+    # 本次请求是否真的会把本地数据发往第三方（refs 之外，source=focus/report
+    # 也会把统计拼进 prompt）——知情确认必须按它判断，而不是只看 refs。
+    sends_data: bool = False
+    data_scope: str = ""
 
 
 def build_request(key: str, extra: str = "", today: date | None = None) -> TaskRequest:
@@ -131,12 +136,17 @@ def build_request(key: str, extra: str = "", today: date | None = None) -> TaskR
         raise ValueError(f"未知任务：{key}")
     today = today or date.today()
     pieces: list[str] = []
+    scope = ""
     if task.source == "report":
         period = "month" if key == "spending" else "week"
         report = build_report(period, today)
         pieces.append(report_prompt(report))
+        scope = "本期统计（任务、日记、笔记、健康、收支、娱乐、习惯）"
     elif task.source == "focus":
         pieces.append("今天的聚焦数据：\n" + brief_text(today_focus(today)))
+        scope = "今日聚焦数据（任务、健康、消费、习惯）"
+    refs_scope = "、".join(f"@{table_label(name)}" for name in task.refs)
+    send_scope = "，".join(part for part in (scope, refs_scope) if part)
     instruction = task.instruction.replace("{today}", today.isoformat())
     content = instruction if not extra.strip() else f"{instruction}\n\n{extra.strip()}"
     if pieces:
@@ -147,4 +157,6 @@ def build_request(key: str, extra: str = "", today: date | None = None) -> TaskR
         refs=list(task.refs),
         draft=task.draft,
         task=task,
+        sends_data=bool(send_scope),
+        data_scope=send_scope,
     )

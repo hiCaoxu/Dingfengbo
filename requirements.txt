@@ -1,7 +1,10 @@
 # 定风波 · 个人工作台
 # 桌面端 + 同步服务端共用的最小依赖集合
-flet>=0.24,<1.0
-flet-desktop>=0.86.5,<0.87.0
+# 代码同时兼容 Flet 0.86 与 1.x（controls 都是动态读的，没有钉死常量）；
+# 打包时由 packaging/fetch_flet_client.py 按实际安装版本决定随包的客户端，
+# 因此这里放宽到 <2.0，避免 pip install -r 把开发环境静默降级成 0.86。
+flet>=0.86,<2.0
+flet-desktop>=0.86.5,<2.0
 SQLAlchemy>=2.0,<3.0
 zhdate>=0.1
 Pygments>=2.17,<3.0
