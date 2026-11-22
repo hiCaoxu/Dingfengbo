@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 MAX_EDGE = 1600  # 压缩后最长边（像素）
 QUALITY = 82  # JPEG 质量
 MAX_UPLOAD_BYTES = 12 * 1024 * 1024
+# 上传前的原始文件上限：压缩在内存里做，先拒绝明显不可能压到 12MB 的文件。
+MAX_SOURCE_BYTES = 60 * 1024 * 1024
 UPLOAD_TIMEOUT = 30.0
 # 解压炸弹防线：先看像素数再 load()，避免一张几 MB 的高压缩比图片把内存吃光。
 MAX_PIXELS = 40_000_000
@@ -108,14 +110,26 @@ def _to_rgb(image: Image.Image) -> Image.Image:
 
 
 def compress(data: bytes) -> bytes:
-    """压到长边 MAX_EDGE，转 JPEG；动图或无法识别时原样返回。"""
+    """压到长边 MAX_EDGE，转 JPEG；动图或无法识别时原样返回。
+
+    像素超限必须**拒绝**而不是原样上传：压缩后的体积可能很小（大片纯色），
+    但解码后上亿像素会同步到每台设备，打开即吃光内存（解压炸弹）。
+    """
     try:
         image = Image.open(io.BytesIO(data))
         width, height = image.size
         if width * height > MAX_PIXELS:
-            logger.info("图片像素过大（%dx%d），按原文件上传", width, height)
-            return data
+            logger.warning("图片像素过大（%dx%d），已拒绝", width, height)
+            raise UploadError(f"图片尺寸过大（{width}×{height}），请先压缩或裁剪后再上传")
         image.load()
+    except Image.DecompressionBombError as exc:
+        logger.warning("图片触发解压炸弹保护，已拒绝")
+        raise UploadError("图片尺寸异常（疑似解压炸弹），已拒绝") from exc
+    except OSError:
+        logger.info("图片无法识别，按原文件上传")
+        return data
+    except UploadError:
+        raise
     except Exception:
         logger.info("图片无法识别，按原文件上传")
         return data
@@ -187,6 +201,11 @@ def upload_path(path: str | Path) -> str:
     if file.suffix.lower() not in _SUFFIXES:
         raise UploadError("只支持 JPG/PNG/GIF/WEBP/BMP 图片")
     try:
+        # 先看原始大小：几个 GB 的“图片”直接读进内存会 OOM，压缩也救不回来。
+        if file.stat().st_size > MAX_SOURCE_BYTES:
+            raise UploadError(
+                f"图片原始体积过大（{file.stat().st_size // (1024 * 1024)}MB），请先压缩后再上传"
+            )
         data = file.read_bytes()
     except OSError as exc:
         raise UploadError("读取图片失败，请检查文件权限") from exc

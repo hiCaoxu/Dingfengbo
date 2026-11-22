@@ -55,6 +55,21 @@ Invoke-Remote "mkdir -p '$RemoteDir/docker' '$RemoteDir/data' && echo dirs-ready
 # (docker creates the folder as root 755).
 Invoke-Remote "chown -R 10001:10001 '$RemoteDir/data' && echo chown-ready" "chown-data"
 
+# Back up the cloud DB BEFORE shipping new code: the new image runs schema migrations
+# at startup, and a bad migration would otherwise rewrite the only copy in place.
+# sqlite3's .backup API is WAL-safe (plain cp is not); keep the newest 5 snapshots.
+# Single-quoted here-string: PowerShell expands nothing, so $(date ...) runs remotely.
+$backupCmd = @'
+if [ -f "__DIR__/data/cloud.db" ]; then
+  docker run --rm -v "__DIR__/data:/data" python:3.11-slim python -c "import sqlite3; src = sqlite3.connect('/data/cloud.db'); dst = sqlite3.connect('/data/cloud.db.bak-' + __STAMP__); src.backup(dst); dst.close(); src.close()" && echo db-backed-up || echo db-backup-failed
+  ls -1t __DIR__/data/cloud.db.bak-* 2>/dev/null | tail -n +6 | xargs -r rm -f
+else
+  echo db-missing
+fi
+'@
+$backupCmd = $backupCmd.Replace("__DIR__", $RemoteDir).Replace("__STAMP__", '$(date +%Y%m%d-%H%M%S)')
+Invoke-Remote $backupCmd "backup-db"
+
 Send-Files "app" "$RemoteDir/" "copy-app"
 Send-Files "server" "$RemoteDir/" "copy-server"
 Send-Files "run_server.py" "$RemoteDir/" "copy-entry"

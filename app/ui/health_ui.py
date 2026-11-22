@@ -286,41 +286,49 @@ def _chart_grid(page: ft.Page, data: dict) -> ft.Control:
         return (len(rows), max((r.updated_at for r in rows), default=None))
 
     def render_charts() -> None:
-        weight_slot.content = ft.Image(
-            src=line_chart(
-                labels_of(weights),
-                [{"name": "体重 kg", "values": [w.kg for w in weights[-14:]], "color": th.PRIMARY, "fill": True}],
-                "体重趋势",
-                cache_key=_key(weights),
-                y_range=(56, 66),
-            ),
-            width=width, height=height, fit=ft.BoxFit.CONTAIN,
+        """后台线程只生成图片字节，控件赋值回 UI 线程（Flet 单 UI 线程模型）。"""
+        weight_src = line_chart(
+            labels_of(weights),
+            [{"name": "体重 kg", "values": [w.kg for w in weights[-14:]], "color": th.PRIMARY, "fill": True}],
+            "体重趋势",
+            cache_key=_key(weights),
+            y_range=(56, 66),
         )
-        sleep_slot.content = ft.Image(
-            # 睡眠柱状图：纵轴固定 6-10 小时；没有记录的天为 0（不参与轴范围计算），
-            # 真实数据越界（如 4.5 小时）会把轴撑开，不会整根柱子消失。
-            src=bar_chart(
-                sleep_labels,
-                sleep_hours,
-                "睡眠时长",
-                th.ACCENT,
-                cache_key=_key(sleeps),
-                y_range=(6, 10),
-            ),
-            width=width, height=height, fit=ft.BoxFit.CONTAIN,
+        # 睡眠柱状图：纵轴固定 6-10 小时；没有记录的天为 0（不参与轴范围计算），
+        # 真实数据越界（如 4.5 小时）会把轴撑开，不会整根柱子消失。
+        sleep_src = bar_chart(
+            sleep_labels,
+            sleep_hours,
+            "睡眠时长",
+            th.ACCENT,
+            cache_key=_key(sleeps),
+            y_range=(6, 10),
         )
-        exercise_slot.content = ft.Image(
-            src=bar_chart(exercise_labels, exercise_minutes, "锻炼分钟", th.PRIMARY, cache_key=_key(exercises)),
-            width=width, height=height, fit=ft.BoxFit.CONTAIN,
+        exercise_src = bar_chart(
+            exercise_labels, exercise_minutes, "锻炼分钟", th.PRIMARY, cache_key=_key(exercises)
         )
-        diet_slot.content = ft.Image(
-            src=bar_chart(diet_labels, diet_calories, "饮食热量", th.ACCENT, cache_key=_key(diets)),
-            width=width, height=height, fit=ft.BoxFit.CONTAIN,
+        diet_src = bar_chart(
+            diet_labels, diet_calories, "饮食热量", th.ACCENT, cache_key=_key(diets)
         )
+
+        async def apply() -> None:
+            try:
+                weight_slot.content = ft.Image(src=weight_src, width=width, height=height,
+                                               fit=ft.BoxFit.CONTAIN)
+                sleep_slot.content = ft.Image(src=sleep_src, width=width, height=height,
+                                              fit=ft.BoxFit.CONTAIN)
+                exercise_slot.content = ft.Image(src=exercise_src, width=width, height=height,
+                                                 fit=ft.BoxFit.CONTAIN)
+                diet_slot.content = ft.Image(src=diet_src, width=width, height=height,
+                                             fit=ft.BoxFit.CONTAIN)
+                page.update()
+            except Exception:
+                logger.exception("健康图表渲染后刷新页面失败")
+
         try:
-            page.update()
+            page.run_task(apply)
         except Exception:
-            logger.exception("健康图表渲染后刷新页面失败")
+            logger.debug("健康图表回 UI 线程失败", exc_info=True)
 
     if page is not None:
         page.run_thread(render_charts)

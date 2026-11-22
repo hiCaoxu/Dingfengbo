@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import math
 import os
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -193,10 +194,17 @@ def _coerce(column, value: Any) -> Any:
             return str(value).strip().lower() in ("1", "true", "yes", "是", "y")
         if python_type is float:
             parsed = float(value)
+            if not math.isfinite(parsed):
+                # 'inf'/'nan' 能通过 float()，但会把下游统计与 round 全部污染
+                raise ValueError("非有限数值")
             return to_float(parsed) if column.name in _MONEY_FIELDS else parsed
         if python_type is int:
             return int(float(value))
         return str(value)
+    except ArithmeticError:
+        # int(float('inf')) 抛 OverflowError：只该丢这一列，不该整行失败
+        logger.debug("_coerce：数值溢出，按无法解析处理")
+        return None
     except (TypeError, ValueError) as exc:
         logger.debug("_coerce：忽略 %s", type(exc).__name__)
         return None

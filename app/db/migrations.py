@@ -352,6 +352,10 @@ def _add_missing_columns(connection: Connection) -> None:
 _COMPOSITE_INDEXES = (
     ("ix_%s_owner_sync_seq", "owner_id", "sync_seq"),
     ("ix_%s_owner_sync_status", "owner_id", "sync_status"),
+    # /api/sync/check 与旧客户端 since 探测都是 MAX(updated_at) WHERE owner_id=?：
+    # 没有这个复合索引时 SQLite 只能倒扫 updated_at 再逐行核对 owner，多租户下会
+    # 随着别的租户写入量线性变慢。
+    ("ix_%s_owner_updated_at", "owner_id", "updated_at"),
 )
 
 
@@ -625,10 +629,15 @@ def initialize_schema(engine: Engine, *, assign_sequences: bool = True) -> None:
                             Decimal(str(values[money_field])) / 100
                         )
                 if table == "transactions":
-                    old_account_id = values["account_id"]
-                    values["account_id"] = account_ids.get(
-                        (owner, old_account_id), str(old_account_id)
-                    )
+                    # 旧库可能允许 account_id 为 NULL：直接 str(None) 会把空引用写成
+                    # 字面量 "None"，而 to_account_id 分支已有同样保护，这里补齐。
+                    old_account_id = values.get("account_id")
+                    if old_account_id is not None:
+                        values["account_id"] = account_ids.get(
+                            (owner, old_account_id), str(old_account_id)
+                        )
+                    else:
+                        values["account_id"] = ""
                     old_to_id = values.get("to_account_id")
                     if old_to_id is not None:
                         values["to_account_id"] = account_ids.get(

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import calendar
 import logging
 import re
 from datetime import date, timedelta
@@ -96,6 +97,12 @@ def parse_amount(text: str) -> float | None:
 
 
 def parse_date(text: str, today: date | None = None) -> date:
+    """从一句话里取日期；识别不出时返回今天。
+
+    只写了「M 月 D 日」没写年份时，取**距今天最近**的那一年：旧实现固定落在
+    「今年或去年」，于是 10 月说「12月25日」会被记成去年，12 月说「1月5日」会被
+    记成今年已过去的那一天。2 月 29 日在平年会夹到 2/28，而不是静默返回今天。
+    """
     today = today or date.today()
     body = text or ""
     if "前天" in body:
@@ -107,13 +114,17 @@ def parse_date(text: str, today: date | None = None) -> date:
     match = re.search(r"(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]?", body)
     if match:
         month, day = int(match.group(1)), int(match.group(2))
-        if 1 <= month <= 12 and 1 <= day <= 31:
-            year = today.year if month <= today.month else today.year - 1
+        if not (1 <= month <= 12 and 1 <= day <= 31):
+            return today
+        candidates: list[date] = []
+        for year in (today.year - 1, today.year, today.year + 1):
             try:
-                return date(year, month, day)
-            except ValueError as exc:
-                logger.debug("parse_date：忽略 %s", type(exc).__name__)
-                return today
+                candidates.append(date(year, month, day))
+            except ValueError:
+                # 平年 2/29 这类不存在的日期：夹到当月最后一天
+                last_day = calendar.monthrange(year, month)[1]
+                candidates.append(date(year, month, min(day, last_day)))
+        return min(candidates, key=lambda item: abs((item - today).days))
     return today
 
 

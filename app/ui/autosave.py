@@ -37,6 +37,49 @@ _pending: _Pending | None = None
 _timer: threading.Timer | None = None
 _version = 0
 
+# 写库失败后的自动重试：不重试的话，快照只能等下一次输入或 flush_now，
+# 用户停手后关窗就丢了。退避几档后放弃（保留在 _pending 里等下一次编辑/必要时 flush）。
+RETRY_DELAYS_MS: tuple[int, ...] = (1000, 3000, 8000)
+_retry_attempt = 0
+
+
+def _arm_retry(version: int, attempt: int) -> None:
+    """为失败快照重新挂一个定时器（只在仍是当前版本时生效）。"""
+    global _timer
+    if attempt >= len(RETRY_DELAYS_MS):
+        logger.warning("自动保存重试已放弃，等待下次编辑或 flush_now")
+        return
+    with _LOCK:
+        if _pending is None or _pending.version != version:
+            return
+        if _timer is not None:
+            _timer.cancel()
+        timer = threading.Timer(RETRY_DELAYS_MS[attempt] / 1000, _fire, (version,))
+        timer.daemon = True
+        _timer = timer
+    timer.start()
+
+
+def _fire(version: int) -> None:
+    """定时器回调：只有仍是当前版本的那次快照才落库。"""
+    global _pending, _timer, _retry_attempt
+    with _LOCK:
+        pending = _pending
+        if pending is None or pending.version != version:
+            return
+        _pending = None
+        _timer = None
+    if _write(pending):
+        _retry_attempt = 0
+    else:
+        # 写失败：_write 已把快照放回队列（version 已更新），这里退避重试。
+        with _LOCK:
+            current_version = _pending.version if _pending is not None else None
+        if current_version is not None:
+            attempt = _retry_attempt
+            _retry_attempt += 1
+            _arm_retry(current_version, attempt)
+
 
 def schedule(key: str, snapshot: Any, writer: Callable[[str, Any], None],
              delay_ms: int) -> None:
@@ -53,17 +96,6 @@ def schedule(key: str, snapshot: Any, writer: Callable[[str, Any], None],
         _timer = timer
     timer.start()
 
-
-def _fire(version: int) -> None:
-    """定时器回调：只有仍是当前版本的那次快照才落库。"""
-    global _pending, _timer
-    with _LOCK:
-        pending = _pending
-        if pending is None or pending.version != version:
-            return
-        _pending = None
-        _timer = None
-    _write(pending)
 
 
 def _write(pending: _Pending) -> bool:

@@ -300,6 +300,7 @@ def _budget_section(session: Session, start: date, end: date) -> dict[str, Any]:
     monthly: dict[str, Decimal] = {}
     standing: dict[str, Decimal] = {}
     total_monthly = ZERO
+    total_standing = ZERO
     for item in budgets:
         amount = quantize(item.amount)
         if item.category:
@@ -307,9 +308,12 @@ def _budget_section(session: Session, start: date, end: date) -> dict[str, Any]:
             bucket[item.category] = bucket.get(item.category, ZERO) + amount
         elif item.month:
             total_monthly += amount
+        else:
+            total_standing += amount
         # 无 month 的「长期总预算」不计入本月合计：拿长期额度去减本月支出，
         # 「剩余」会严重失真（报告里显示成一个大负数或大正数）。
     category_budgets = {**standing, **monthly}
+    # 与 budget.overview 同一口径：本月只看本月总预算，长期额度单独暴露。
     total_budget = total_monthly
     categories = [
         {
@@ -323,6 +327,7 @@ def _budget_section(session: Session, start: date, end: date) -> dict[str, Any]:
     return {
         "month": month,
         "total": to_float(total_budget),
+        "standing_total": to_float(total_standing),
         "expense": to_float(expense),
         "remaining": to_float(total_budget - expense) if total_budget else 0.0,
         "categories": categories,
@@ -436,6 +441,44 @@ def render_markdown(report: dict[str, Any], narrative: str = "") -> str:
             "- 明细：" + "、".join(f"{name} {count} 次" for name, count in habit["per_habit"]),
         ]
     return "\n".join(lines).rstrip() + "\n"
+
+
+def finance_prompt(report: dict[str, Any]) -> str:
+    """只把「钱相关」的统计拼成提示词（消费分析任务专用）。
+
+    ``report_prompt`` 会渲染整份报告（任务标题、笔记标签、健康、娱乐、习惯），
+    而「消费分析」只需要收支与预算数字：把无关领域也发出去属于超范围外发，且
+    与知情同意里描述的范围不符。
+    """
+    finance = report.get("finance") or {}
+    budget = report.get("budget") or {}
+    lines = [
+        "以下是用户本期的收支统计（只含金额与分类，不含任何文本内容）：",
+        f"- 收入 {finance.get('income', 0):.2f} 元，支出 {finance.get('expense', 0):.2f} 元，"
+        f"结余 {finance.get('balance', 0):.2f} 元，日均支出 {finance.get('daily_expense', 0):.2f} 元",
+    ]
+    top = finance.get("top_categories") or []
+    if top:
+        lines.append(
+            "- 支出前五分类：" + "、".join(f"{name} {amount:.2f} 元" for name, amount in top)
+        )
+    if budget.get("total"):
+        lines.append(
+            f"- 本月总预算 {budget['total']:.2f} 元，已用 {budget.get('expense', 0):.2f} 元，"
+            f"剩余 {budget.get('remaining', 0):.2f} 元（{budget.get('percent', 0)}%）"
+        )
+    over = [item for item in budget.get("categories", []) if item.get("over")]
+    if over:
+        lines.append(
+            "- 已超支分类：" + "、".join(f"{item['category']}（预算 {item['budget']:.2f}，"
+                                       f"实际 {item['actual']:.2f}）" for item in over)
+        )
+    lines.append("")
+    lines.append(
+        "请分析我本月的支出结构：指出占比最高的两类支出、可能的异常项（金额明显高于同类），"
+        "并给出 3 条可执行的省钱建议。不要编造数据。"
+    )
+    return "\n".join(lines)
 
 
 def report_prompt(report: dict[str, Any]) -> str:

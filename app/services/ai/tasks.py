@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from ..focus import brief_text, today_focus
-from ..reports import build_report, report_prompt
+from ..reports import build_report, finance_prompt, report_prompt
 from ...db.models import table_label
 
 logger = logging.getLogger(__name__)
@@ -145,8 +145,14 @@ def build_request(key: str, extra: str = "", today: date | None = None) -> TaskR
     if task.source == "report":
         period = "month" if key == "spending" else "week"
         report = build_report(period, today)
-        pieces.append(report_prompt(report))
-        scope = "本期统计（任务、日记、笔记、健康、收支、娱乐、习惯）"
+        if key == "spending":
+            # 消费分析只发钱相关数字：整份月报会带上任务标题、笔记标签、健康等
+            # 与提问无关的领域，属于超范围外发。
+            pieces.append(finance_prompt(report))
+            scope = "本月收支与预算统计"
+        else:
+            pieces.append(report_prompt(report))
+            scope = "本期统计（任务、日记、笔记、健康、收支、娱乐、习惯）"
     elif task.source == "focus":
         pieces.append("今天的聚焦数据：\n" + brief_text(today_focus(today)))
         scope = "今日聚焦数据（任务、健康、消费、习惯）"

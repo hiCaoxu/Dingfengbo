@@ -277,7 +277,9 @@ def cached_cover(
 
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / f"{key}{_extension(data, content_type)}"
-    tmp = target.with_suffix(target.suffix + ".tmp")
+    # 唯一临时名：prefetch 是线程池并发，同 URL 的两个线程曾共用一个 .tmp，
+    # 互相截断后 os.replace 可能拿到半截文件（Windows 上还会因占用失败）。
+    tmp = target.with_suffix(f"{target.suffix}.{os.getpid()}.{threading.get_ident()}.tmp")
     try:
         tmp.write_bytes(data)
         os.replace(tmp, target)

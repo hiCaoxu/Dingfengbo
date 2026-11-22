@@ -124,3 +124,83 @@ class UploadTempNameTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UploadSizeGuardTests(unittest.TestCase):
+    """ASGI 层体积护栏：在 multipart 解析/落盘之前就拒绝超大请求体。
+
+    旧实现只在 handler 里查 Content-Length，而 FastAPI 解析 UploadFile 时早已
+    `await request.form()` 把整包 spool 到临时文件——磁盘先被写满才轮到检查。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.temp_dir = tempfile.TemporaryDirectory()
+        cls.server = _boot_server(cls.temp_dir.name)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.server.engine.dispose()
+        _close_log_handlers()
+        cls.temp_dir.cleanup()
+
+    def _run(self, path: str, headers: list[tuple[bytes, bytes]], chunks: list[bytes]):
+        """直接驱动中间件：返回 (start_message, body, app_called)。"""
+        import asyncio
+
+        called = {"value": False}
+
+        async def app(scope, receive, send):
+            called["value"] = True
+            # 真实 handler 会先把请求体读干净（request.form()），这里照做，
+            # 否则中间件的 receive 包装永远不会被调用。
+            while True:
+                message = await receive()
+                if message.get("type") != "http.request" or not message.get("more_body"):
+                    break
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"ok"})
+
+        guard = self.server._UploadSizeGuard(app)
+        sent: list[dict] = []
+        queue = list(chunks)
+
+        async def receive():
+            if queue:
+                return {"type": "http.request", "body": queue.pop(0), "more_body": bool(queue)}
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            sent.append(message)
+
+        scope = {"type": "http", "path": path, "headers": headers}
+        asyncio.run(guard(scope, receive, send))
+        start = next((m for m in sent if m["type"] == "http.response.start"), {})
+        body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+        return start, body, called["value"]
+
+    def test_declared_oversize_is_rejected_before_parsing(self) -> None:
+        too_big = str(13 * 1024 * 1024).encode()
+        start, body, called = self._run(
+            "/api/upload", [(b"content-length", too_big)], [b"x"]
+        )
+        self.assertEqual(start.get("status"), 413)
+        self.assertFalse(called, "超限请求不应进入应用（否则已经被 spool 落盘）")
+        self.assertIn("12MB", body.decode("utf-8"))
+
+    def test_chunked_oversize_is_rejected_midway(self) -> None:
+        """不声明长度时会被读一部分，但必须在超过上限后立刻中断并回 413。"""
+        start, body, called = self._run(
+            "/api/upload", [], [b"x" * (7 * 1024 * 1024), b"x" * (7 * 1024 * 1024)]
+        )
+        self.assertEqual(start.get("status"), 413)
+        self.assertIn("12MB", body.decode("utf-8"))
+        # 应用被进入是正常的（multipart 解析从第一块就开始了）；关键是它没能读完。
+
+    def test_other_paths_are_untouched(self) -> None:
+        too_big = str(13 * 1024 * 1024).encode()
+        start, body, called = self._run(
+            "/api/sync/push", [(b"content-length", too_big)], [b"{}"]
+        )
+        self.assertTrue(called)
+        self.assertEqual(start.get("status"), 200)

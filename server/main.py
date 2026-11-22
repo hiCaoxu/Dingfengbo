@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import re
 import threading
 import time
 from collections import defaultdict, deque
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -54,6 +55,74 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class _BodyTooLarge(Exception):
+    """内部信号：请求体超过上传上限。"""
+
+
+class _UploadSizeGuard:
+    """在 ASGI 层限制 ``/api/upload`` 的请求体大小。
+
+    为什么不能只在 handler 里检查：FastAPI 解析 ``file: UploadFile = File(...)`` 时
+    会先 ``await request.form()``，Starlette 把整个 multipart 体收下并 spool 到临时
+    文件（>1MB 落盘）。等 handler 跑到 ``Content-Length`` 判断时，磁盘已经被写过一遍了。
+    这里在解析开始前拦：声明了长度的直接拒；不声明（chunked）的边读边累计，读满上限
+    立刻中断——写盘量因此被压在 12MB 附近，而不是「对方发多大就写多大」。
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http" or scope.get("path") != "/api/upload":
+            await self.app(scope, receive, send)
+            return
+        headers = {
+            key.decode("latin-1").lower(): value.decode("latin-1")
+            for key, value in scope.get("headers") or ()
+        }
+        limit = MAX_UPLOAD_BYTES + 4096
+        declared = headers.get("content-length", "").strip()
+        if declared.isdigit() and int(declared) > limit:
+            await _reject_too_large(send)
+            return
+
+        received = 0
+
+        async def guarded_receive():
+            nonlocal received
+            message = await receive()
+            if message.get("type") == "http.request":
+                received += len(message.get("body") or b"")
+                if received > limit:
+                    raise _BodyTooLarge
+            return message
+
+        try:
+            await self.app(scope, guarded_receive, send)
+        except _BodyTooLarge:
+            await _reject_too_large(send)
+        except Exception:
+            # 响应已经开始发送时无法再改状态码：保持原样抛出，交给上层记日志。
+            raise
+
+
+async def _reject_too_large(send) -> None:
+    # 与 HTTPException 的响应体保持同一种形状：{"detail": "..."}
+    body = json.dumps({"detail": "图片过大（超过 12MB）"}, ensure_ascii=False).encode("utf-8")
+    await send({
+        "type": "http.response.start",
+        "status": 413,
+        "headers": [
+            (b"content-type", b"application/json; charset=utf-8"),
+            (b"content-length", str(len(body)).encode()),
+        ],
+    })
+    await send({"type": "http.response.body", "body": body})
+
+
+app.add_middleware(_UploadSizeGuard)
 
 # 图片落盘目录：与数据库同级的 files/（可用 DINGFENGBO_SERVER_FILES 覆盖）。
 # 清理策略：上传只增不删——文件名是内容摘要，可能仍被多端记录的图片引用，
@@ -228,6 +297,10 @@ def pull(payload: PullRequest, authorization: str | None = Header(default=None))
             since = datetime.fromisoformat(payload.since)
         except ValueError:
             raise HTTPException(status_code=400, detail="since 格式应为 ISO 时间")
+        # updated_at 列存的是 naive UTC：带时区偏移/Z 的 ISO 串（旧客户端可能这么发）
+        # 若原样比较会抛 TypeError -> 500。统一折算成 naive UTC 再下推。
+        if since.tzinfo is not None:
+            since = since.astimezone(timezone.utc).replace(tzinfo=None)
     with SessionLocal() as session:
         changes: list[dict[str, Any]] = []
         next_cursors: dict[str, dict[str, int]] = {}

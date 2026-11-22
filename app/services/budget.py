@@ -65,10 +65,11 @@ def budgets(month: str | None = None) -> list[Budget]:
 def upsert_budget(month: str, category: str, amount: float, note: str = "") -> None:
     """同一月份同一分类只保留一条（手动查再改，避免唯一约束在同步时冲突）。
 
-    ``month`` 为空表示长期条目；长期与月度同时存在时由 ``overview`` 按「月度优先」
-    取一条，写入侧不做合并，避免用户想改长期值时被月度值挡住。
+    ``month`` 为空串表示**长期**条目，``None`` 表示「当前月」。
+    长期与月度同时存在时由 ``overview`` 按「月度优先」取一条，写入侧不做合并，
+    避免用户想改长期值时被月度值挡住。
     """
-    month = month or month_key()
+    month = month_key() if month is None else str(month).strip()
     category = (category or "").strip()
     with session_scope() as session:
         row = session.scalar(
@@ -137,7 +138,9 @@ def overview(today: date | None = None) -> dict[str, Any]:
             else:
                 total_standing += amount
         categories = {**standing, **monthly}
-        total_budget = total_monthly or total_standing
+        # 本月视图只认「本月总预算」：用户只设了长期总预算时不再拿它当分母，
+        # 否则「剩余」会严重失真，而且与周/月/年报告的口径互相矛盾（报告只认本月）。
+        total_budget = total_monthly
 
     items = []
     for category, amount in sorted(categories.items(), key=lambda item: -item[1]):
@@ -155,6 +158,8 @@ def overview(today: date | None = None) -> dict[str, Any]:
     return {
         "month": month_key(today),
         "total_budget": to_float(total_budget),
+        # 长期总预算单独暴露：UI 想提示「你设了长期上限」时用得到，但不参与本月计算。
+        "standing_budget": to_float(total_standing),
         "expense": to_float(month_expense),
         "remaining": to_float(total_budget - month_expense) if total_budget else 0.0,
         "percent": percent(month_expense, total_budget),

@@ -243,24 +243,33 @@ def _render_overview(page: ft.Page, refresh, data) -> ft.Control:
     )
 
     def render_charts() -> None:
-        pie_slot.content = _chart_image(
-            pie_chart(summary["categories"], "支出占比", cache_key=tx_max_updated),
-            320, 220,
+        """后台线程只做「生成图片字节」，控件赋值回到 UI 线程。
+
+        旧实现在 run_thread 的回调里直接给 slot.content 赋值并 page.update()：
+        Flet 是单 UI 线程模型，后台线程改控件会与 UI 线程的刷新竞态（图表丢失/闪烁），
+        而且渲染期间切模块时 slot 可能已脱离控件树。
+        """
+        pie_src = pie_chart(summary["categories"], "支出占比", cache_key=tx_max_updated)
+        trend_src = line_chart(
+            [t["label"] for t in trend],
+            [{"name": "收入", "values": [t["income"] for t in trend], "color": th.PRIMARY},
+             {"name": "支出", "values": [t["expense"] for t in trend], "color": th.ACCENT}],
+            "近六个月收支趋势",
+            cache_key=tx_max_updated,
         )
-        trend_slot.content = _chart_image(
-            line_chart(
-                [t["label"] for t in trend],
-                [{"name": "收入", "values": [t["income"] for t in trend], "color": th.PRIMARY},
-                 {"name": "支出", "values": [t["expense"] for t in trend], "color": th.ACCENT}],
-                "近六个月收支趋势",
-                cache_key=tx_max_updated,
-            ),
-            420, 220,
-        )
+
+        async def apply() -> None:
+            try:
+                pie_slot.content = _chart_image(pie_src, 320, 220)
+                trend_slot.content = _chart_image(trend_src, 420, 220)
+                page.update()
+            except Exception:
+                logger.exception("记账图表渲染后刷新页面失败")
+
         try:
-            page.update()
+            page.run_task(apply)
         except Exception:
-            logger.exception("记账图表渲染后刷新页面失败")
+            logger.debug("记账图表回 UI 线程失败", exc_info=True)
 
     if page is not None:
         page.run_thread(render_charts)

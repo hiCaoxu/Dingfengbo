@@ -78,7 +78,13 @@ def normalize_config(raw: dict | None) -> dict:
     if kind == "monthly_last_workday":
         return {"unit": "month", "interval": 1, "month_mode": "workday", "month_nth": "last"}
     if kind == "monthly_days":
-        days = [int(day) for day in raw.get("days") or [] if str(day).isdigit()]
+        # repeat_config 来自同步载荷，可能是脏数据：days 若是 int/bool（不可迭代）
+        # 直接 for 会抛 TypeError，并一路冒到待办列表渲染。
+        raw_days = raw.get("days")
+        if not isinstance(raw_days, (list, tuple, set)):
+            logger.debug("monthly_days 的 days 不是列表（%s），按空处理", type(raw_days).__name__)
+            raw_days = []
+        days = [int(day) for day in raw_days if str(day).isdigit()]
         return {"unit": "month", "interval": 1, "month_mode": "day", "month_days": sorted(days)}
     return {}
 
