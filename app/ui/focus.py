@@ -102,6 +102,12 @@ def render(
 
         run_task_dialog(page, "daily_brief")
 
+    def fill_body(control):
+        """卡片按比例拉伸后，正文 Column 也撑满剩余高度（内部自带滚动兜底）。"""
+        if isinstance(control, ft.Column):
+            control.expand = True
+        return control
+
     todo_body: ft.Control
     if data["todos"]:
         todo_body = ft.Column(
@@ -127,13 +133,12 @@ def render(
                                 color=th.PRIMARY, weight="bold"),
                     ]
                 ),
-                todo_body,
+                fill_body(todo_body),
             ],
             spacing=10,
             expand=True,
         ),
-        title="今日必做",
-        trailing=ft.Row(
+        title="今日必做",        trailing=ft.Row(
             [
                 primary_button("番茄钟", lambda e: open_pomodoro_dialog(page, refresh),
                                ACTIONS["timer"]),
@@ -274,7 +279,7 @@ def render(
         habit_controls = [empty("还没有习惯，先去「习惯」模块添加")]
 
     habit_card = card(
-        ft.Column(habit_controls, spacing=6, scroll=ft.ScrollMode.AUTO),
+        ft.Column(habit_controls, spacing=6, scroll=ft.ScrollMode.AUTO, expand=True),
         title="习惯打卡",
         trailing=ft.TextButton("管理", on_click=lambda e: navigate("todo")),
         expand=2,
@@ -322,13 +327,14 @@ def render(
         expand=1,
     )
 
+    # 高度按比例瓜分剩余空间（4:3:3），整页铺满窗口：不再需要整页上下滚动，
+    # 内容超出时在各卡片内部滚动。
     return ft.Column(
         [
-            equal_height_row([todo_card, diary_card], spacing=12, height=300),
-            equal_height_row([health_card, finance_card, ai_card], spacing=12, height=200),
-            equal_height_row([habit_card, review_card], spacing=12, height=210),
+            equal_height_row([todo_card, diary_card], spacing=12, expand=4),
+            equal_height_row([health_card, finance_card, ai_card], spacing=12, expand=3),
+            equal_height_row([habit_card, review_card], spacing=12, expand=3),
         ],
         spacing=8,
         expand=True,
-        scroll=ft.ScrollMode.AUTO,
     )

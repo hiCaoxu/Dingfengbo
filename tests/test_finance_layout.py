@@ -56,12 +56,14 @@ class OverviewLayoutTests(unittest.TestCase):
         self.assertEqual(len(charts.controls), 3)
         self.assertEqual(_title_of(charts.controls[0]), "支出占比")
         self.assertEqual(_title_of(charts.controls[1]), "收支趋势")
-        # 第三列是竖排的两张入口卡（固定宽度：外层是横向滚动容器，不能用 flex）
+        # 图表按 3:4 弹性分配宽度（窗口变宽时不留白），入口卡列占 2 份
+        self.assertEqual([c.expand for c in charts.controls], [3, 4, 2])
+        self.assertIsNone(charts.scroll)
+        # 第三列是竖排的两张入口卡，与图表同高、各占一半
         stack = charts.controls[2]
         self.assertIsInstance(stack, ft.Column)
         self.assertEqual(len(stack.controls), 2)
-        self.assertEqual(stack.width, 220)
-        self.assertIsNone(stack.expand)
+        self.assertEqual(stack.height, 284)
         self.assertTrue(all(control.expand == 1 for control in stack.controls))
 
     def test_three_cards_share_one_row_and_equal_height(self) -> None:

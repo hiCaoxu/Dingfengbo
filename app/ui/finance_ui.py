@@ -52,14 +52,25 @@ def _chart_placeholder() -> ft.Control:
     )
 
 
-def _chart_slot(width: int, height: int) -> ft.Container:
-    """图表占位槽：初始显示加载提示，后台渲染完成后替换为 Image。"""
+def _chart_slot() -> ft.Container:
+    """图表占位槽：初始显示加载提示，后台渲染完成后替换为 Image。
+
+    尺寸交给父容器弹性分配：窗口更宽时图表跟着变宽，卡片右侧不会留出一条空白。
+    """
     return ft.Container(
         content=_chart_placeholder(),
-        width=width,
-        height=height,
+        expand=True,
         alignment=ft.Alignment.CENTER,
     )
+
+
+def _chart_image(src: bytes, width: int, height: int) -> ft.Image:
+    """图表位图：保持生成时的清晰尺寸，由外层居中槽位摆放。
+
+    卡片宽度改成了按比例分配（窗口变宽时三列一起变宽），图片本身仍按原像素
+    渲染并居中——放大位图只会更糊，居中留白比整行右侧空一条更耐看。
+    """
+    return ft.Image(src=src, width=width, height=height, fit=ft.BoxFit.CONTAIN)
 
 
 def _delete(model, item_id: str, page, refresh) -> None:
@@ -184,46 +195,45 @@ def _render_overview(page: ft.Page, refresh, data) -> ft.Control:
         )
 
     # 收支记录 / 账户列表：两张入口卡上下排列，紧接在「收支趋势」右侧，
-    # 与两张图表同高（各占一半高度）。
-    # 注意这里给固定宽度、不能用 expand：外层 Row 带横向滚动（窗口窄时能滑动），
-    # 滚动容器里是「无界宽度」，再放 flex 子控件会触发 Flutter 布局断言。
+    # 与两张图表同高、各占一半（136）；宽度用 expand 吸收多余空间，
+    # 窗口变宽时不会在行尾留下空白。
     nav_stack = ft.Column(
         [
             entry("RECEIPT_LONG_OUTLINED", "收支记录", "查看、筛选与新增", "records"),
             entry("ACCOUNT_BALANCE_WALLET_OUTLINED", "账户列表", "管理账户与余额", "accounts"),
         ],
         spacing=12,
-        width=220,
+        expand=2,
+        height=284,
     )
 
-    pie_slot = _chart_slot(320, 220)
-    trend_slot = _chart_slot(420, 220)
+    pie_slot = _chart_slot()
+    trend_slot = _chart_slot()
     charts = ft.Row(
         [
-            card(pie_slot, title="支出占比", width=352, height=284),
-            card(trend_slot, title="收支趋势", width=452, height=284),
+            card(pie_slot, title="支出占比", expand=3, height=284),
+            card(trend_slot, title="收支趋势", expand=4, height=284),
             nav_stack,
         ],
         spacing=12,
-        scroll=ft.ScrollMode.AUTO,
         vertical_alignment=ft.CrossAxisAlignment.STRETCH,
         height=284,
     )
 
     def render_charts() -> None:
-        pie_slot.content = ft.Image(
-            src=pie_chart(summary["categories"], "支出占比", cache_key=tx_max_updated),
-            width=320, height=220, fit=ft.BoxFit.CONTAIN,
+        pie_slot.content = _chart_image(
+            pie_chart(summary["categories"], "支出占比", cache_key=tx_max_updated),
+            320, 220,
         )
-        trend_slot.content = ft.Image(
-            src=line_chart(
+        trend_slot.content = _chart_image(
+            line_chart(
                 [t["label"] for t in trend],
                 [{"name": "收入", "values": [t["income"] for t in trend], "color": th.PRIMARY},
                  {"name": "支出", "values": [t["expense"] for t in trend], "color": th.ACCENT}],
                 "近六个月收支趋势",
                 cache_key=tx_max_updated,
             ),
-            width=420, height=220, fit=ft.BoxFit.CONTAIN,
+            420, 220,
         )
         try:
             page.update()
