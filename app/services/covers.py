@@ -99,10 +99,35 @@ def is_url(value: str) -> bool:
     return value.lower().startswith(("http://", "https://"))
 
 
-def _extension(url: str, content_type: str) -> str:
-    suffix = Path(urlsplit(url).path).suffix.lower()
-    if suffix in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}:
-        return suffix
+# 只缓存真正的图片：后缀与 content-type 都由服务端决定，不校验的话任意字节
+# （HTML、可执行文件）都会被存成 .jpg 并由界面按图片加载。
+_IMAGE_MAGIC = (
+    (b"\xff\xd8\xff", ".jpg"),
+    (b"\x89PNG\r\n\x1a\n", ".png"),
+    (b"GIF87a", ".gif"),
+    (b"GIF89a", ".gif"),
+    (b"BM", ".bmp"),
+)
+
+
+def _image_suffix(data: bytes) -> str:
+    for magic, suffix in _IMAGE_MAGIC:
+        if data.startswith(magic):
+            return suffix
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp"
+    return ""
+
+
+def _extension(data: bytes, content_type: str) -> str:
+    """按文件头决定后缀。
+
+    先按魔数嗅探真实类型（URL 扩展名和 content-type 都是对方说了算），嗅探不出来时
+    再退回 content-type，最后才给 .jpg。
+    """
+    sniffed = _image_suffix(data)
+    if sniffed:
+        return sniffed
     mapping = {
         "image/jpeg": ".jpg",
         "image/png": ".png",
@@ -218,6 +243,8 @@ def cached_cover(
             data, content_type = _download(url, client)
         if not data:
             raise ValueError("封面内容为空")
+        if not _image_suffix(data):
+            raise ValueError("下载内容不是图片")
     except Exception:
         # 只记录域名与状态，避免把带签名的完整 URL 写进日志。
         logger.info("封面下载失败：%s", urlsplit(url).netloc or url)
@@ -225,7 +252,7 @@ def cached_cover(
         return None
 
     target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / f"{key}{_extension(url, content_type)}"
+    target = target_dir / f"{key}{_extension(data, content_type)}"
     tmp = target.with_suffix(target.suffix + ".tmp")
     try:
         tmp.write_bytes(data)

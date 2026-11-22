@@ -8,7 +8,7 @@ import os
 import threading
 import time
 from collections import defaultdict, deque
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -23,7 +23,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db.engine import create_sqlite_engine
 from app.db.migrations import initialize_schema, sequence_value
-from app.db.models import MODEL_BY_TABLE, utcnow
+from app.db.models import MODEL_BY_TABLE, PurgeMark, utcnow
 from app.db.repo import apply_remote, max_updated_at, purge_deleted, serialize
 from app.logging_setup import setup_logging
 
@@ -291,7 +291,23 @@ def push(payload: PushRequest, authorization: str | None = Header(default=None))
 
     with SessionLocal() as session:
         accepted: list[dict[str, Any]] = []
+        purge_mark = session.get(PurgeMark, "*")
+        purged_before = purge_mark.purged_before if purge_mark is not None else None
         for item in valid:
+            reason = _stale_after_purge(session, item, purged_before)
+            if reason:
+                # 墓碑已被物理清理、推送又比清理截止点更老：拒绝并提示全量重拉，
+                # 否则这条「已删除」的记录会被当成新记录插回去。
+                rejected.append(
+                    {
+                        "table": item.get("table"),
+                        "id": (item.get("data") or {}).get("id"),
+                        "reason": reason,
+                    }
+                )
+                logger.warning("拒收过期推送：table=%s id=%s", item.get("table"),
+                               (item.get("data") or {}).get("id"))
+                continue
             _apply_push_item(session, item, accepted, rejected)
         changed = [
             c for c in accepted
@@ -388,21 +404,60 @@ def _maybe_purge_tombstones() -> None:
     """服务端也清理过期墓碑（与客户端 30 天窗口对齐，这里放宽到 90 天）。
 
     云端只增不减会让任何一次游标重置（恢复备份/换机）把历史墓碑全量重拉一遍。
-    按小时节流，避免每次 push 都做全表扫描。
+    按小时节流，避免每次 push 都做全表扫描。清理后记录删除高水位：离线超过保留窗口
+    的设备再来推送旧记录时，服务端据此拒绝，避免已删除的数据被复活。
     """
     global _last_purge
     now = time.monotonic()
     if now - _last_purge < _PURGE_INTERVAL_SECONDS:
         return
     _last_purge = now
+    retention_days = 90
     try:
         with SessionLocal() as session:
-            removed = purge_deleted(session, retention_days=90)
+            removed = purge_deleted(session, retention_days=retention_days)
+            if removed:
+                # 只有真的删掉了墓碑才更新水位：没删过东西的库不该因为「跑过一次清理」
+                # 就开始拒收带旧时间戳的记录（导入的历史数据会被误伤）。
+                cutoff = utcnow() - timedelta(days=retention_days)
+                mark = session.get(PurgeMark, "*")
+                if mark is None:
+                    session.add(
+                        PurgeMark(owner_id="*", purged_before=cutoff, purged_at=utcnow(),
+                                  purged_count=removed)
+                    )
+                else:
+                    mark.purged_before = max(mark.purged_before or cutoff, cutoff)
+                    mark.purged_at = utcnow()
+                    mark.purged_count = int(mark.purged_count or 0) + removed
             session.commit()
         if removed:
             logger.info("已清理 %d 条过期墓碑", removed)
     except Exception:
         logger.exception("清理墓碑失败")
+
+
+def _stale_after_purge(session, item: dict[str, Any], purged_before) -> str | None:
+    """推送的是「云端已不存在、时间戳又早于清理截止点」的记录时给出拒绝原因。"""
+    if purged_before is None:
+        return None
+    data = item.get("data") or {}
+    model = MODEL_BY_TABLE.get(item.get("table"))
+    record_id = str(data.get("id") or "")
+    if model is None or not record_id:
+        return None
+    if session.get(model, record_id) is not None:
+        return None  # 记录还在：走正常 LWW
+    try:
+        stamp = datetime.fromisoformat(str(data.get("updated_at"))[:19])
+    except (TypeError, ValueError):
+        return None
+    if stamp < purged_before:
+        return (
+            "该记录已在云端过期清理（墓碑保留窗口已过），本次推送被拒；"
+            "请先在「同步明细」里点「重新拉取云端全量」再继续"
+        )
+    return None
 
 
 @app.get("/api/sync/check")

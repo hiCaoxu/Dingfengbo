@@ -88,6 +88,23 @@ class SyncSequence(Base):
     value: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
 
+class PurgeMark(Base):
+    """本地辅助表（不参与同步）：墓碑物理清理的删除高水位。
+
+    墓碑被物理清理后，「这条记录曾经存在、且已被删除」的知识就彻底消失了：离线超过
+    保留窗口的设备再来推送时，服务端看到的是一个「不存在的 id」，会把它当成新记录
+    插回去——已删除的数据被复活。记下清理时的截止时间后，服务端可以拒绝这类
+    「比墓碑还老」的推送，要求对方先全量重拉。``owner_id="*"`` 表示全局一条。
+    """
+
+    __tablename__ = "purge_marks"
+
+    owner_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    purged_before: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    purged_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    purged_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
 class Todo(SyncMixin, Base):
     __tablename__ = "todos"
 

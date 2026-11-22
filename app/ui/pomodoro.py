@@ -71,11 +71,14 @@ def _run_timer(
         return _run_is_current(run)
 
     def worker() -> None:
-        while current() and _session["remaining"] > 0:
-            time.sleep(1)
-            if not current():
-                return
-            _session["remaining"] -= 1
+        # 用单调时钟算剩余时间，而不是「睡 1 秒减 1」：后者会把每次循环的调度开销
+        # 累加进倒计时，25 分钟实际会多跑十几秒。
+        deadline = time.monotonic() + float(_session["remaining"])
+        while current():
+            left = deadline - time.monotonic()
+            if left <= 0:
+                break
+            _session["remaining"] = int(round(left))
             remaining = _session["remaining"]
 
             async def apply(r: int = remaining) -> None:
@@ -90,11 +93,13 @@ def _run_timer(
             except Exception:
                 logger.debug("番茄钟刷新调度失败", exc_info=True)
                 break
+            time.sleep(min(0.5, max(0.05, left)))
 
         if not current():
             return  # 中途被停止/被新一轮取代：不写库、不通知、不动按钮
-        finished = _session["remaining"] <= 0
+        _session["remaining"] = 0
         _session["active"] = False
+        finished = True
 
         async def done() -> None:
             if _session.get("run") != run:

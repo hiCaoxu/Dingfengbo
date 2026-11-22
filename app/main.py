@@ -471,7 +471,18 @@ def main(page: ft.Page) -> None:
             state["palette"] = False
             logger.exception("打开命令面板失败")
 
+    def _refresh_clock_texts() -> None:
+        """顶栏的日期与问候语跨天要跟着变。
+
+        它们只在启动时赋值一次，程序常驻过夜后仍显示「昨天」与「晚上好」。
+        每次重建/刷新前重算一遍，随后的 ``page.update()`` 一起生效。
+        """
+        today = date.today()
+        date_text.value = f"{today.year}年{today.month}月{today.day}日 {weekday_cn(today)}"
+        greeting_text.value = f"{_greeting()}，欢迎回来"
+
     def refresh(force: bool = True) -> None:
+        _refresh_clock_texts()
         current = state["current"]
         if not force and current == "note_preview":
             # 后台同步完成不做整页重建：编辑页被重建会用控件初值覆盖正在输入的内容。

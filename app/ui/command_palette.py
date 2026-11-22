@@ -94,7 +94,16 @@ def open_command_palette(
         content_padding=ft.Padding.symmetric(vertical=8, horizontal=10),
     )
 
+    timer: dict[str, threading.Timer | None] = {"value": None}
+
+    def _cancel_timer() -> None:
+        """关面板时取消在跑的防抖 Timer：否则关掉后还会空跑一次全库搜索。"""
+        if timer["value"] is not None:
+            timer["value"].cancel()
+            timer["value"] = None
+
     def close() -> None:
+        _cancel_timer()
         dismiss(page, dialog)
 
     def go(module: str) -> None:
@@ -282,11 +291,8 @@ def open_command_palette(
 
         page.run_thread(worker)
 
-    timer = {"value": None}
-
     def on_change(_) -> None:
-        if timer["value"] is not None:
-            timer["value"].cancel()
+        _cancel_timer()
         timer["value"] = threading.Timer(DEBOUNCE_SECONDS, run_search)
         timer["value"].daemon = True
         timer["value"].start()
