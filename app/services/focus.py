@@ -31,12 +31,15 @@ from .money import from_cents, to_float
 
 
 def _writing_streak(session, today: date) -> int:
-    days = {
-        item.date
-        for item in session.scalars(
-            select(Diary).where(Diary.is_deleted.is_(False), Diary.content != "")
-        )
-    }
+    """连续写作天数：只取「有正文」的日期列，不把整篇日记搬进内存。
+
+    旧实现 ``select(Diary)`` 全表加载后建集合，日记越写越多时每天打开首页都要把
+    全部正文读一遍。
+    """
+    rows = session.scalars(
+        select(Diary.date).where(Diary.is_deleted.is_(False), Diary.content != "")
+    )
+    days = set(rows.all())
     cursor = today if today in days else today - timedelta(days=1)
     count = 0
     while cursor in days:

@@ -41,10 +41,13 @@ def main() -> int:
 
         max_seq = 0
         for table in tables:
-            columns = {row[1] for row in connection.execute(f'PRAGMA table_info("{table}")')}
+            # 表名来自 sqlite_master（可被恶意库/手工建表注入引号），统一成标准标识符：
+            # 引号内的 " 需要成对转义，否则能拼出任意 SQL。
+            ident = '"' + str(table).replace('"', '""') + '"'
+            columns = {row[1] for row in connection.execute(f"PRAGMA table_info({ident})")}
             if "sync_seq" not in columns:
                 continue
-            found = connection.execute(f'SELECT MAX(sync_seq) FROM "{table}"').fetchone()[0] or 0
+            found = connection.execute(f"SELECT MAX(sync_seq) FROM {ident}").fetchone()[0] or 0
             max_seq = max(max_seq, int(found))
             print(f"  {table:<16} MAX(sync_seq)={found}")
 

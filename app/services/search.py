@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from sqlalchemy import case, or_, select
@@ -238,6 +238,14 @@ def _search_notes(session: Session, query: Query, limit: int) -> list[Hit]:
             | or_(*[_like(Note.content, k) for k in query.keywords])
             | or_(*[_like(Note.tags, k) for k in query.keywords])
         )
+    # 日期过滤也要对笔记生效：此前 only todos/diaries/transactions 支持
+    # 「本周/上月」这类限定，笔记会无视时间范围全部返回，结果与提示不符。
+    if query.since:
+        stmt = stmt.where(Note.updated_at >= datetime.combine(query.since, time.min))
+    if query.until:
+        stmt = stmt.where(
+            Note.updated_at <= datetime.combine(query.until, time.max)
+        )
     order: list = []
     title_first = _title_first(Note.title, query.keywords)
     if title_first is not None:
@@ -334,6 +342,15 @@ def _search_entertainments(session: Session, query: Query, limit: int) -> list[H
         stmt = stmt.where(
             or_(*[_like(Entertainment.title, k) for k in query.keywords])
             | or_(*[_like(Entertainment.note, k) for k in query.keywords])
+        )
+    # 与笔记一致：日期过滤对娱乐同样生效（否则「上个月看的电影」会把全部记录带出来）。
+    if query.since:
+        stmt = stmt.where(
+            Entertainment.updated_at >= datetime.combine(query.since, time.min)
+        )
+    if query.until:
+        stmt = stmt.where(
+            Entertainment.updated_at <= datetime.combine(query.until, time.max)
         )
     order: list = []
     title_first = _title_first(Entertainment.title, query.keywords)

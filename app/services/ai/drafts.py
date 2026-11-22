@@ -42,6 +42,8 @@ _TABLE_OF_TYPE = {
 }
 
 _PRIORITIES = {"high", "medium", "low", "高", "中", "低"}
+# 单条 AI 笔记正文上限：超过就明确拒绝（不截断），避免一次对话把几十万字写进库。
+_MAX_NOTE_CONTENT = 20_000
 
 
 @dataclass
@@ -82,7 +84,10 @@ def _json_blocks(text: str) -> list[Any]:
         raw = match.group(1).strip()
         try:
             payloads.append(json.loads(raw))
-        except ValueError:
+        except ValueError as exc:
+            # 不再静默丢弃：模型偶尔输出带注释/尾逗号的 JSON，留一条日志便于排查
+            # （只记异常类型与长度，不记正文，避免把用户内容写进日志）。
+            logger.warning("草稿 JSON 块解析失败（%s，长度 %d）", type(exc).__name__, len(raw))
             continue
     if payloads:
         return payloads
@@ -90,14 +95,16 @@ def _json_blocks(text: str) -> list[Any]:
     if stripped.startswith(("{", "[")):
         try:
             return [json.loads(stripped)]
-        except ValueError:
+        except ValueError as exc:
+            logger.warning("草稿 JSON 解析失败（%s，长度 %d）", type(exc).__name__, len(stripped))
             return []
     # 兜底：找到第一个 { 到最后一个 } 的片段
     start, end = stripped.find("{"), stripped.rfind("}")
     if 0 <= start < end:
         try:
             return [json.loads(stripped[start:end + 1])]
-        except ValueError:
+        except ValueError as exc:
+            logger.warning("草稿 JSON 片段解析失败（%s）", type(exc).__name__)
             return []
     return []
 
@@ -195,6 +202,12 @@ def _normalize(item: dict[str, Any], today: date) -> Draft:
         content = str(item.get("content") or item.get("body") or "").strip()
         if not content:
             return Draft(kind, raw=item, reason="缺少正文")
+        if len(content) > _MAX_NOTE_CONTENT:
+            # 落库前明确拒绝，而不是截断后静默保存：用户确认的与最终写入的必须一致。
+            return Draft(
+                kind, raw=item,
+                reason=f"正文过长（超过 {_MAX_NOTE_CONTENT} 字），请让 AI 精简后再试",
+            )
         return Draft(
             kind,
             fields={"title": title[:200], "content": content, "tags": _tags(item.get("tags"))},

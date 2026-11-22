@@ -1,7 +1,7 @@
 """数据导入导出：Markdown / CSV / JSON。
 
 导出默认落到数据目录的 exports 下（不需要文件选择框），导入提供路径输入
-与「浏览…」（tkinter 文件对话框，失败时退回手输路径）。
+与「浏览…」（Flet 自带 FilePicker，与图片上传同一套）。
 
 所有导出/导入都是整库读写，动辄几百毫秒到数秒，一律放后台线程执行；
 导入是破坏性操作（按最后写入获胜合并），因此先确认、再自动备份当前库。
@@ -34,23 +34,6 @@ from .widgets import close_modal, confirm, form_field, modal, primary_button, sn
 logger = logging.getLogger(__name__)
 
 EXPORT_DIR = DATA_DIR / "exports"
-
-
-def _pick_file(title: str, patterns: str = "*.*") -> str:
-    """同步打开系统文件对话框（调用方负责放到后台线程）。"""
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        path = filedialog.askopenfilename(title=title, filetypes=[("文件", patterns), ("全部", "*.*")])
-        root.destroy()
-        return path or ""
-    except Exception:
-        logger.debug("系统文件对话框不可用", exc_info=True)
-        return ""
 
 
 def open_data_io_dialog(page: ft.Page, refresh=None) -> ft.AlertDialog:
@@ -181,22 +164,38 @@ def open_data_io_dialog(page: ft.Page, refresh=None) -> ft.AlertDialog:
         run_action(work, done)
 
     def do_browse(_) -> None:
-        def worker() -> None:
-            path = _pick_file("选择要导入的文件", "*.json;*.csv")
-
-            async def apply() -> None:
-                if path:
-                    path_field.value = path
-                    page.update()
-                    return
-                snack(page, "没有选到文件，可直接粘贴路径", th.TEXT_MUTED)
-
+        # 用 Flet 自带的 FilePicker（和图片上传同一套）：tkinter 的文件对话框
+        # 必须在主线程里创建，放到后台线程在部分环境会直接卡死或崩溃。
+        async def pick() -> None:
+            picker = ft.FilePicker()
+            page.services.append(picker)
             try:
-                page.run_task(apply)
+                files = await picker.pick_files(
+                    dialog_title="选择要导入的文件",
+                    file_type=ft.FilePickerFileType.CUSTOM,
+                    allowed_extensions=["json", "csv"],
+                    allow_multiple=False,
+                )
             except Exception:
-                logger.debug("回填导入路径失败", exc_info=True)
+                logger.exception("打开文件选择器失败")
+                snack(page, "无法打开文件选择器，可直接粘贴路径", th.ACCENT)
+                return
+            finally:
+                try:
+                    page.services.remove(picker)
+                except ValueError:
+                    pass
+            path = files[0].path if files else ""
+            if not path:
+                snack(page, "没有选到文件，可直接粘贴路径", th.TEXT_MUTED)
+                return
+            path_field.value = path
+            path_field.update()
 
-        page.run_thread(worker)
+        try:
+            page.run_task(pick)
+        except Exception:
+            logger.debug("回填导入路径失败", exc_info=True)
 
     def do_import(_) -> None:
         raw = (path_field.value or "").strip()

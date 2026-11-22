@@ -65,3 +65,32 @@ class SystemIntegrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class FontPatchTests(unittest.TestCase):
+    """全局 monkey-patch 的回归测试：升级 Flet 后这里最先炸。"""
+
+    def setUp(self) -> None:
+        import flet as ft
+
+        self.ft = ft
+        th._patch_control_fonts()
+
+    def test_patch_is_idempotent(self) -> None:
+        patched = self.ft.Text.__init__
+        th._patch_control_fonts()
+        self.assertIs(self.ft.Text.__init__, patched, "重复调用不应再次包装 __init__")
+
+    def test_text_gets_default_font(self) -> None:
+        label = self.ft.Text("测试")
+        self.assertEqual(label.font_family, th.FONT_LATIN)
+        self.assertTrue(label.font_family_fallback)
+
+    def test_explicit_font_is_kept(self) -> None:
+        label = self.ft.Text("测试", font_family="Consolas")
+        self.assertEqual(label.font_family, "Consolas")
+
+    def test_text_style_gets_default_font(self) -> None:
+        style = self.ft.TextStyle(size=13)
+        self.assertEqual(style.font_family, th.FONT_LATIN)
+        custom = self.ft.TextStyle(size=13, font_family="Consolas")
+        self.assertEqual(custom.font_family, "Consolas")

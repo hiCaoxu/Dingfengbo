@@ -492,6 +492,21 @@ def open_dialog(page: ft.Page, dialog: ft.Control) -> None:
     if callable(opener):
         opener(dialog)
         return
+    previous = getattr(dialog, "on_dismiss", None)
+
+    def _cleanup(event=None) -> None:
+        # 旧版 fallback：Flet 不会替我们把控件从 overlay 里摘掉，弹窗越开越多，
+        # 控件树持续膨胀。这里在 dismiss 之后再移除，避免同帧删除丢掉回调。
+        try:
+            if dialog in page.overlay:
+                page.overlay.remove(dialog)
+                page.update()
+        except Exception:
+            logger.debug("清理 overlay 弹窗失败", exc_info=True)
+        if callable(previous):
+            previous(event)
+
+    dialog.on_dismiss = _cleanup
     page.overlay.append(dialog)
     dialog.open = True
     page.update()

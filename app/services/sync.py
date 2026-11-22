@@ -127,7 +127,8 @@ class SyncClient:
         token = str(settings.get("sync_token", ""))
         return hashlib.sha256(f"{server}\n{token}".encode()).hexdigest()
 
-    def _load_cursors(self, settings: dict[str, Any]) -> dict[str, dict[str, str]]:
+    def _load_cursors(self, settings: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        """游标：``{table: {"sequence": int}}``（早期注释写成了 str，容易误用）。"""
         stored = settings.get("sync_cursors", {})
         if not isinstance(stored, dict):
             return {}
