@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from datetime import date
+from uuid import NAMESPACE_URL, uuid5
 
 import flet as ft
 from sqlalchemy import select
@@ -75,6 +76,15 @@ def _all_tags(items) -> list[str]:
     return sorted(t for t in tags if t)
 
 
+def _occurrence_id(todo_id: str, due: date) -> str:
+    """循环任务下一期的确定性 id：同一 (任务, 到期日) 全库只可能有一行。
+
+    没有它时「完成 → 取消完成 → 再完成」会给同一个到期日再建一行，
+    列表里出现两条一模一样的任务。
+    """
+    return str(uuid5(NAMESPACE_URL, f"todo-recur:{todo_id}:{due.isoformat()}"))
+
+
 def toggle(page: ft.Page, todo_id: str, refresh) -> None:
     with session_scope() as session:
         item = session.get(Todo, todo_id)
@@ -86,23 +96,38 @@ def toggle(page: ft.Page, todo_id: str, refresh) -> None:
                 due, item.repeat_rule, item.repeat_config, bool(item.lunar_reminder)
             )
             if following:
-                create(
-                    session, Todo,
-                    title=item.title, note=item.note, due_date=following,
-                    due_time=item.due_time, tags=item.tags,
-                    lunar_reminder=lunar_md(following) if item.lunar_reminder else "",
-                    repeat_rule=item.repeat_rule,
-                    repeat_config=item.repeat_config,
-                    remind_days=item.remind_days,
-                    remind_days_before=item.remind_days_before,
-                    remind_time=item.remind_time,
-                    priority=item.priority, quadrant=item.quadrant,
-                    completed=False, is_template=False,
-                )
+                occurrence_id = _occurrence_id(item.id, following)
+                existing = session.get(Todo, occurrence_id)
+                if existing is None:
+                    create(
+                        session, Todo,
+                        id=occurrence_id,
+                        title=item.title, note=item.note, due_date=following,
+                        due_time=item.due_time, tags=item.tags,
+                        lunar_reminder=lunar_md(following) if item.lunar_reminder else "",
+                        repeat_rule=item.repeat_rule,
+                        repeat_config=item.repeat_config,
+                        remind_days=item.remind_days,
+                        remind_days_before=item.remind_days_before,
+                        remind_time=item.remind_time,
+                        priority=item.priority, quadrant=item.quadrant,
+                        completed=False, is_template=False,
+                    )
+                elif existing.is_deleted:
+                    # 上一期被删过：恢复它，而不是再插一行同 id
+                    update(session, existing, is_deleted=False, completed=False,
+                           completed_at=None, is_template=False)
             update(session, item, completed=True, completed_at=utcnow(), is_template=True)
         else:
-            update(session, item, completed=not item.completed,
-                   completed_at=utcnow() if not item.completed else None)
+            un_completing = bool(item.completed)
+            update(
+                session, item,
+                completed=not item.completed,
+                completed_at=None if un_completing else utcnow(),
+                # 取消完成必须把「循环模板」标记一起复位：否则这一行会从「未完成」
+                # 视图消失，却仍在「全部」里显示为未完成——状态自相矛盾。
+                is_template=False if un_completing else item.is_template,
+            )
     mark_pending_write()
     refresh()
 

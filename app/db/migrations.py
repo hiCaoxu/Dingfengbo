@@ -10,7 +10,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 from sqlalchemy import Connection, Engine, Integer, func, inspect, select, text, update
 
-from .models import SYNC_MODELS, Base
+from .models import SYNC_MODELS, Base, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,7 @@ MONEY_COLUMNS: tuple[tuple[str, str], ...] = (
 )
 MONEY_SCHEMA_VERSION = 1
 TIMESTAMP_SCHEMA_VERSION = 2
+TEMPLATE_FLAG_SCHEMA_VERSION = 3
 
 
 def _schema_version(connection: Connection) -> int:
@@ -259,12 +260,41 @@ def _ensure_indexes(connection: Connection) -> None:
     )
 
 
+def _repair_template_flags(connection: Connection) -> None:
+    """修正历史：``is_template=1`` 但 ``completed=0`` 的待办。
+
+    「完成循环任务」会把这一期标成 is_template 以从列表里隐去，但旧实现「取消完成」
+    时没有复位，于是这一行既不算未完成、又在「全部」里显示为未完成。这里把它改回
+    普通未完成任务，并标脏重新同步，避免别的设备再从云端把旧标记拉回来。
+    """
+    if _schema_version(connection) >= TEMPLATE_FLAG_SCHEMA_VERSION:
+        return
+    existing = set(inspect(connection).get_table_names())
+    fixed = 0
+    if "todos" in existing:
+        columns = {item["name"] for item in inspect(connection).get_columns("todos")}
+        if {"is_template", "completed"} <= columns:
+            result = connection.execute(
+                text(
+                    'UPDATE "todos" SET "is_template" = 0, "sync_status" = \'pending\', '
+                    '"updated_at" = :now '
+                    'WHERE "is_template" = 1 AND "completed" = 0'
+                ),
+                {"now": utcnow().isoformat(sep=" ")},
+            )
+            fixed += result.rowcount or 0
+    connection.exec_driver_sql(f"PRAGMA user_version = {TEMPLATE_FLAG_SCHEMA_VERSION}")
+    if fixed:
+        logger.info("已修正 %d 条状态矛盾的待办（is_template 已复位）", fixed)
+
+
 def initialize_schema(engine: Engine) -> None:
     """创建新表；旧版整数主键库在一个事务内迁移为 UUID。"""
     with engine.begin() as connection:
         # 库级迁移必须最先做：后续所有写入都会经过 MoneyCents（元 → 分）。
         _migrate_money_to_cents(connection)
         _normalize_timestamp_inversions(connection)
+        _repair_template_flags(connection)
         inspector = inspect(connection)
         existing = set(inspector.get_table_names())
         legacy_tables = [
