@@ -46,7 +46,7 @@ _HOME_STATE = state.home
 _HOME_TOKEN = RenderToken()
 
 
-def _calendar_card(selected: date, set_date, width: int | None = None, height: int | None = None) -> ft.Container:
+def _calendar_card(selected: date, width: int | None = None, height: int | None = None) -> ft.Container:
     header = ft.Container(
         content=ft.Row(
             [
@@ -404,10 +404,6 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
     today = date.today()
     heat_start, heat_end, heat_counts = heatmap
 
-    def set_date(value: date):
-        _HOME_STATE["selected_date"] = value
-        refresh()
-
     def set_year(value: int):
         _HOME_STATE["year"] = value
         refresh()
@@ -547,7 +543,7 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
                         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                     ),
                     # 日历不设固定高度：随同行 STRETCH 拉伸，与左列严格等高
-                    _calendar_card(_HOME_STATE["selected_date"], set_date, width=280),
+                    _calendar_card(_HOME_STATE["selected_date"], width=280),
                 ],
                 spacing=12,
                 vertical_alignment=ft.CrossAxisAlignment.STRETCH,

@@ -148,8 +148,10 @@ def _legacy_value(column, value: Any) -> Any:
 
 def _uses_integer_ids(connection: Connection, table: str) -> bool:
     columns = inspect(connection).get_columns(table)
-    id_column = next(column for column in columns if column["name"] == "id")
-    return isinstance(id_column["type"], Integer)
+    # 用 next(..., None) 而不是裸 next：没有 id 列的表（理论上不该出现，但外部
+    # 手工建的表可能有）会抛 StopIteration，在迁移事务里表现成一次不明原因的回滚。
+    id_column = next((column for column in columns if column["name"] == "id"), None)
+    return id_column is not None and isinstance(id_column["type"], Integer)
 
 
 def _sync_sequence_value(connection: Connection) -> int:
