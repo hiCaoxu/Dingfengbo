@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from collections.abc import Callable
 from datetime import date, datetime
@@ -119,6 +120,39 @@ def _date(value: str | None, default: date | None = None) -> date | None:
     if not value:
         return default
     return date.fromisoformat(value)
+
+
+MAX_NUMBER = 1_000_000.0
+
+
+def _number(
+    raw: str | None,
+    *,
+    label: str,
+    minimum: float = 0.0,
+    maximum: float = MAX_NUMBER,
+    allow_empty: bool = True,
+) -> tuple[float | None, str | None]:
+    """解析数值输入，返回 ``(值, 错误说明)``。
+
+    空输入 → ``(None, None)``（由调用方决定用默认值）；非法 / 非有限 / 越界 →
+    ``(None, 错误)``。``float()`` 会接受 "nan" 与 "inf"，必须显式挡掉：nan 会一路
+    污染金额与统计，inf 在取整（``int(inf)``）时还会直接抛 OverflowError。
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return (None, None) if allow_empty else (0.0, None)
+    try:
+        value = float(text)
+    except ValueError:
+        return None, f"{label}格式不正确"
+    if not math.isfinite(value):
+        return None, f"{label}必须是有限数值"
+    if value < minimum:
+        return None, f"{label}不能小于 {minimum:g}"
+    if value > maximum:
+        return None, f"{label}不能大于 {maximum:g}"
+    return value, None
 
 
 def _close_and_refresh(page, dialog, on_done):
@@ -683,14 +717,11 @@ def open_transaction_dialog(page: ft.Page, kind: str = "expense", tx: Transactio
     )
 
     def save(_):
-        try:
-            value = round(float(amount.value or 0), 2)
-        except ValueError:
-            snack(page, "金额格式不正确", th.ACCENT)
+        parsed, error = _number(amount.value, label="金额", minimum=0.01, maximum=MAX_NUMBER)
+        if error:
+            snack(page, error, th.ACCENT)
             return
-        if value <= 0:
-            snack(page, "金额需大于 0", th.ACCENT)
-            return
+        value = round(parsed, 2)
         try:
             record_date = _date(date_field.value, date.today()) or date.today()
         except ValueError:
@@ -742,18 +773,29 @@ def open_exercise_dialog(page: ft.Page, item: Exercise | None = None, on_done: C
     day = form_field("日期 YYYY-MM-DD", item.date.isoformat() if item else date.today().isoformat())
 
     def save(_):
-        try:
-            mins = int(float(minutes.value or 0))
-        except ValueError:
-            snack(page, "时长格式不正确", th.ACCENT)
+        minutes_value, error = _number(
+            minutes.value, label="时长（分钟）", minimum=1, maximum=24 * 60
+        )
+        if error:
+            snack(page, error, th.ACCENT)
+            return
+        mins = int(minutes_value)
+        distance_value, error = _number(
+            distance.value, label="距离", minimum=0, maximum=1000
+        )
+        if error:
+            snack(page, error, th.ACCENT)
+            return
+        kcal, error = _number(calories.value, label="消耗热量", minimum=0, maximum=100_000)
+        if error:
+            snack(page, error, th.ACCENT)
             return
         try:
-            kcal = float(calories.value) if calories.value else None
             record_date = _date(day.value, date.today()) or date.today()
-            distance_km = float(distance.value) if distance.value else None
         except ValueError:
-            snack(page, "日期、距离或热量格式不正确", th.ACCENT)
+            snack(page, "日期格式不正确", th.ACCENT)
             return
+        distance_km = distance_value
         if kcal is None:
             # 估算需要体重：优先取最近一次体重记录，没有才退回默认值。
             with session_scope() as session:
@@ -796,17 +838,22 @@ def open_diet_dialog(page: ft.Page, item: Diet | None = None, on_done: Callable 
         page.update()
 
     def save(_):
-        try:
-            weight = float(grams.value or 0)
-            record_date = _date(day.value, date.today()) or date.today()
-            if (calories.value or "").strip():
-                kcal = float(calories.value or 0)
-            else:
-                with session_scope() as session:
-                    kcal = calorie_of(session, food.value or "", weight)
-        except ValueError:
-            snack(page, "请输入正确的日期、重量和热量", th.ACCENT)
+        weight, error = _number(grams.value, label="重量", minimum=0.1, maximum=100_000)
+        if error:
+            snack(page, error, th.ACCENT)
             return
+        kcal, error = _number(calories.value, label="热量", minimum=0, maximum=100_000)
+        if error:
+            snack(page, error, th.ACCENT)
+            return
+        try:
+            record_date = _date(day.value, date.today()) or date.today()
+        except ValueError:
+            snack(page, "日期格式不正确", th.ACCENT)
+            return
+        if kcal is None:
+            with session_scope() as session:
+                kcal = calorie_of(session, food.value or "", weight)
         fields = dict(date=record_date, meal=meal.value,
                       food=food.value, grams=weight, calories=kcal, note=note.value or "")
         if not _save_or_alert(page, Diet, item.id if item else None, fields):
@@ -832,19 +879,18 @@ def open_weight_dialog(page: ft.Page, item: Weight | None = None, on_done: Calla
     day = form_field("日期 YYYY-MM-DD", item.date.isoformat() if item else date.today().isoformat())
 
     def save(_):
-        try:
-            weight = float(kg.value or 0)
-        except ValueError:
-            snack(page, "体重格式不正确", th.ACCENT)
+        weight, error = _number(kg.value, label="体重", minimum=1, maximum=500)
+        if error:
+            snack(page, error, th.ACCENT)
             return
-        if weight <= 0:
-            snack(page, "体重需大于 0", th.ACCENT)
+        body_fat, error = _number(fat.value, label="体脂率", minimum=0, maximum=100)
+        if error:
+            snack(page, error, th.ACCENT)
             return
         try:
             record_date = _date(day.value, date.today()) or date.today()
-            body_fat = float(fat.value) if fat.value else None
         except ValueError:
-            snack(page, "日期或体脂率格式不正确", th.ACCENT)
+            snack(page, "日期格式不正确", th.ACCENT)
             return
         fields = dict(date=record_date, kg=weight, body_fat=body_fat)
         if not _save_or_alert(page, Weight, item.id if item else None, fields):

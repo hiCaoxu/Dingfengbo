@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from datetime import date
 
 import flet as ft
@@ -27,6 +28,9 @@ from .widgets import (
     primary_button,
     snack,
 )
+
+# 预算金额上限：只为挡住明显的手误（多按了几个 0）与非有限值，不限制真实大额预算。
+MAX_BUDGET_AMOUNT = 100_000_000.0
 
 logger = logging.getLogger(__name__)
 
@@ -54,16 +58,39 @@ def open_budget_dialog(page: ft.Page, refresh) -> ft.AlertDialog:
         category_rows.append(field)
 
     def save(_) -> None:
-        def amount_of(field: ft.TextField) -> float:
-            try:
-                return max(0.0, float((field.value or "0").strip() or 0))
-            except ValueError:
+        def amount_of(label: str, field: ft.TextField) -> float | None:
+            """留空 = 不设置/清除该项（0 元）；填了但不是合法数字 → 报错并中止。
+
+            旧实现把解析失败静默当成 0，而 ``upsert_budget`` 对 ≤0 是软删除——
+            手误一次「1O00」就能无提示清空整月预算。
+            """
+            raw = (field.value or "").strip()
+            if not raw:
                 return 0.0
+            try:
+                value = float(raw)
+            except ValueError:
+                snack(page, f"「{label}」金额格式不正确，未保存", th.ACCENT)
+                return None
+            if not math.isfinite(value) or value < 0 or value > MAX_BUDGET_AMOUNT:
+                snack(page, f"「{label}」金额需在 0 ~ {MAX_BUDGET_AMOUNT:g} 之间", th.ACCENT)
+                return None
+            return round(value, 2)
+
+        total = amount_of("月度总预算", total_field)
+        if total is None:
+            return
+        parsed: dict[str, float] = {}
+        for category, field in fields.items():
+            value = amount_of(category, field)
+            if value is None:
+                return
+            parsed[category] = value
 
         try:
-            budget_service.upsert_budget(month, "", amount_of(total_field))
-            for category, field in fields.items():
-                budget_service.upsert_budget(month, category, amount_of(field))
+            budget_service.upsert_budget(month, "", total)
+            for category, value in parsed.items():
+                budget_service.upsert_budget(month, category, value)
         except Exception:
             logger.exception("保存预算失败")
             snack(page, "保存失败，详见日志", th.ACCENT)
@@ -130,15 +157,25 @@ def open_rule_form(page: ft.Page, rule=None, on_done=None) -> ft.AlertDialog:
             snack(page, "请填写名称", th.ACCENT)
             return
         try:
-            value = max(0.01, float((amount.value or "0").strip() or 0))
+            value = float((amount.value or "").strip())
         except ValueError:
             snack(page, "金额格式不正确", th.ACCENT)
             return
+        if not math.isfinite(value) or value <= 0:
+            snack(page, "金额需大于 0 且为有限数值", th.ACCENT)
+            return
+        if value > MAX_BUDGET_AMOUNT:
+            snack(page, f"金额不能大于 {MAX_BUDGET_AMOUNT:g}", th.ACCENT)
+            return
+        is_week = period.value == "每周"
+        day_max = 7 if is_week else 31
         try:
-            day_value = max(1, min(31, int(float(day.value or 1))))
+            day_value = int(float(day.value or 1))
         except ValueError:
             snack(page, "执行日格式不正确", th.ACCENT)
             return
+        # 按周期夹取：每周只能 1-7（旧实现一律夹到 31，周规则会存进 day=20 这种非法值）
+        day_value = max(1, min(day_max, day_value))
         account_id = account_options.get(account.value or "", "")
         try:
             budget_service.save_rule(
@@ -148,7 +185,7 @@ def open_rule_form(page: ft.Page, rule=None, on_done=None) -> ft.AlertDialog:
                 kind="income" if kind.value == "收入" else "expense",
                 category=category.value or "",
                 account_id=account_id,
-                period="week" if period.value == "每周" else "month",
+                period="week" if is_week else "month",
                 day=day_value,
                 active=bool(active.value),
                 note=note.value or "",

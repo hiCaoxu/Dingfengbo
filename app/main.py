@@ -13,15 +13,14 @@ import flet as ft
 from . import theme as th
 from .config import DATA_DIR, LOGS_DIR, load_settings, save_settings
 from .db.backup import maybe_daily_backup
-from .db.session import init_db, session_scope
+from .db.session import init_db
 from .icons import ACTIONS, NAV, ico
 from .logging_setup import setup_logging
 from .services import budget as budget_service
 from .services import system_integration
 from .services.dates import weekday_cn
-from .services.diary import ensure_diary
 from .services.holidays import ensure_sample_file
-from .services.sync import mark_pending_write, queue_counts, sync_client
+from .services.sync import queue_counts, sync_client
 from .ui import ai_assistant, diary as diary_ui
 from .ui import entertainment, finance_ui, health_ui, home, notes
 from .ui import help as help_ui
@@ -136,9 +135,8 @@ def _default_window_size(screen: tuple[int, int]) -> tuple[int, int]:
 def main(page: ft.Page) -> None:
     setup_logging(LOGS_DIR)
     init_db()
-    with session_scope() as session:
-        ensure_diary(session, date.today())
-        mark_pending_write()
+    # 不再启动即预建当天日记：翻看日期会留下空日记、同步到其他设备并进检索/热力图。
+    # 日记行改由 diary.save_content 在「首次真实输入（含插图）」时创建。
     # 首次启动生成节假日补充文件模板（内置 2026-2027 数据已生效，这里只放说明）
     ensure_sample_file()
     # 每日自动备份放后台线程：SQLite 在线快照不影响启动速度，失败只记日志。

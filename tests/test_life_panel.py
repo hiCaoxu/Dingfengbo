@@ -43,7 +43,8 @@ def _payload(events: list[dict] | None = None) -> dict:
     return {
         "view": "月历",
         "main": (today.year, today.month, set(), []),
-        "editor": {"id": "d1", "title": f"{today} 日记", "content": "今天状态不错"},
+        "editor": {"id": "d1", "day": today, "title": f"{today} 日记",
+                   "content": "今天状态不错"},
         "life": events or [],
     }
 

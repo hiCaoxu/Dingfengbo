@@ -51,13 +51,16 @@ def flush_pending_save() -> None:
 
 
 def _diary_writer(_key: str, snapshot: dict) -> None:
-    save_content(snapshot["id"], snapshot["value"])
+    save_content(snapshot["id"], snapshot["value"], snapshot.get("day"))
 
 
-def _schedule_save(diary_id: str, value: str) -> None:
+def _schedule_save(diary_id: str, value: str, day: date | None = None) -> None:
     # 快照在 UI 线程里取好：Timer 触发时控件可能已被重建。
     autosave.schedule(
-        "diary", {"id": diary_id, "value": value}, _diary_writer, _AUTOSAVE_DEBOUNCE_MS
+        "diary",
+        {"id": diary_id, "value": value, "day": day},
+        _diary_writer,
+        _AUTOSAVE_DEBOUNCE_MS,
     )
 
 
@@ -65,30 +68,53 @@ def set_selected(day: date) -> None:
     _state["selected"] = day
 
 
-def save_content(diary_id: str, value: str) -> None:
+def save_content(diary_id: str, value: str, day: date | None = None) -> str:
+    """写正文；当天还没有日记行时按「首次真实输入才建」的规则创建。
+
+    旧流程是「打开某天就 ensure_diary」：只是翻看日期也会留下一行空日记，还会同步到
+    其他设备、进检索与热力图。现在浏览只读，写入（含插图）才建行；空内容不建。
+    """
+    written = False
     with session_scope() as session:
-        item = session.get(Diary, diary_id)
-        if item:
+        item = session.get(Diary, diary_id) if diary_id else None
+        if item is None and (value or "").strip() and day is not None:
+            item = ensure_diary(session, day)
+        if item is not None:
             update(session, item, content=value)
-    mark_pending_write()
+            diary_id = str(item.id)
+            written = True
+    if written:
+        mark_pending_write()
+    return diary_id
 
 
 def _editor_data(day: date) -> dict:
-    """取（必要时创建）当天日记，后台线程执行，避免写库卡住 UI。
+    """读当天日记；**不存在时不创建**，只返回一份未落库的草稿。
 
-    ``ensure_diary`` 是「先查后建」，挪到后台后两次刷新可能并发；用模块级锁把
-    建库路径串行化，避免同一天插入两次触发 (owner_id, date) 唯一约束。
+    后台线程执行，避免写库卡住 UI。草稿的 id 为空串，第一次真实输入时由
+    :func:`save_content` 建行（``ensure_diary`` 幂等，不会重复插入）。
     """
     with _EDITOR_LOCK:
         # 先落库待保存的正文，再读库：否则重建读到的还是上一次写盘的内容。
         flush_pending_save()
         with session_scope() as session:
-            diary = ensure_diary(session, day)
-            return {"id": diary.id, "title": diary.title, "content": diary.content}
+            diary = session.scalar(
+                select(Diary).where(
+                    Diary.owner_id == "local",
+                    Diary.date == day,
+                    Diary.is_deleted.is_(False),
+                )
+            )
+            if diary is not None:
+                return {"id": diary.id, "day": day, "title": diary.title,
+                        "content": diary.content}
+            return {"id": "", "day": day, "title": diary_title(day), "content": ""}
 
 
 def _editor(page: ft.Page, data: dict, refresh) -> ft.Control:
     diary_id, title, content = data["id"], data["title"], data["content"]
+    # 草稿数据由 _editor_data 提供，一定带 day；这里兜底避免旧调用方 KeyError。
+    day = data.get("day") or _state["selected"]
     # 本轮重建发生在最后一个字刚输入、定时器还没触发时：以内存里的最新值为准。
     pending = autosave.pending_snapshot("diary")
     if pending and pending.get("id") == diary_id:
@@ -103,9 +129,9 @@ def _editor(page: ft.Page, data: dict, refresh) -> ft.Control:
         filled=False,
         color=th.TEXT,
         text_style=ft.TextStyle(size=13, color=th.TEXT, height=1.6),
-        on_change=lambda e: _schedule_save(diary_id, e.control.value or ""),
+        on_change=lambda e: _schedule_save(diary_id, e.control.value or "", day),
         on_blur=lambda e: (
-            _schedule_save(diary_id, e.control.value or ""),
+            _schedule_save(diary_id, e.control.value or "", day),
             autosave.flush_now(),
         ),
         expand=True,
@@ -115,7 +141,7 @@ def _editor(page: ft.Page, data: dict, refresh) -> ft.Control:
         separator = "\n" if text and not text.endswith("\n") else ""
         field.value = f"{text}{separator}![]({url})\n"
         # 先同步待保存缓冲再 flush：否则重建时 _editor 会用缓冲里的旧正文覆盖新图。
-        _schedule_save(diary_id, field.value)
+        _schedule_save(diary_id, field.value, day)
         flush_pending_save()
         # 重建卡片，让下方配图区立刻出现新图片
         refresh()

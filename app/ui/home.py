@@ -12,7 +12,6 @@ from ..db.models import Account, Diary, Diet, Exercise, Note, Sleep, Todo, Trans
 from ..db.session import session_scope
 from ..icons import QUICK, ico
 from ..services.dates import day_of_year, iso_week, local_date_from_utc, lunar_text, shift_month, weekday_cn
-from ..services.diary import ensure_diary
 from ..services.finance import money, month_summary, total_assets
 from ..services.sync import mark_pending_write
 from .. import theme as th
@@ -467,9 +466,7 @@ def _render_home(page, refresh, on_open_diary, on_open_note,
         on_open_note(created)
 
     def open_day(day: date):
-        with session_scope() as session:
-            ensure_diary(session, day)
-            mark_pending_write()
+        # 只导航不建行：日记行由日记页在首次真实输入时创建，翻日历不该留下空日记。
         on_open_diary(day)
 
     quick = ft.Row(
