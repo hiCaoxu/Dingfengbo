@@ -65,7 +65,9 @@ python main.py
 - **番茄钟**：可选关联任务与 25/45/60 分钟，结束后通知并给任务累加 `pomodoro_count`（随同步传播）。
 
 ## 同步与多端
-
+- **接口文档**：[`docs/API.md`](docs/API.md)（含认证、字段、限流、错误码与一次完整同步的时序）；
+  机读契约见 [`docs/openapi.json`](docs/openapi.json)，服务运行时可访问 `/docs`、`/redoc`。
+  `tests/test_api_docs.py` 会校验「接口改了文档没改」。
 - **本地优先**：写操作先落 SQLite 再进待同步队列，界面不等网络。
 - **触发**：启动一次、每 5 分钟、本地写入后 10 秒，以及顶栏「立即同步」。
 - **接口**：`POST /api/sync/pull`、`POST /api/sync/push`、`GET /api/sync/check`、`GET /api/health`、`POST /api/upload`；Bearer token 鉴权，服务端按 `owner_id` 隔离数据。
