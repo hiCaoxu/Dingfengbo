@@ -17,6 +17,8 @@ from ..config import (
     DATA_DIR,
     DEFAULT_HEIGHT_CM,
     DEFAULT_SERVER_URL,
+    InsufficientSecretProtection,
+    dpapi_available,
     load_settings,
     save_settings,
     secrets_protection,
@@ -927,8 +929,11 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
             return "同步令牌与 AI Key 已用 Windows DPAPI 按当前用户加密保存。"
         if level == "base64":
             return (
-                "⚠ 当前环境不可用 DPAPI，令牌 / Key 只做了 base64 混淆（等同明文），"
-                "请勿把 settings.json 放到共享目录或云盘。"
+                "⚠ 令牌 / Key 目前以 base64 保存（等同明文），建议清空后重新填写以启用 DPAPI。"
+            )
+        if not dpapi_available():
+            return (
+                "⚠ 当前系统不支持 DPAPI：默认拒绝保存令牌 / Key，可勾选下方弱保护开关（不推荐）。"
             )
         return "尚未配置同步令牌 / AI Key。"
 
@@ -936,6 +941,11 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
     token = form_field("同步令牌", settings.get("sync_token", ""))
     token.password = True
     token.can_reveal_password = True
+    allow_weak = ft.Checkbox(
+        label="允许弱保护存储（DPAPI 不可用时以 base64 保存令牌/Key，不推荐）",
+        value=bool(settings.get("allow_weak_secret_storage", False)),
+        label_style=th.checkbox_label_style(),
+    )
     height = form_field("身高 cm", str(settings.get("height_cm", DEFAULT_HEIGHT_CM)))
     gender = dropdown("性别", ["男", "女"], settings.get("gender", "男"))
     enabled = ft.Checkbox(label="启用自动同步", value=bool(settings.get("sync_enabled", True)),
@@ -1201,19 +1211,25 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
             h = float(height.value or DEFAULT_HEIGHT_CM)
         except ValueError:
             h = DEFAULT_HEIGHT_CM
-        save_settings(dict(
-            server_url=server.value or DEFAULT_SERVER_URL, sync_token=token.value or "",
-            height_cm=h, gender=gender.value, sync_enabled=enabled.value,
-            ai_provider=provider_key["value"],
-            ai_base_url=ai_base_url.value or "",
-            ai_api_key=ai_key.value or "",
-            ai_model=ai_model.value or "",
-            theme_mode="dark" if theme_dd.value == "暗色" else "light",
-            autostart=bool(autostart.value),
-            close_to_tray=bool(close_to_tray.value),
-            module_order=list(order_state["value"]),
-            hidden_modules=sorted(hidden),
-        ))
+        try:
+            save_settings(dict(
+                server_url=server.value or DEFAULT_SERVER_URL, sync_token=token.value or "",
+                height_cm=h, gender=gender.value, sync_enabled=enabled.value,
+                ai_provider=provider_key["value"],
+                ai_base_url=ai_base_url.value or "",
+                ai_api_key=ai_key.value or "",
+                ai_model=ai_model.value or "",
+                theme_mode="dark" if theme_dd.value == "暗色" else "light",
+                autostart=bool(autostart.value),
+                close_to_tray=bool(close_to_tray.value),
+                module_order=list(order_state["value"]),
+                hidden_modules=sorted(hidden),
+                allow_weak_secret_storage=bool(allow_weak.value),
+            ))
+        except InsufficientSecretProtection as exc:
+            # 缺 DPAPI 时拒绝把凭据写成 base64：留在弹窗里让用户勾选「允许弱保护存储」重试。
+            snack(page, str(exc), th.ACCENT)
+            return
         # 开机自启写注册表（失败只提示，不影响其他设置保存）
         from ..services import system_integration
 
@@ -1255,9 +1271,10 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
                 server, token,
                 ft.Text(
                     _protection_note(),
-                    size=th.FONT_CAPTION, color=th.TEXT_MUTED, max_lines=2,
+                    size=th.FONT_CAPTION, color=th.TEXT_MUTED, max_lines=1,
                     overflow=ft.TextOverflow.ELLIPSIS,
                 ),
+                allow_weak,
                 ft.Row([ft.TextButton("测试同步连接", on_click=test_sync), sync_probe_text],
                        spacing=10, wrap=True),
                 enabled,

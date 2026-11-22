@@ -94,6 +94,20 @@ class DataIoTests(unittest.TestCase):
         with session_scope() as session:
             self.assertIsInstance(session.query(Transaction).one().date, date)
 
+    def test_csv_transactions_are_appended_not_merged(self) -> None:
+        """同一天两笔完全相同的交易是合法的，CSV 无 id 时必须都保留。"""
+        path = self.root / "dup.csv"
+        path.write_text(
+            "kind,amount,category,note,account_id,date\n"
+            "支出,12,餐饮,午饭,acc-1,2026-2-1\n"
+            "支出,12,餐饮,午饭,acc-1,2026-2-1\n",
+            encoding="utf-8-sig",
+        )
+        self.assertEqual(data_io.import_csv("transactions", path)["imported"], 2)
+        with session_scope() as session:
+            kept = session.query(Transaction).filter(Transaction.date == date(2026, 2, 1)).count()
+            self.assertEqual(kept, 2)
+
     def test_markdown_export_dedupes_same_titles(self) -> None:
         with session_scope() as session:
             session.query(Note).delete()
@@ -153,6 +167,8 @@ class AiDraftValidationTests(unittest.TestCase):
 class SettingsCiphertextTests(unittest.TestCase):
     def setUp(self) -> None:
         self.backup = _snapshot_settings()
+        # 让 DPAPI 不可用的环境也能跑通（默认会拒绝弱保护落盘）
+        save_settings({"allow_weak_secret_storage": True})
 
     def tearDown(self) -> None:
         _restore_settings(self.backup)

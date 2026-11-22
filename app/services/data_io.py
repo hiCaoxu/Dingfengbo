@@ -56,11 +56,9 @@ def _rows(table: str) -> list[dict[str, Any]]:
 
 
 def counts() -> dict[str, int]:
-    """各表可导出记录数（一条聚合查询）。"""
+    """各表可导出记录数（每表一条 COUNT，均走 is_deleted 过滤）。"""
     result: dict[str, int] = {}
     with session_scope() as session:
-        from sqlalchemy import func
-
         for table, model in MODEL_BY_TABLE.items():
             total = session.scalar(
                 select(func.count()).select_from(model).where(model.is_deleted.is_(False))
@@ -293,6 +291,9 @@ def _prepare_row(model, mapping: dict[str, Any]) -> tuple[dict[str, Any], list[s
 
 # CSV 没有可靠的 id（用户经常手工编辑再导入），按业务键找已有行：
 # 同一份 CSV 导入两次不会变成两份数据。
+# 收支**故意不参与**业务键去重：同一天两笔金额、分类、备注都相同的交易是合法的，
+# 按业务键合并会静默少一笔。重复导入同一份 CSV 会追加重复行，但导入前有确认与
+# 自动备份，且导出的 CSV 自带 id（带 id 时走精确更新，不会重复）。
 _CSV_NATURAL_KEYS: dict[str, tuple[str, ...]] = {
     "todos": ("title", "due_date"),
     "diaries": ("date",),
@@ -300,7 +301,6 @@ _CSV_NATURAL_KEYS: dict[str, tuple[str, ...]] = {
     "habits": ("name",),
     "habit_logs": ("habit_id", "date"),
     "accounts": ("name",),
-    "transactions": ("date", "kind", "category", "amount", "note"),
     "weights": ("date",),
     "sleeps": ("date",),
     "exercises": ("date", "kind"),
@@ -321,12 +321,7 @@ def _find_csv_duplicate(session, model, table: str, values: dict[str, Any]):
     for key in keys:
         if key not in values or values[key] in (None, ""):
             return None
-        column = getattr(model, key)
-        if key == "amount":
-            # 金额是 REAL：直接 == 既不可靠，也会把 12.00 与 12.000000001 判成同一条。
-            conditions.append(func.round(column, 2) == round(float(values[key]), 2))
-        else:
-            conditions.append(column == values[key])
+        conditions.append(getattr(model, key) == values[key])
     return session.scalar(select(model).where(*conditions))
 
 

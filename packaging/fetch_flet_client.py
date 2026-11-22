@@ -14,10 +14,23 @@ from pathlib import Path
 
 
 def _installed_version() -> str:
+    """已安装的 flet-desktop 版本。
+
+    注意：``flet_desktop`` 并没有 ``__version__`` 属性（1.x 里是
+    ``flet_desktop.version.version`` / 包元数据），只读 ``__version__`` 会静默回退到
+    兜底值，于是一路下载错误版本的客户端——运行时协议对不上，启动即失败。
+    """
+    try:
+        from importlib.metadata import version
+
+        return str(version("flet-desktop"))
+    except Exception:
+        pass
     try:
         import flet_desktop
+        from flet_desktop.version import version as package_version
 
-        return str(getattr(flet_desktop, "__version__", "") or "")
+        return str(getattr(flet_desktop, "__version__", "") or package_version)
     except Exception:
         return ""
 

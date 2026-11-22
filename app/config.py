@@ -89,6 +89,9 @@ _DEFAULT_SETTINGS: dict[str, Any] = {
     "sync_tables": [],
     # 数据导入导出：最近一次导出目录
     "last_export_dir": "",
+    # 安全：DPAPI 不可用时是否允许把令牌/Key 以 base64（等同明文）落盘。
+    # 默认关闭——宁可保存失败并明确报错，也不静默把凭据写成可解码文本。
+    "allow_weak_secret_storage": False,
 }
 
 # settings.json 会被同步线程（游标落盘）与设置界面并发读写，统一串行化避免互相覆盖。
@@ -109,6 +112,10 @@ _DPAPI_PREFIX = "dpapi:"
 _DECRYPT_FAILED: set[str] = set()
 
 
+class InsufficientSecretProtection(RuntimeError):
+    """DPAPI 不可用且用户未允许弱保护存储：拒绝把凭据写成 base64。"""
+
+
 def _is_protected(value: str) -> bool:
     return value.startswith((_DPAPI_PREFIX, _B64_PREFIX))
 
@@ -123,6 +130,11 @@ def secrets_protection() -> str:
     if all(value.startswith(_DPAPI_PREFIX) for value in protected):
         return "dpapi"
     return "base64"
+
+
+def dpapi_available() -> bool:
+    """当前环境是否能用 DPAPI 保护敏感字段（探测结果会被缓存）。"""
+    return _dpapi_crypt(b"probe", protect=True) is not None
 
 # DPAPI 可用性只探测一次：不可用时（非 Windows / 受策略限制）退回 base64 混淆。
 _DPAPI_AVAILABLE: bool | None = None
@@ -190,12 +202,24 @@ def _b64_decode(payload: str) -> bytes | None:
         return None
 
 
-def _obfuscate_token(value: str) -> str:
-    """落盘前保护 token/api key：优先 DPAPI 加密，失败退回 base64 混淆。"""
+def _obfuscate_token(value: str, allow_weak: bool = False) -> str:
+    """落盘前保护 token/api key：优先 DPAPI 加密。
+
+    DPAPI 不可用时默认**拒绝保存**并抛 :class:`InsufficientSecretProtection`：
+    base64 只是混淆，任何能读文件的人都能还原，把凭据写成这样比"保存失败"更危险。
+    需要在不支持 DPAPI 的环境（非 Windows / 被策略禁用）使用时，用户必须在设置里
+    显式勾选 allow_weak_secret_storage。
+    """
     raw = value.encode("utf-8")
     protected = _dpapi_crypt(raw, protect=True)
     if protected is not None:
         return _DPAPI_PREFIX + base64.urlsafe_b64encode(protected).decode("ascii")
+    if _DPAPI_AVAILABLE is False and not allow_weak:
+        raise InsufficientSecretProtection(
+            "当前系统不支持 DPAPI（或已被安全策略禁用）。为避免同步令牌 / AI Key 以"
+            "可解码文本落盘，本次未保存。确需在此环境使用，请在设置里勾选"
+            "「允许弱保护存储（不推荐）」。"
+        )
     return _B64_PREFIX + base64.urlsafe_b64encode(raw).decode("ascii")
 
 
@@ -273,16 +297,21 @@ def save_settings(settings: dict[str, Any]) -> None:
         raw = _raw_disk_settings()
         merged = load_settings()
         merged.update(settings)
+        allow_weak = bool(merged.get("allow_weak_secret_storage"))
         for key in ("sync_token", "ai_api_key"):
             if key in settings:
                 # 调用方显式给了新值（包括清空）：按新值处理。
-                merged[key] = _obfuscate_token(str(settings[key])) if settings[key] else ""
+                merged[key] = (
+                    _obfuscate_token(str(settings[key]), allow_weak=allow_weak)
+                    if settings[key]
+                    else ""
+                )
             elif key in _DECRYPT_FAILED and raw.get(key):
                 # 解密失败且本次没改这一项：保留磁盘上的原密文，否则一次后台
                 # 保存游标就会把原机上还能用的密钥永久抹掉。
                 merged[key] = str(raw[key])
             elif merged.get(key):
-                merged[key] = _obfuscate_token(str(merged[key]))
+                merged[key] = _obfuscate_token(str(merged[key]), allow_weak=allow_weak)
             else:
                 merged[key] = str(raw.get(key) or "")
         tmp = SETTINGS_PATH.with_suffix(".tmp")

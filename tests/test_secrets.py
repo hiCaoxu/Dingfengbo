@@ -1,20 +1,43 @@
-"""敏感字段落盘保护：DPAPI 优先、base64 兼容、损坏值不崩溃。"""
+"""敏感字段落盘保护：DPAPI 优先，base64 必须显式允许、损坏值不崩溃。"""
 
 from __future__ import annotations
 
 import base64
 import unittest
 
-from app.config import _deobfuscate_token, _obfuscate_token
+from app import config
+from app.config import (
+    InsufficientSecretProtection,
+    _deobfuscate_token,
+    _obfuscate_token,
+)
 
 
 class SecretStorageTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._dpapi = config._DPAPI_AVAILABLE
+
+    def tearDown(self) -> None:
+        config._DPAPI_AVAILABLE = self._dpapi
+
     def test_roundtrip_does_not_store_plaintext(self) -> None:
         token = "sync-token-abc-123"
-        stored = _obfuscate_token(token)
+        stored = _obfuscate_token(token, allow_weak=True)
         self.assertNotIn(token, stored)
         self.assertTrue(stored.startswith(("dpapi:", "b64:")))
         self.assertEqual(_deobfuscate_token(stored), token)
+
+    def test_refuses_weak_storage_when_dpapi_missing(self) -> None:
+        """没有 DPAPI 时默认拒绝保存：base64 等同明文，不该静默落盘。"""
+        config._DPAPI_AVAILABLE = False
+        with self.assertRaises(InsufficientSecretProtection):
+            _obfuscate_token("sync-token")
+
+    def test_allows_weak_storage_when_explicitly_opted_in(self) -> None:
+        config._DPAPI_AVAILABLE = False
+        stored = _obfuscate_token("sync-token", allow_weak=True)
+        self.assertTrue(stored.startswith("b64:"))
+        self.assertEqual(_deobfuscate_token(stored), "sync-token")
 
     def test_legacy_base64_value_still_readable(self) -> None:
         legacy = "b64:" + base64.urlsafe_b64encode(b"old-token").decode("ascii")

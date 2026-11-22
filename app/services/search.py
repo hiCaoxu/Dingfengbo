@@ -109,6 +109,12 @@ def _day_range(word: str, today: date) -> tuple[date, date] | None:
     return None
 
 
+# 关键字条数与单条长度上限：每条关键字都会多生成一组 LIKE 条件，
+# 把一整段文章粘进搜索框会让 5 张表 × 多列的条件数暴涨（SQLite 也会撞参数上限）。
+MAX_KEYWORDS = 8
+MAX_KEYWORD_LEN = 64
+
+
 def parse_query(text: str, today: date | None = None) -> Query:
     """把「待办 今天 高优先级 报告」这类输入拆成结构化条件。
 
@@ -134,7 +140,8 @@ def parse_query(text: str, today: date | None = None) -> Query:
             if table not in query.tables:
                 query.tables.append(table)
             continue
-        query.keywords.append(token)
+        if len(query.keywords) < MAX_KEYWORDS:
+            query.keywords.append(token[:MAX_KEYWORD_LEN])
     return query
 
 

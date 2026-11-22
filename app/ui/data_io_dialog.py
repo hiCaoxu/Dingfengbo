@@ -282,8 +282,9 @@ def open_data_io_dialog(page: ft.Page, refresh=None) -> ft.AlertDialog:
             ft.Row([import_table, import_button], spacing=8),
             ft.Text(
                 "JSON 导入按「最后写入获胜」合并，适合换机或从旧备份恢复；导入的行会重新进入待同步队列。"
-                "CSV 按列名匹配、缺列用默认值，已有记录按 ID 或业务键（日期 / 习惯+日期）去重，"
-                "文件里更旧的行不会覆盖较新的数据，单行失败不影响其他行。",
+                "CSV 按列名匹配、缺列用默认值；带 id 的行按 id 精确更新，无 id 时日记/笔记/习惯等"
+                "按业务键去重（日期「习惯+日期」），而**收支一律追加**——同一天两笔同额交易是合法的，"
+                "按业务键合并会静默少一笔。单行失败不影响其他行。",
                 size=th.FONT_CAPTION,
                 color=th.TEXT_MUTED,
             ),
