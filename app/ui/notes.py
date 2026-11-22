@@ -118,12 +118,30 @@ def _code_block(code: str, lang: str) -> ft.Control:
     )
 
 
+def _normalize_table_rows(header: list[str], rows: list[list[str]]) -> list[list[str]]:
+    """把每行补齐/截断到表头列数。
+
+    Markdown 允许「少写几格」或「多写几格」，但 DataRow 的单元格数必须与列数一致，
+    否则 Flet/Flutter 侧会断言失败（整块预览渲染不出来）。短行补空串、长行截断。
+    """
+    width = len(header)
+    if width == 0:
+        return []
+    normalized: list[list[str]] = []
+    for row in rows:
+        cells = [str(cell) for cell in row[:width]]
+        cells.extend([""] * (width - len(cells)))
+        normalized.append(cells)
+    return normalized
+
+
 def _table(header: list[str], rows: list[list[str]]) -> ft.Control:
+    safe_rows = _normalize_table_rows(header, rows)
     table = ft.DataTable(
         columns=[ft.DataColumn(ft.Text(h, size=12, weight="bold", color=th.TEXT)) for h in header],
         rows=[
             ft.DataRow(cells=[ft.DataCell(ft.Text(c, size=12, color=th.TEXT)) for c in row])
-            for row in rows
+            for row in safe_rows
         ],
         border=ft.Border.all(1, th.DIVIDER),
         border_radius=8,
@@ -332,7 +350,21 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
         suggestion_row.visible = False
         suggestion_row.update()
         page.update()
-    _preview = ft.Container(content=render_markdown(content_text), expand=True)
+    def _safe_render(value: str) -> ft.Control:
+        """首渲染兜底：解析/构建失败时退回纯文本并记日志，别让预览区（甚至整窗）挂掉。"""
+        try:
+            return render_markdown(value)
+        except Exception:
+            logger.exception("Markdown 预览渲染失败，退回纯文本")
+            return ft.Container(
+                content=ft.Text(
+                    value or "（预览渲染失败，已显示原文）",
+                    size=12, color=th.TEXT_MUTED, selectable=True,
+                ),
+                expand=True,
+            )
+
+    _preview = ft.Container(content=_safe_render(content_text), expand=True)
     source = ft.TextField(
         value=content_text,
         multiline=True,

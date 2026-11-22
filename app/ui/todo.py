@@ -20,7 +20,7 @@ from ..services.dates import lunar_md
 from ..services.reminders import describe as describe_reminders
 from ..services.sync import mark_pending_write
 from ..services.habits import overview as habits_overview
-from ..services.todo_rules import describe as describe_rule
+from ..services.todo_rules import ANCHOR_RULES, describe as describe_rule, ensure_anchor
 from ..services.todo_rules import next_occurrence
 from ..services.todo_views import (
     QUADRANTS,
@@ -94,8 +94,13 @@ def toggle(page: ft.Page, todo_id: str, refresh) -> None:
             return
         if not item.completed and item.repeat_rule not in ("none",) and not item.is_template:
             due = item.due_date or date.today()
+            # 按月/按年：首次推进就把「系列日号」固化进 repeat_config，之后 1/31 完成一次
+            # 不会漂成 2/28 再也回不到 31（锚点随配置一起同步，各端推进结果一致）。
+            config_raw = item.repeat_config
+            if item.repeat_rule in ANCHOR_RULES:
+                config_raw = ensure_anchor(config_raw, due)
             following = next_occurrence(
-                due, item.repeat_rule, item.repeat_config, bool(item.lunar_reminder)
+                due, item.repeat_rule, config_raw, bool(item.lunar_reminder)
             )
             if following:
                 occurrence_id = _occurrence_id(item.id, following)
@@ -108,7 +113,7 @@ def toggle(page: ft.Page, todo_id: str, refresh) -> None:
                         due_time=item.due_time, tags=item.tags,
                         lunar_reminder=lunar_md(following) if item.lunar_reminder else "",
                         repeat_rule=item.repeat_rule,
-                        repeat_config=item.repeat_config,
+                        repeat_config=config_raw,
                         remind_days=item.remind_days,
                         remind_days_before=item.remind_days_before,
                         remind_time=item.remind_time,

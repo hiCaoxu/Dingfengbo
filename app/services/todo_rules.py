@@ -49,11 +49,32 @@ def serialize_config(config: dict | None) -> str:
 
 def next_occurrence(due: date, rule: str, config_raw: str, lunar: bool) -> date | None:
     """按规则推进下一次到期日；无法推进（不循环/自定义未配置）返回 None。"""
+    config = parse_config(config_raw)
     if rule in ("custom", "irregular"):
-        return next_custom_due(due, parse_config(config_raw))
+        return next_custom_due(due, config)
+    try:
+        anchor_day = int(config.get("anchor_day")) if config.get("anchor_day") else None
+    except (TypeError, ValueError):
+        anchor_day = None
     if lunar:
-        return next_lunar_due(due, rule)
-    return next_due(due, rule)
+        return next_lunar_due(due, rule, anchor_day)
+    return next_due(due, rule, anchor_day)
+
+
+ANCHOR_RULES = ("month", "year")
+
+
+def ensure_anchor(config_raw: str, due: date) -> str:
+    """给按月/按年的循环补上 ``anchor_day``（系列最初选定的日号）。
+
+    没有它，1/31 完成一次就会漂到 2/28，之后永远停在 28 号。锚点随 ``repeat_config``
+    一起同步，因此每台设备推进出来的日期一致。
+    """
+    config = parse_config(config_raw)
+    if config.get("anchor_day"):
+        return config_raw
+    config["anchor_day"] = due.day
+    return serialize_config(config)
 
 
 def describe(rule: str, config_raw: str) -> str:

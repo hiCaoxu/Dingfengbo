@@ -128,19 +128,46 @@ def _close_and_refresh(page, dialog, on_done):
         on_done()
 
 
-def save_record(model, record_id: str | None, fields: dict, resolve=None) -> None:
-    """统一的「取-改 / 建 + 标脏」骨架，供各弹窗复用。
+class SaveTargetMissing(RuntimeError):
+    """编辑目标已不存在或已删除：不能静默新建一条「看起来保存成功」的记录。"""
 
-    ``resolve`` 在会话内按业务键查找既有记录（如睡眠按日期去重），返回 None 则新建。
+
+def save_record(model, record_id: str | None, fields: dict, resolve=None) -> str:
+    """统一的「取-改 / 建 + 标脏」骨架，返回记录 id。
+
+    ``resolve`` 只在**新建**时按业务键查找既有记录（如睡眠按日期去重）。
+    编辑（``record_id`` 非空）时目标必须存在且未删除，否则抛 ``SaveTargetMissing``：
+    以前这种情况会照常 update 墓碑行（保存成功但列表里看不到），或直接新建一条
+    重复记录（用户以为改的是原来那条）。
     """
     with session_scope() as session:
-        target = session.get(model, record_id) if record_id else None
-        if target is None and resolve is not None:
-            target = resolve(session)
+        if record_id:
+            target = session.get(model, record_id)
+            if target is None or target.is_deleted:
+                raise SaveTargetMissing(
+                    f"{table_label(model.__tablename__)}记录已不存在（可能已被删除），"
+                    "请取消后重新创建"
+                )
+            update(session, target, **fields)
+            return str(target.id)
+        target = resolve(session) if resolve is not None else None
         if target is not None:
             update(session, target, **fields)
-        else:
-            create(session, model, **fields)
+            return str(target.id)
+        return str(create(session, model, **fields).id)
+
+
+def _save_or_alert(page, model, record_id, fields, resolve=None) -> bool:
+    """保存并就地提示失败（目标已失效），返回是否成功。
+
+    失败时**不标脏、不关弹窗**：用户还能看到自己填的内容，可以直接取消或重建。
+    """
+    try:
+        save_record(model, record_id, fields, resolve=resolve)
+    except SaveTargetMissing as exc:
+        snack(page, str(exc), th.ACCENT)
+        return False
+    return True
 
 
 # ---------------------------------------------------------------- 待办
@@ -496,7 +523,8 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
             # 四象限由优先级与到期日自动推导，手选值不再写入（列保留仅作兼容）。
             quadrant="",
         )
-        save_record(Todo, todo.id if todo else None, fields)
+        if not _save_or_alert(page, Todo, todo.id if todo else None, fields):
+            return
         mark_pending_write()
         _close_and_refresh(page, dialog, on_done)
 
@@ -548,7 +576,8 @@ def open_note_dialog(page: ft.Page, note: Note | None = None, on_done: Callable 
             snack(page, "请填写标题", th.ACCENT)
             return
         fields = dict(title=title.value.strip(), tags=_tags(tags.value or ""), content=content.value or "")
-        save_record(Note, note.id if note else None, fields)
+        if not _save_or_alert(page, Note, note.id if note else None, fields):
+            return
         mark_pending_write()
         _close_and_refresh(page, dialog, on_done)
 
@@ -583,7 +612,8 @@ def open_account_dialog(page: ft.Page, account: Account | None = None, on_done: 
             snack(page, "余额格式不正确", th.ACCENT)
             return
         fields = dict(name=name.value.strip(), kind=kind.value, initial_balance=amount)
-        save_record(Account, account.id if account else None, fields)
+        if not _save_or_alert(page, Account, account.id if account else None, fields):
+            return
         mark_pending_write()
         _close_and_refresh(page, dialog, on_done)
 
@@ -682,7 +712,8 @@ def open_transaction_dialog(page: ft.Page, kind: str = "expense", tx: Transactio
             date=record_date,
             note=note.value or "",
         )
-        save_record(Transaction, tx.id if tx else None, fields)
+        if not _save_or_alert(page, Transaction, tx.id if tx else None, fields):
+            return
         mark_pending_write()
         _close_and_refresh(page, dialog, on_done)
 
@@ -732,7 +763,8 @@ def open_exercise_dialog(page: ft.Page, item: Exercise | None = None, on_done: C
             distance_km=distance_km,
             calories=kcal, note=note.value or "",
         )
-        save_record(Exercise, item.id if item else None, fields)
+        if not _save_or_alert(page, Exercise, item.id if item else None, fields):
+            return
         mark_pending_write()
         _close_and_refresh(page, dialog, on_done)
 
@@ -777,7 +809,8 @@ def open_diet_dialog(page: ft.Page, item: Diet | None = None, on_done: Callable 
             return
         fields = dict(date=record_date, meal=meal.value,
                       food=food.value, grams=weight, calories=kcal, note=note.value or "")
-        save_record(Diet, item.id if item else None, fields)
+        if not _save_or_alert(page, Diet, item.id if item else None, fields):
+            return
         mark_pending_write()
         _close_and_refresh(page, dialog, on_done)
 
@@ -814,7 +847,8 @@ def open_weight_dialog(page: ft.Page, item: Weight | None = None, on_done: Calla
             snack(page, "日期或体脂率格式不正确", th.ACCENT)
             return
         fields = dict(date=record_date, kg=weight, body_fat=body_fat)
-        save_record(Weight, item.id if item else None, fields)
+        if not _save_or_alert(page, Weight, item.id if item else None, fields):
+            return
         mark_pending_write()
         _close_and_refresh(page, dialog, on_done)
 
@@ -849,15 +883,17 @@ def open_sleep_dialog(page: ft.Page, item: Sleep | None = None, on_done: Callabl
             quality_val = 3
         fields = dict(date=record_date, bedtime=bedtime.value or "",
                       wake_time=wake.value or "", hours=hours, quality=quality_val)
-        save_record(
+        if not _save_or_alert(
+            page,
             Sleep,
             item.id if item else None,
             fields,
-            # 同一天只保留一条睡眠记录：新建时按日期复用既有行。
+            # 同一天只保留一条睡眠记录：**新建**时按日期复用既有行（编辑不走这个分支）。
             resolve=lambda session: session.scalar(
                 select(Sleep).where(Sleep.is_deleted.is_(False), Sleep.date == record_date)
             ),
-        )
+        ):
+            return
         mark_pending_write()
         _close_and_refresh(page, dialog, on_done)
 
@@ -909,7 +945,8 @@ def open_entertainment_dialog(page: ft.Page, item: Entertainment | None = None, 
             cover=normalize_cover(cover.value or ""),
             rating=score, note=note.value or "",
         )
-        save_record(Entertainment, item.id if item else None, fields)
+        if not _save_or_alert(page, Entertainment, item.id if item else None, fields):
+            return
         mark_pending_write()
         _close_and_refresh(page, dialog, on_done)
 

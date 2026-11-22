@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import date, datetime, timedelta
 from typing import Any, Iterable
 
@@ -389,6 +391,38 @@ def _same_version(obj: SyncMixin, model, data: dict[str, Any]) -> bool:
     return True
 
 
+# LWW 平局（updated_at 完全相同）时用来决胜的字段：身份与同步元数据不参与，
+# 业务内容（含 is_deleted）参与。
+_DIGEST_SKIP_FIELDS = {
+    "id",
+    "owner_id",
+    "created_at",
+    "updated_at",
+    "sync_status",
+    "sync_seq",
+}
+
+
+def payload_digest(model, source: dict[str, Any]) -> str:
+    """业务载荷的确定性摘要，用于 LWW 平局决胜。
+
+    为什么不能拿 id 或设备号决胜：业务键合并后同一业务记录的 id 在不同端可能不同，
+    设备号也不随载荷传播。摘要只由「这条记录的业务内容」决定，所有端算出来一致，
+    于是「谁赢」在任意端都相同（取摘要较大的一方），不需要额外协调。
+    """
+    fields: dict[str, Any] = {}
+    for column in model.__table__.columns:
+        if column.name in _DIGEST_SKIP_FIELDS or column.name not in source:
+            continue
+        try:
+            parsed = _parse(column, source[column.name])
+        except (TypeError, ValueError):
+            parsed = str(source[column.name])
+        fields[column.name] = _jsonable(parsed)
+    blob = json.dumps(fields, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
 def apply_remote(
     session: Session, changes: Iterable[dict], owner_id: str | None = None
 ) -> list[dict]:
@@ -428,6 +462,28 @@ def apply_remote(
                 applied.append(
                     {"table": table, "data": data, "changed": False, "record_id": obj.id}
                 )
+                continue
+            if obj.updated_at == remote_time:
+                # 平局（时间戳完全相同但内容不同）：拿业务载荷摘要决胜。
+                # 两端用同一算法、同一份载荷，算出的胜者一致；输的一方也必须留痕并
+                # 回执，否则推送方会一直 pending（旧实现这里直接 continue）。
+                _record_conflict(session, str(table), record_id, obj.updated_at, remote_time)
+                local_digest = payload_digest(model, serialize(obj)["data"])
+                remote_digest = payload_digest(model, data)
+                if local_digest >= remote_digest:
+                    applied.append(
+                        {
+                            "table": table,
+                            "data": data,
+                            "changed": False,
+                            "superseded": True,
+                            "record_id": obj.id,
+                            "local_updated_at": obj.updated_at,
+                            "remote_updated_at": remote_time,
+                        }
+                    )
+                    continue
+                # 远端摘要更大：远端胜出，落到下面的覆盖逻辑（本次改动生效并回执）。
             elif obj.updated_at > remote_time:
                 # 远端版本更旧：本地获胜，但留下冲突记录供用户核对，并回执让客户端出队。
                 _record_conflict(session, str(table), record_id, obj.updated_at, remote_time)
@@ -442,7 +498,7 @@ def apply_remote(
                         "remote_updated_at": remote_time,
                     }
                 )
-            continue
+                continue
         for column in model.__table__.columns:
             # 按业务键（日期 / 习惯+日期）合并出的本地行保留本地主键，避免被远端 id 改写行身份。
             if column.name == "id" and merged:

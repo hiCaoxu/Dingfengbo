@@ -294,7 +294,7 @@ def push(payload: PushRequest, authorization: str | None = Header(default=None))
         {
             "table": change.get("table"),
             "id": (change.get("data") or {}).get("id"),
-            "reason": "云端已有更新版本，本次推送已按最后写入获胜丢弃",
+            "reason": "云端版本胜出（更晚，或同时间戳按内容摘要决胜），本次推送已丢弃",
             "local_updated_at": change.get("local_updated_at"),
             "remote_updated_at": change.get("remote_updated_at"),
         }

@@ -138,6 +138,26 @@ class ServerSyncTests(unittest.TestCase):
         )
         self.assertEqual([change["data"]["content"] for change in pulled["changes"]], ["B 版"])
 
+    def test_lww_tie_push_returns_receipt_and_converges(self) -> None:
+        """同一 updated_at、不同内容：按内容摘要决胜，败方也要拿到回执出队。"""
+        from app.db.repo import payload_digest
+
+        stamp = datetime(2026, 3, 1, 12, 0, 0)
+        first = note_change("A 版", stamp)
+        second = note_change("B 版", stamp)
+        second["data"]["id"] = first["data"]["id"]
+
+        self.server.push(self.server.PushRequest(changes=[first]), "Bearer tie-token")
+        payload = self.server.push(self.server.PushRequest(changes=[second]), "Bearer tie-token")
+
+        self.assertEqual(len(payload["accepted"]), 1, "败方也必须进 accepted 才能出队")
+        a_wins = payload_digest(Note, first["data"]) >= payload_digest(Note, second["data"])
+        winner = "A 版" if a_wins else "B 版"
+        with self.Session() as session:
+            stored = session.scalar(select(Note))
+        self.assertEqual(stored.title, winner, "两端必须收敛到同一胜者")
+        self.assertEqual(bool(payload["superseded"]), a_wins)
+
     def test_stale_push_is_reported_as_superseded(self) -> None:
         """被云端更新版本覆盖的推送必须回执，否则客户端会永久停在待同步队列。"""
         newer = note_change("新版本", datetime(2026, 1, 2))

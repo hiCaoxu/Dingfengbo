@@ -176,24 +176,31 @@ def nth_workday(year: int, month: int, nth: str) -> date | None:
     return None
 
 
-def next_due(value: date, rule: str) -> date | None:
+def _clamped(year: int, month: int, day: int) -> date:
+    return date(year, month, min(day, calendar.monthrange(year, month)[1]))
+
+
+def next_due(value: date, rule: str, anchor_day: int | None = None) -> date | None:
+    """推进下一次到期日。
+
+    ``anchor_day`` 是「系列最初选定的日号」：按月/按年推进时用它而不是当前日号，
+    否则 1/31 → 2/28 之后会一直停在 28 号（3 月变回 28 号），2/29 之后也再回不到 29。
+    没有锚点时退回当前日号（存量数据的既有行为）。
+    """
     if rule == "day":
         return value + timedelta(days=1)
     if rule == "week":
         return value + timedelta(weeks=1)
+    day = anchor_day or value.day
     if rule == "month":
         year, month = shift_month(value.year, value.month, 1)
-        day = min(value.day, calendar.monthrange(year, month)[1])
-        return date(year, month, day)
+        return _clamped(year, month, day)
     if rule == "year":
-        year = value.year + 1
-        month = value.month
-        day = min(value.day, calendar.monthrange(year, month)[1])
-        return date(year, month, day)
+        return _clamped(value.year + 1, value.month, day)
     return None
 
 
-def next_lunar_due(value: date, rule: str) -> date | None:
+def next_lunar_due(value: date, rule: str, anchor_day: int | None = None) -> date | None:
     """农历日期的循环推进：按天/按周走公历，按月=农历月+1，按年=农历年+1。"""
     if rule == "day":
         return value + timedelta(days=1)
@@ -213,6 +220,7 @@ def next_lunar_due(value: date, rule: str) -> date | None:
                 month += 1
         else:
             year += 1
+        day = anchor_day or day
         days = ZhDate.month_days(year)[month - 1]
         if day > days:
             day = days
