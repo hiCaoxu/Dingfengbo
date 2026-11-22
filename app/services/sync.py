@@ -131,7 +131,15 @@ class SyncClient:
         stored[self._cursor_key(settings)] = cursors
         save_settings({"sync_cursors": stored})
 
-    def _observe_server_time(self, payload: dict[str, Any]) -> None:
+    def _observe_server_time(
+        self, payload: dict[str, Any], sent_at: datetime | None = None
+    ) -> None:
+        """用服务端时间估计钟差（秒）。
+
+        ``server_time`` 是服务端在发响应前一刻取的，若直接用「收到响应时」的本地
+        时间去减，会把整个网络往返（RTT）算进钟差，写入时间因此被推到未来。
+        这里扣掉半个 RTT，把误差压到 RTT/2 以内。
+        """
         raw = payload.get("server_time")
         if not raw:
             return
@@ -139,7 +147,10 @@ class SyncClient:
             server_now = datetime.fromisoformat(str(raw))
         except ValueError:
             return
-        self.clock_offset = (server_now - utcnow()).total_seconds()
+        received = utcnow()
+        reference = sent_at or received
+        rtt = max(0.0, (received - reference).total_seconds())
+        self.clock_offset = round((server_now - reference).total_seconds() - rtt / 2, 3)
         set_clock_offset(self.clock_offset)
         if abs(self.clock_offset) > 120:
             self.status = "本机时钟异常，请校准系统时间"
@@ -185,6 +196,7 @@ class SyncClient:
         selected = self.selected_tables(settings)
         while True:
             before = {table: dict(cursor) for table, cursor in cursors.items()}
+            sent_at = utcnow()
             response = client.post(
                 self._endpoint("/api/sync/pull"),
                 json={"cursors": cursors, "limit": 200},
@@ -192,7 +204,7 @@ class SyncClient:
             )
             response.raise_for_status()
             payload = response.json()
-            self._observe_server_time(payload)
+            self._observe_server_time(payload, sent_at)
             raw_changes = payload.get("changes", [])
             remote_changes = raw_changes
             if selected:
@@ -238,6 +250,7 @@ class SyncClient:
         self.pending_upload = len(changes)
         if not changes:
             return
+        sent_at = utcnow()
         response = client.post(
             self._endpoint("/api/sync/push"),
             json={"changes": changes},
@@ -245,7 +258,7 @@ class SyncClient:
         )
         response.raise_for_status()
         payload = response.json()
-        self._observe_server_time(payload)
+        self._observe_server_time(payload, sent_at)
         accepted = payload.get("accepted", [])
         rejected = payload.get("rejected", []) or []
         superseded = payload.get("superseded", []) or []

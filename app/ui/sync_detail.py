@@ -23,6 +23,7 @@ from ..db.repo import (
     sync_queue_stats,
 )
 from ..db.backup import reset_sync_cursors
+from ..services.dates import local_datetime_from_utc
 from ..services.sync import mark_pending_write, sync_devices, sync_history
 from .widgets import close_modal, modal, snack
 
@@ -135,7 +136,7 @@ def open_sync_detail(page: ft.Page, refresh_status=None) -> ft.AlertDialog:
                                     ft.Text(
                                         (row["reason"] or "未提供原因")
                                         + " · "
-                                        + (row["created_at"].strftime("%m-%d %H:%M")
+                                        + (local_datetime_from_utc(row["created_at"]).strftime("%m-%d %H:%M")
                                            if isinstance(row["created_at"], datetime) else ""),
                                         size=th.FONT_CAPTION,
                                         color=th.TEXT_MUTED,
@@ -205,10 +206,10 @@ def open_sync_detail(page: ft.Page, refresh_status=None) -> ft.AlertDialog:
                                     ),
                                     ft.Text(
                                         "本地 "
-                                        + (row["local"].strftime("%m-%d %H:%M")
+                                        + (local_datetime_from_utc(row["local"]).strftime("%m-%d %H:%M")
                                            if isinstance(row["local"], datetime) else "?")
                                         + " / 远端 "
-                                        + (row["remote"].strftime("%m-%d %H:%M")
+                                        + (local_datetime_from_utc(row["remote"]).strftime("%m-%d %H:%M")
                                            if isinstance(row["remote"], datetime) else "?"),
                                         size=th.FONT_CAPTION,
                                         color=th.TEXT_MUTED,

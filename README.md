@@ -122,6 +122,9 @@ tests/               31 个测试文件
 约定：
 
 - 主题用模块级色板 + 运行时 `set_mode()`，界面统一按 `theme.X` 读色；静态 `from theme import X` 会把导入时的值钉死，切主题失效。
+- **时间口径**：`created_at` / `updated_at` 统一存 **naive UTC**（多端 LWW 需要公共时间轴），
+  界面与 AI 上下文展示前一律用 `dates.local_datetime_from_utc()` 转本地时间；
+  CSV/JSON 导出保持 UTC，便于原样回灌。写库时两个字段用同一个（已对齐的）时钟。
 - 界面文案新增生僻字会影响字体子集，改完跑 `python packaging\subset_font.py`（见下）。
 - 金额：库里存**整数分**（`models.MoneyCents` 类型装饰器，写元读元），同步载荷与 CSV/JSON 导出仍是「元」——旧客户端按元推送不会被读成 1/100；`app/services/money.py` 统一 Decimal 舍入与比较。迁移由 `PRAGMA user_version` 保证只执行一次。
 - 已知技术债：Caddy TLS 仅文档就绪，未在真实域名生产演练。

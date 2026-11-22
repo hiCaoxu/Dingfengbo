@@ -234,6 +234,17 @@ def local_date_from_utc(value: datetime) -> date:
     return value.astimezone().date()
 
 
+def local_datetime_from_utc(value: datetime) -> datetime:
+    """naive UTC（库里的存储口径）→ 本地时间，供界面与 AI 上下文展示。
+
+    库里统一存 UTC 是为了让多端 LWW 比较有公共时间轴；但直接把它 ``strftime``
+    出来显示，用户看到的时间会比本地墙上时间早一个时区（UTC+8 下就是早 8 小时）。
+    """
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone().replace(tzinfo=None)
+
+
 _HM_PATTERN = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d")
 
 

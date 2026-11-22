@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -23,6 +24,7 @@ from ...db.models import (
     table_label,
 )
 from ...db.session import session_scope
+from ..dates import local_datetime_from_utc
 
 # (表名, 中文名, 模型)；中文名统一取自 models.TABLE_LABELS，顺序即快捷指令展示顺序。
 TABLES: list[tuple[str, str, Any]] = [
@@ -80,6 +82,9 @@ def serialize_row(obj) -> str:
         value = getattr(obj, column.name)
         if value is None or value == "" or value == "[]":
             continue
+        if column.name in ("created_at", "updated_at") and isinstance(value, datetime):
+            # 库里存 UTC，给模型看的应该是本地时间，否则「上周写的笔记」会被判成更早。
+            value = local_datetime_from_utc(value).strftime("%Y-%m-%d %H:%M")
         label = _FIELD_LABELS.get(column.name, column.name)
         parts.append(f"{label}={value}")
     text = "；".join(parts)

@@ -14,9 +14,10 @@ from .models import SYNC_MODELS, Base
 
 logger = logging.getLogger(__name__)
 
-# 金额列（元 → 整数分）的一次性迁移。
-# 用 SQLite 自带的 ``PRAGMA user_version`` 记录是否已迁移：只看数值无法区分
-# 「100 元」和「100 分」，必须有一个显式标记，否则重复换算就是灾难。
+# 库级单位/口径迁移的版本号，记录在 SQLite 自带的 ``PRAGMA user_version``：
+#   1 = 金额改为整数分（元 → 分）
+#   2 = 修正 created_at / updated_at 的历史倒挂（两者曾用不同的时钟）
+# 只看数值无法区分「100 元」和「100 分」，必须有显式版本标记，否则重复换算就是灾难。
 MONEY_COLUMNS: tuple[tuple[str, str], ...] = (
     ("transactions", "amount"),
     ("accounts", "initial_balance"),
@@ -24,9 +25,10 @@ MONEY_COLUMNS: tuple[tuple[str, str], ...] = (
     ("recurring_rules", "amount"),
 )
 MONEY_SCHEMA_VERSION = 1
+TIMESTAMP_SCHEMA_VERSION = 2
 
 
-def _money_schema_version(connection: Connection) -> int:
+def _schema_version(connection: Connection) -> int:
     return int(connection.exec_driver_sql("PRAGMA user_version").scalar() or 0)
 
 
@@ -36,7 +38,7 @@ def _migrate_money_to_cents(connection: Connection) -> None:
     必须在任何 ORM 写入之前运行：``MoneyCents`` 类型装饰器会在写入时把元乘 100，
     如果先写入再迁移，这批数据会被乘两次。
     """
-    if _money_schema_version(connection) >= MONEY_SCHEMA_VERSION:
+    if _schema_version(connection) >= MONEY_SCHEMA_VERSION:
         return
     existing = set(inspect(connection).get_table_names())
     converted = 0
@@ -53,6 +55,32 @@ def _migrate_money_to_cents(connection: Connection) -> None:
     connection.exec_driver_sql(f"PRAGMA user_version = {MONEY_SCHEMA_VERSION}")
     if converted:
         logger.info("金额已迁移为整数分：%d 行", converted)
+
+
+def _normalize_timestamp_inversions(connection: Connection) -> None:
+    """修正 ``updated_at < created_at`` 的历史倒挂。
+
+    旧实现里 created_at 走模型默认的裸 UTC，updated_at 却叠加了同步时钟偏移
+    （含一次请求往返），同一行会出现「更新早于创建」。新写入已改为同钟，这里把
+    存量行按 ``updated_at = created_at`` 归一；不改内容、不改同步状态，
+    下次 pull 若云端版本更「新」，LWW 会用同样的内容覆盖，不会丢数据。
+    """
+    if _schema_version(connection) >= TIMESTAMP_SCHEMA_VERSION:
+        return
+    existing = set(inspect(connection).get_table_names())
+    fixed = 0
+    for model in SYNC_MODELS:
+        table = model.__tablename__
+        if table not in existing:
+            continue
+        result = connection.exec_driver_sql(
+            f'UPDATE "{table}" SET "updated_at" = "created_at" '
+            f'WHERE "updated_at" < "created_at"'
+        )
+        fixed += result.rowcount or 0
+    connection.exec_driver_sql(f"PRAGMA user_version = {TIMESTAMP_SCHEMA_VERSION}")
+    if fixed:
+        logger.info("已修正 %d 条时间倒挂（updated_at 对齐 created_at）", fixed)
 
 
 def sequence_value(connection: Connection) -> int:
@@ -234,8 +262,9 @@ def _ensure_indexes(connection: Connection) -> None:
 def initialize_schema(engine: Engine) -> None:
     """创建新表；旧版整数主键库在一个事务内迁移为 UUID。"""
     with engine.begin() as connection:
-        # 金额单位迁移必须最先做：后续所有写入都会经过 MoneyCents（元 → 分）。
+        # 库级迁移必须最先做：后续所有写入都会经过 MoneyCents（元 → 分）。
         _migrate_money_to_cents(connection)
+        _normalize_timestamp_inversions(connection)
         inspector = inspect(connection)
         existing = set(inspector.get_table_names())
         legacy_tables = [

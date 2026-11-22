@@ -35,15 +35,22 @@ def serialize(obj: SyncMixin) -> dict[str, Any]:
     return {"table": obj.__tablename__, "data": data}
 
 
-def mark_dirty(obj: SyncMixin) -> None:
-    # 把写入时间对齐到服务端时间轴，规避本机时钟回拨/快走导致的 LWW 误判。
-    obj.updated_at = utcnow() + timedelta(seconds=get_clock_offset())
+def mark_dirty(obj: SyncMixin) -> datetime:
+    """把写入时间对齐到服务端时间轴，规避本机时钟回拨/快走导致的 LWW 误判。"""
+    stamp = utcnow() + timedelta(seconds=get_clock_offset())
+    obj.updated_at = stamp
     obj.sync_status = "pending"
+    return stamp
 
 
 def create(session: Session, model: type[SyncMixin], owner_id: str = "local", **fields: Any):
     obj = model(owner_id=owner_id, **fields)
-    mark_dirty(obj)
+    stamp = mark_dirty(obj)
+    # created_at 必须和 updated_at 用同一个（已对齐的）时钟：它原先走模型默认值
+    # = 裸 UTC，而 updated_at 叠了时钟偏移，两者会差出一次请求的往返时间，
+    # 出现「更新时间早于创建时间」的倒挂（实测差 1~2 秒）。
+    if getattr(obj, "created_at", None) is None:
+        obj.created_at = stamp
     session.add(obj)
     session.flush()
     return obj
