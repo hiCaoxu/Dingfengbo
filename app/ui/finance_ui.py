@@ -197,6 +197,9 @@ def _render_overview(page: ft.Page, refresh, data) -> ft.Control:
     # 收支记录 / 账户列表：两张入口卡上下排列，紧接在「收支趋势」右侧，
     # 与两张图表同高、各占一半（136）；宽度用 expand 吸收多余空间，
     # 窗口变宽时不会在行尾留下空白。
+    #
+    # horizontal_alignment 必须是 STRETCH：Column 默认按子控件自身宽度（START）摆放，
+    # 卡片会缩成文字那么窄，列里剩下的宽度就成了右侧那条空白。
     nav_stack = ft.Column(
         [
             entry("RECEIPT_LONG_OUTLINED", "收支记录", "查看、筛选与新增", "records"),
@@ -205,6 +208,7 @@ def _render_overview(page: ft.Page, refresh, data) -> ft.Control:
         spacing=12,
         expand=2,
         height=284,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
     )
 
     pie_slot = _chart_slot()

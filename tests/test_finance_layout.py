@@ -64,6 +64,8 @@ class OverviewLayoutTests(unittest.TestCase):
         self.assertIsInstance(stack, ft.Column)
         self.assertEqual(len(stack.controls), 2)
         self.assertEqual(stack.height, 284)
+        # 竖排卡片要横向拉伸：Column 默认 START 会让卡片缩成文字宽度，右侧留白
+        self.assertEqual(stack.horizontal_alignment, ft.CrossAxisAlignment.STRETCH)
         self.assertTrue(all(control.expand == 1 for control in stack.controls))
 
     def test_three_cards_share_one_row_and_equal_height(self) -> None:

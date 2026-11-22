@@ -98,6 +98,41 @@ def _generate_recurring() -> None:
         logger.exception("生成周期交易失败")
 
 
+def _screen_size() -> tuple[int, int]:
+    """屏幕的逻辑分辨率（Windows 返回的是 DPI 虚拟化后的值，正好等于 Flet 用的逻辑像素）。
+
+    非 Windows 或取不到时退回 1280×880，保证窗口一定有个可用尺寸。
+    """
+    try:
+        import ctypes
+
+        width = int(ctypes.windll.user32.GetSystemMetrics(0))
+        height = int(ctypes.windll.user32.GetSystemMetrics(1))
+        if width > 0 and height > 0:
+            return width, height
+    except Exception:
+        logger.debug("读取屏幕尺寸失败，使用默认窗口尺寸", exc_info=True)
+    return 1280, 880
+
+
+DEFAULT_WINDOW_WIDTH = 1280
+DEFAULT_WINDOW_HEIGHT = 880
+MAX_WINDOW_WIDTH = 1440
+MAX_WINDOW_HEIGHT = 940
+
+
+def _default_window_size(screen: tuple[int, int]) -> tuple[int, int]:
+    """按屏幕大小取窗口的默认尺寸（约占可用区域 82%×88%，并夹在合理区间内）。
+
+    高分屏上固定 1280×880 会浪费一大圈桌面空间；按比例计算既不会超出屏幕，
+    也不会在小屏上过大。下限用最小窗口尺寸（1120×600 之上留些余量）。
+    """
+    width, height = screen
+    target_w = min(MAX_WINDOW_WIDTH, max(1120, int(width * 0.82)))
+    target_h = min(MAX_WINDOW_HEIGHT, max(720, int(height * 0.88)))
+    return target_w, target_h
+
+
 def main(page: ft.Page) -> None:
     setup_logging(LOGS_DIR)
     init_db()
@@ -118,8 +153,9 @@ def main(page: ft.Page) -> None:
     page.bgcolor = th.BG
     page.padding = 0
     page.spacing = 0
-    page.window.width = 1280
-    page.window.height = 880
+    window_w, window_h = _default_window_size(_screen_size())
+    page.window.width = window_w
+    page.window.height = window_h
     # 任务页是三栏（月历/象限 + 列表 + 习惯），低于此宽度会把中间列表挤没
     page.window.min_width = 1120
     page.window.min_height = 600
