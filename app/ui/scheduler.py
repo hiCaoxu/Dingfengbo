@@ -96,12 +96,17 @@ def _run_sync_async() -> None:
         return
 
     def worker() -> None:
-        sync_client.sync_once()
-        if _page is not None:
-            try:
+        # 同步是「尽力而为」：抛异常绝不能带走这个调度线程——线程一死，顶栏状态
+        # 永远停在旧值，打包后连日志都看不到。失败也要回调一次 UI 刷新。
+        try:
+            sync_client.sync_once()
+        except Exception:
+            logger.exception("自动同步失败")
+        try:
+            if _page is not None:
                 _page.run_task(_after_sync)
-            except Exception:
-                logger.exception("调度同步结果回 UI 线程失败")
+        except Exception:
+            logger.exception("调度同步结果回 UI 线程失败")
 
     threading.Thread(target=worker, daemon=True).start()
 

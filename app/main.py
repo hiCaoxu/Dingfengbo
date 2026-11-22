@@ -458,15 +458,20 @@ def main(page: ft.Page) -> None:
         def closed(_=None) -> None:
             state["palette"] = False
 
-        dialog = open_command_palette(
-            page,
-            navigate,
-            refresh,
-            on_open_note=open_note_preview,
-            on_open_diary=open_diary_day,
-            on_sync=_manual_sync,
-        )
-        dialog.on_dismiss = closed
+        try:
+            open_command_palette(
+                page,
+                navigate,
+                refresh,
+                on_open_note=open_note_preview,
+                on_open_diary=open_diary_day,
+                on_sync=_manual_sync,
+                on_close=closed,
+            )
+        except Exception:
+            # 面板没打开成功也必须复位标记，否则 Ctrl+K 从此失效到重启。
+            state["palette"] = False
+            logger.exception("打开命令面板失败")
 
     def refresh(force: bool = True) -> None:
         current = state["current"]

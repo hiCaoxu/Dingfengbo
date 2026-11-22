@@ -503,7 +503,12 @@ def confirm(page: ft.Page, message: str, on_confirm: Callable) -> None:
 
     def accept(_):
         close(_)
-        on_confirm()
+        try:
+            on_confirm()
+        except Exception as exc:
+            # 弹窗已经关掉了，至少要让用户知道「点了确定但没生效」，而不是静默。
+            logger.exception("确认操作执行失败")
+            snack(page, f"操作失败：{exc}", th.ACCENT)
 
     dialog = ft.AlertDialog(
         bgcolor=th.CARD,

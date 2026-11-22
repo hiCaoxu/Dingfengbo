@@ -73,8 +73,14 @@ def open_command_palette(
     on_open_note=None,
     on_open_diary=None,
     on_sync=None,
+    on_close=None,
 ) -> ft.AlertDialog:
-    """打开命令面板。``navigate/refresh`` 沿用主界面回调，避免重复实现路由。"""
+    """打开命令面板。``navigate/refresh`` 沿用主界面回调，避免重复实现路由。
+
+    ``on_close`` 在**弹窗显示之前**就挂到 ``on_dismiss`` 上：Esc/点遮罩关闭走的是
+    Flet 的 dismiss 回调，等 open 之后再赋值，Esc 那条路径可能根本没注册上，
+    调用方的「面板已打开」标记就会永远卡住（Ctrl+K 从此失效到重启）。
+    """
     results = ft.Column(spacing=2, scroll=ft.ScrollMode.AUTO, height=360)
     status = ft.Text("输入关键字，或直接选择下面的命令", size=th.FONT_CAPTION,
                      color=th.TEXT_MUTED)
@@ -329,6 +335,9 @@ def open_command_palette(
         actions_alignment=ft.MainAxisAlignment.END,
         shape=ft.RoundedRectangleBorder(radius=12),
     )
+    if on_close is not None:
+        # 必须在 open_dialog 之前挂好：Esc / 点遮罩关闭时 Flet 直接走 on_dismiss。
+        dialog.on_dismiss = on_close
     open_dialog(page, dialog)
     render_rows({}, "")
     try:

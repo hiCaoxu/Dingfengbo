@@ -20,12 +20,19 @@ from .widgets import confirm, dismiss, dropdown, modal, primary_button, set_butt
 logger = logging.getLogger(__name__)
 
 # 只保留一份运行中的计时器状态：重复打开弹窗不应并发两个倒计时。
-_session = {"active": False, "remaining": 0, "total": 0}
+# ``run`` 是每轮开始的代次：停止后 1 秒内重启时，旧 worker 醒来发现代次变了就
+# 直接退出，不会和新 worker 一起递减同一个 remaining（双倍速度、双份收尾）。
+_session = {"active": False, "remaining": 0, "total": 0, "run": 0}
 
 
 def _fmt(seconds: int) -> str:
     seconds = max(0, int(seconds))
     return f"{seconds // 60:02d}:{seconds % 60:02d}"
+
+
+def _run_is_current(run: int) -> bool:
+    """本轮计时是否仍然有效（仍在计时且代次未被 stop/新的 start 取代）。"""
+    return _session.get("run") == run and bool(_session.get("active"))
 
 
 def _record(minutes: int, todo_id: str, title: str) -> None:
@@ -57,11 +64,17 @@ def _run_timer(
     stop_btn: ft.TextButton,
     refresh,
 ) -> None:
+    run = int(_session.get("run") or 0)
+
+    def current() -> bool:
+        """仍是本轮且仍在计时：旧轮次一律不碰共享状态。"""
+        return _run_is_current(run)
+
     def worker() -> None:
-        while _session["active"] and _session["remaining"] > 0:
+        while current() and _session["remaining"] > 0:
             time.sleep(1)
-            if not _session["active"]:
-                break
+            if not current():
+                return
             _session["remaining"] -= 1
             remaining = _session["remaining"]
 
@@ -78,10 +91,14 @@ def _run_timer(
                 logger.debug("番茄钟刷新调度失败", exc_info=True)
                 break
 
-        finished = _session["active"] and _session["remaining"] <= 0
+        if not current():
+            return  # 中途被停止/被新一轮取代：不写库、不通知、不动按钮
+        finished = _session["remaining"] <= 0
         _session["active"] = False
 
         async def done() -> None:
+            if _session.get("run") != run:
+                return  # 新一轮已经开始，别用旧结果覆盖它的界面
             try:
                 if finished:
                     # 写库 + 系统通知都在后台线程：notify 走 PowerShell Toast，
@@ -145,6 +162,8 @@ def open_pomodoro_dialog(page: ft.Page, refresh=None):
 
     def stop(_=None):
         _session["active"] = False
+        # 代次自增：让仍在 sleep 的 worker 下一 tick 就失效，绝不能去递减新一轮的 remaining。
+        _session["run"] = int(_session.get("run") or 0) + 1
         # 立即恢复按钮状态：计时线程要等下一次 tick 才会发现已停止。
         set_button_text(start_btn, "开始")
         start_btn.disabled = False
@@ -174,7 +193,10 @@ def open_pomodoro_dialog(page: ft.Page, refresh=None):
         minutes = int((duration.value or "25 分钟").split(" ")[0])
         todo_id = todo_select.value or ""
         title = next((item.title for item in todos if item.id == todo_id), "")
-        _session.update(active=True, remaining=minutes * 60, total=minutes * 60)
+        _session.update(
+            active=True, remaining=minutes * 60, total=minutes * 60,
+            run=int(_session.get("run") or 0) + 1,
+        )
         remain_text.value = _fmt(minutes * 60)
         status_text.value = "专注中：" + (title or "自由专注")
         status_text.color = th.PRIMARY
