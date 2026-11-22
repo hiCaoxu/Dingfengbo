@@ -15,6 +15,7 @@ from sqlalchemy import select
 from ..db.models import LifeEvent
 from ..db.repo import create, soft_delete, update
 from ..db.session import session_scope
+from .sync import mark_pending_write
 
 MAX_TITLE = 15  # 一行放下，不缩成两行
 _DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -72,7 +73,10 @@ def add_event(
         return None
     with session_scope() as session:
         event = create(session, LifeEvent, title=title, target_date=target_date, note=note)
-        return event.id
+        event_id = event.id
+    # 写操作后立刻触发同步：漏掉这一步只能等 5 分钟的周期同步兜底。
+    mark_pending_write()
+    return event_id
 
 
 def update_event(event_id: str, title: str, target_date: date | None) -> bool:
@@ -85,7 +89,8 @@ def update_event(event_id: str, title: str, target_date: date | None) -> bool:
         if event is None or event.is_deleted:
             return False
         update(session, event, title=title, target_date=target_date)
-        return True
+    mark_pending_write()
+    return True
 
 
 def delete_event(event_id: str) -> bool:
@@ -94,4 +99,5 @@ def delete_event(event_id: str) -> bool:
         if event is None or event.is_deleted:
             return False
         soft_delete(session, event)
-        return True
+    mark_pending_write()
+    return True

@@ -20,10 +20,13 @@
 from __future__ import annotations
 
 import calendar
+import logging
 from datetime import date, timedelta
 
 from .dates import nth_workday, shift_month
 from .holidays import is_holiday, is_weekend_off
+
+logger = logging.getLogger(__name__)
 
 UNIT_LABELS = {"day": "天", "week": "周", "month": "月", "year": "年"}
 UNIT_BY_LABEL = {label: unit for unit, label in UNIT_LABELS.items()}
@@ -163,7 +166,11 @@ def _skip_blocked(value: date, config: dict) -> date:
         if not blocked:
             return candidate
         candidate += timedelta(days=1)
-    return candidate
+    # 400 步都没找到可用日期，说明规则本身就把它锁死了（比如同时跳过双休与节假日、
+    # 且窗口内全是假）。静默返回一个「被阻止」的日期会让调用方以为推进成功，这里
+    # 明确返回 None（调用方按「无法推进」处理）并留下警告。
+    logger.warning("循环推进在 %d 步内没有找到可用日期，已放弃：%s", MAX_STEPS, value)
+    return None
 
 
 def _next_week(value: date, config: dict, interval: int) -> date | None:

@@ -53,6 +53,12 @@ class ServerEmptyWhitelistTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         cls.server.engine.dispose()
+        # 关闭日志文件句柄，否则 Windows 下无法删除临时目录里的日志文件。
+        import logging
+
+        for handler in logging.getLogger().handlers[:]:
+            handler.close()
+            logging.getLogger().removeHandler(handler)
         cls.temp_dir.cleanup()
 
     def setUp(self) -> None:

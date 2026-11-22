@@ -9,6 +9,15 @@ from types import SimpleNamespace
 from tests.test_server_sync import _boot_server
 
 
+def _close_log_handlers() -> None:
+    """关闭日志文件句柄：Windows 下临时目录里有打开的文件就删不掉。"""
+    import logging
+
+    for handler in logging.getLogger().handlers[:]:
+        handler.close()
+        logging.getLogger().removeHandler(handler)
+
+
 class PublicBaseTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -18,6 +27,7 @@ class PublicBaseTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         cls.server.engine.dispose()
+        _close_log_handlers()
         cls.temp_dir.cleanup()
 
     def _request(self, host: str, port: int = 8000):
@@ -65,6 +75,7 @@ class StaticFileHeaderTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         cls.server.engine.dispose()
+        _close_log_handlers()
         cls.temp_dir.cleanup()
 
     def test_files_are_served_with_nosniff(self) -> None:
@@ -96,6 +107,7 @@ class UploadTempNameTests(unittest.TestCase):
             self.assertIn("uuid4()", source)
             self.assertNotIn('".tmp"', source)
             server.engine.dispose()
+            _close_log_handlers()
 
 
 if __name__ == "__main__":

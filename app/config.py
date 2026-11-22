@@ -36,7 +36,12 @@ def _resolve_data_dir() -> Path:
     if override:
         candidate = Path(override)
     elif os.name == "nt":
+        # 默认放在数据盘。不是每台机器都有 D 盘，D 不存在或不可写时要显式回退，
+        # 否则用户只会看到「数据目录创建失败」的静默降级，且不知道数据落在哪。
         candidate = DEFAULT_DATA_DIR
+        if not candidate.anchor or not Path(candidate.anchor).exists():
+            logger.warning("默认数据目录所在盘不存在（%s），回退到用户目录", DEFAULT_DATA_DIR)
+            candidate = Path.home() / "Dingfengbo"
     else:
         candidate = Path.home() / "Dingfengbo"
     try:

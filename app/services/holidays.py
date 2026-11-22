@@ -33,6 +33,30 @@ _SAMPLE = """\
 
 _cache: dict[str, tuple[tuple[float, int], tuple[set[date], set[date]]]] = {}
 
+# 内置数据的覆盖年份（holiday_data 里最新的一年）。超出这个年份且用户没补充数据时，
+# 结果会退化成「只按双休判断」，必须让用户知道。
+COVERED_LAST_YEAR = max(item.year for item in HOLIDAY_DATES) if HOLIDAY_DATES else 0
+_warned_years: set[int] = set()
+
+
+def _warn_if_uncovered(value: date, path: Path | None = None) -> None:
+    """超出内置覆盖年份且补充文件也没写到这一年时，记一次警告。"""
+    if not COVERED_LAST_YEAR or value.year <= COVERED_LAST_YEAR:
+        return
+    if value.year in _warned_years:
+        return
+    extra, workdays = _extra(path)
+    if any(item.year == value.year for item in extra) or any(
+        item.year == value.year for item in workdays
+    ):
+        return
+    _warned_years.add(value.year)
+    logger.warning(
+        "节假日数据只覆盖到 %d 年，%d 年按「周末休息」估算；"
+        "可在节假日补充文件里追加该年安排",
+        COVERED_LAST_YEAR, value.year,
+    )
+
 
 def _read_file(path: Path) -> tuple[set[date], set[date]]:
     """解析补充文件，返回（放假日, 调休上班日）。"""
@@ -92,6 +116,7 @@ def holiday_name(value: date, path: Path | None = None) -> str:
 
 
 def is_holiday(value: date, path: Path | None = None) -> bool:
+    _warn_if_uncovered(value, path)
     if value in HOLIDAY_DATES:
         return True
     extra, _ = _extra(path)

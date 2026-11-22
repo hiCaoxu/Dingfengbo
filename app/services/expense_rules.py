@@ -33,21 +33,61 @@ def suggest_category(text: str) -> str:
     return "其他"
 
 
+_MULTIPLIERS = {"万": 10_000, "千": 1_000}
+# ASCII 连字符 + Unicode 减号（U+2212）。用转义写，源码保持纯 ASCII：字体子集
+# 是按源码里的可见字符生成的，没必要为它额外扩一套字形。
+_MINUS = "-\u2212"
+
+
+def _to_amount(number: str, sign: str | None, unit: str | None) -> float | None:
+    try:
+        value = float(number)
+    except ValueError:
+        return None
+    value *= _MULTIPLIERS.get(unit or "", 1)
+    return -value if sign else value
+
+
 def parse_amount(text: str) -> float | None:
-    """提取金额：优先「数字+元/块」，其次 ¥ 前缀，最后取最大的数字。"""
+    """提取金额：口语「N块M」→ 单位/货币符号 → 万/千倍数 → 最大数字兜底。
+
+    兜底那一步必须排除年份/日期/次数：「2025年收入10万」旧实现会取到 2025（年份），
+    记成 2025 元；负号与「10块5」的小数位也一并按口语习惯处理。
+    """
     body = text or ""
-    patterns = [
-        r"(\d+(?:\.\d+)?)\s*(?:元|块钱|块|rmb|RMB)",
-        r"[¥￥]\s*(\d+(?:\.\d+)?)",
-    ]
-    for pattern in patterns:
+    # 1) 「10块5」「10块5毛」：口语里 块 后面跟一位数字表示角
+    match = re.search(r"(\d+)\s*块\s*(\d)\s*[毛角]?", body)
+    if match:
+        return float(match.group(1)) + float(match.group(2)) / 10
+
+    # 2) 带货币符号 / 金额单位（允许 万元、千块 这类倍数）
+    for pattern in (
+        rf"(?:¥|￥)\s*([{_MINUS}])?\s*(\d+(?:\.\d+)?)\s*(万|千)?",
+        rf"([{_MINUS}])?\s*(\d+(?:\.\d+)?)\s*(万|千)?\s*(?:元|块钱|块|rmb|RMB)",
+    ):
         match = re.search(pattern, body)
         if match:
-            try:
-                return float(match.group(1))
-            except ValueError:
-                continue
-    numbers = [float(n) for n in re.findall(r"\d+(?:\.\d+)?", body)]
+            amount = _to_amount(match.group(2), match.group(1), match.group(3))
+            if amount is not None:
+                return amount
+
+    # 3) 光有倍数：「收入10万」「3千」
+    match = re.search(rf"([{_MINUS}])?\s*(\d+(?:\.\d+)?)\s*(万|千)(?![年月日])", body)
+    if match:
+        amount = _to_amount(match.group(2), match.group(1), match.group(3))
+        if amount is not None:
+            return amount
+
+    # 4) 兜底：取最大的数字，但排除年份、日期、次数、折扣这类非金额数字。
+    #    末尾的 (?![\d.]) 防止 `\d+` 回溯到长数字的一部分（"2025年" 曾回退成 202）。
+    numbers = [
+        float(found)
+        for found in re.findall(
+            r"(?<![\d.])(\d+(?:\.\d+)?)(?![\d.])"
+            r"(?!\s*(?:年|月|日|号|天|次|岁|点|分|个|折))",
+            body,
+        )
+    ]
     return max(numbers) if numbers else None
 
 
@@ -73,18 +113,26 @@ def parse_date(text: str, today: date | None = None) -> date:
 
 
 def parse_transaction(text: str, today: date | None = None) -> dict | None:
-    """把一句话解析成交易草稿；金额缺失时返回 None。"""
-    amount = parse_amount(text)
-    if amount is None or amount <= 0:
+    """把一句话解析成交易草稿；金额缺失或为 0 时返回 None。
+
+    负号按「退款/收入」理解：金额取绝对值、类型记为收入——交易金额本身恒为正，
+    方向由 kind 表达。
+    """
+    parsed = parse_amount(text)
+    if parsed is None or parsed == 0:
         return None
     body = (text or "").strip()
     category = suggest_category(body)
-    kind = "income" if any(word in body for word in INCOME_WORDS) else "expense"
+    kind = (
+        "income"
+        if parsed < 0 or any(word in body for word in INCOME_WORDS)
+        else "expense"
+    )
     if category == "收入":
         category, kind = "工资", "income"
     return {
         "kind": kind,
-        "amount": round(amount, 2),
+        "amount": round(abs(parsed), 2),
         "category": category,
         "date": parse_date(body, today).isoformat(),
         "note": body[:200],

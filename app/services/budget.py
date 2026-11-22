@@ -25,11 +25,6 @@ PERIOD_LABELS = {"month": "每月", "week": "每周"}
 MAX_CATCH_UP = 12  # 一次最多补生成 12 期，避免长期未启动后爆量
 
 
-def _cents(value: float | None) -> int:
-    """金额换算成整数分（兼容旧调用；新代码统一用 ``services.money``）。"""
-    return int(round(float(value or 0) * 100))
-
-
 def occurrence_id(rule_id: str, due: date) -> str:
     """周期交易的确定性主键：同一 (规则, 到期日) 在任何设备都会算出同一个 id。
 
