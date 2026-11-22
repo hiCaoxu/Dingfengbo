@@ -19,6 +19,7 @@ import flet as ft
 from .. import theme as th
 from ..config import DATA_DIR, save_settings
 from ..db.backup import (
+    RestoreIncomplete,
     backup_database,
     configured_dir,
     configured_keep,
@@ -179,20 +180,25 @@ def open_backup_center(page: ft.Page, refresh=None) -> ft.AlertDialog:
             from .scheduler import pause_auto_sync, resume_auto_sync
 
             pause_auto_sync("备份恢复中")
-            settled = False
+            # 只有「库已换、但游标没重置」(RestoreIncomplete) 才需要保持暂停；
+            # 其余失败（校验不过、恢复前备份失败、原子替换失败）库里还是原数据，
+            # 必须恢复自动同步，否则用户会得到一个「永久不再同步」的静默状态。
+            keep_paused = False
             try:
-                sync_client.wait_idle()
+                if not sync_client.wait_idle():
+                    # 同步还在写库：此刻替换文件会把在途数据灌回刚恢复的库。
+                    raise RuntimeError("同步仍在进行，请稍后再试")
                 result = restore_database(path)
                 # 数据库文件已被替换：重建 schema 检查。
                 from ..db.session import init_db
 
                 init_db()
-                # 只有整条链路（含游标重置）都成功才恢复自动同步：RestoreIncomplete
-                # 表示库换了但游标没重置，此时恢复同步会带着旧游标只拉增量。
-                settled = True
                 return result
+            except RestoreIncomplete:
+                keep_paused = True
+                raise
             finally:
-                if settled:
+                if not keep_paused:
                     resume_auto_sync()
 
         def done(payload, error) -> None:

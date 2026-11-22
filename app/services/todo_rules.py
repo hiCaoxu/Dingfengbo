@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date
+from datetime import date, datetime
 
 from .dates import next_due, next_lunar_due
 from .recurrence import describe as describe_custom
@@ -69,15 +69,36 @@ def next_occurrence(due: date, rule: str, config_raw: str, lunar: bool) -> date 
 ANCHOR_RULES = ("month", "year")
 
 
-def ensure_anchor(config_raw: str, due: date) -> str:
+def _lunar_day_of(value: date) -> int | None:
+    """取某天的农历日号（初一=1）；农历库不可用或转换失败返回 None。"""
+    try:
+        from zhdate import ZhDate
+
+        return int(ZhDate.from_datetime(datetime.combine(value, datetime.min.time())).lunar_day)
+    except Exception:
+        logger.debug("农历日号换算失败：%s", value, exc_info=True)
+        return None
+
+
+def ensure_anchor(config_raw: str, due: date, lunar: bool = False) -> str:
     """给按月/按年的循环补上 ``anchor_day``（系列最初选定的日号）。
 
     没有它，1/31 完成一次就会漂到 2/28，之后永远停在 28 号。锚点随 ``repeat_config``
     一起同步，因此每台设备推进出来的日期一致。
+
+    **农历任务必须存农历日号**：``next_lunar_due`` 把 anchor 当农历日号用（如「每月
+    初五」）。若这里存公历 ``due.day``，农历正月初一（公历 2/17）会被推进成农历十七，
+    永久错位。换算不出农历日号时宁可不写锚点，让它按当前农历日号推进（最多漂一次）。
     """
     config = parse_config(config_raw)
     if config.get("anchor_day"):
         return config_raw
+    if lunar:
+        lunar_day = _lunar_day_of(due)
+        if lunar_day is None:
+            return config_raw
+        config["anchor_day"] = lunar_day
+        return serialize_config(config)
     config["anchor_day"] = due.day
     return serialize_config(config)
 

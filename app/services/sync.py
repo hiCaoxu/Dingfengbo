@@ -30,6 +30,12 @@ from ..services.clock import set_clock_offset
 
 logger = logging.getLogger(__name__)
 
+# 服务端 PushRequest.changes 限制单次 ≤500 条（server/main.py 的 max_length）。
+# 客户端 pending_changes 是「每张表 ≤500」，16 张表累计可达 8000：不在这里截断，
+# 一次 push 就会 422，而 422 时一条都不会被确认（mark_clean），下一轮原样重推 ——
+# 同步永久卡死。按批推送即可：每轮清掉 500 条，多轮自然推进。
+PUSH_BATCH_LIMIT = 500
+
 # 自动同步暂停开关：恢复备份期间必须让所有同步路径（启动/周期/写后/手动）都停下。
 # 只靠 UI 层"不要再启动新线程"不够——检查与应用之间还有窗口，正在跑的线程也可能
 # 在库被整库替换后才提交。因此校验下沉到 sync_once 里，进入临界区前后各看一次。
@@ -257,6 +263,11 @@ class SyncClient:
         这里给每条一个 savepoint：坏记录只回滚它自己，明细写进同步问题表（同步明细
         可见、可查询），其余记录照常提交，游标照常推进。
         """
+        if _auto_pause.is_set():
+            # 暂停可能发生在「本页请求已发出、响应还没回来」的窗口里（一次请求最多 10s）。
+            # 恢复备份会把整库替换掉，此时再写就是往别人的库里灌数据，直接放弃本页。
+            self._log(logging.INFO, "同步已暂停，丢弃本页 %d 条拉取结果", len(changes))
+            return 0
         failed = 0
         with session_scope() as session:
             for change in changes:
@@ -350,6 +361,13 @@ class SyncClient:
             changes = pending_changes(session)
         if selected is not None:
             changes = [change for change in changes if str(change.get("table")) in selected]
+        if len(changes) > PUSH_BATCH_LIMIT:
+            # 超出服务端单次上限就必须分批：整批发出去只会 422，一条都确认不了。
+            self._log(
+                logging.INFO, "待同步 %d 条，本轮先推送前 %d 条（分多轮清空）",
+                len(changes), PUSH_BATCH_LIMIT,
+            )
+            changes = changes[:PUSH_BATCH_LIMIT]
         self.pending_upload = len(changes)
         if not changes:
             return

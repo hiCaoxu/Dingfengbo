@@ -457,8 +457,10 @@ def _stale_after_purge(session, item: dict[str, Any], purged_before) -> str | No
         return None
     if stamp < purged_before:
         return (
-            "该记录已在云端过期清理（墓碑保留窗口已过），本次推送被拒；"
-            "请先在「同步明细」里点「重新拉取云端全量」再继续"
+            "该记录已在云端过期清理（墓碑保留窗口已过），本次推送被拒。"
+            "两种处理：① 如果是已删除的记录，点「同步明细 → 重新拉取云端全量」把它清掉；"
+            "② 如果这条记录仍要保留（离线新建或从旧备份导入），打开它改一下保存"
+            "（会刷新更新时间）再同步即可重新推送"
         )
     return None
 

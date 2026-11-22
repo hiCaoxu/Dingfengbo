@@ -300,9 +300,16 @@ def save(drafts: list[Draft]) -> list[dict[str, Any]]:
     saved: list[dict[str, Any]] = []
     written: list[Draft] = []
     with session_scope() as session:
-        account = session.scalar(
-            select(Account).where(Account.is_deleted.is_(False)).order_by(Account.created_at)
+        # 多个账户时不能替用户"猜"：一句「午饭 32」的草稿提示词里没有账户，
+        # 直接落到最早创建的账户会让按账户聚合的报表静默算错，且预览里看不到。
+        accounts = list(
+            session.scalars(
+                select(Account)
+                .where(Account.is_deleted.is_(False))
+                .order_by(Account.created_at)
+            )
         )
+        only_account = accounts[0] if len(accounts) == 1 else None
         for draft in drafts:
             if not draft.valid or draft.saved:
                 continue
@@ -320,11 +327,15 @@ def save(drafts: list[Draft]) -> list[dict[str, Any]]:
                         # 报表按账户聚合时静默算错。
                         draft.reason = "草稿指定的账户不存在，请手动选择账户后再保存"
                         continue
+                elif only_account is not None:
+                    account_id = only_account.id  # 只有一个账户：没有歧义
                 else:
-                    account_id = account.id if account else ""
-                    if not account_id:
-                        draft.reason = "没有可用账户，请先在记账里添加账户"
-                        continue
+                    draft.reason = (
+                        "有多个账户，无法自动判断记到哪个账户；请先在记账里手动记一笔"
+                        if accounts
+                        else "没有可用账户，请先在记账里添加账户"
+                    )
+                    continue
                 created = create(session, Transaction, account_id=account_id, **fields)
             elif draft.type == "entertainment":
                 created = create(session, Entertainment, **fields)

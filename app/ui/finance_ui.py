@@ -77,10 +77,26 @@ def _delete(model, item_id: str, page, refresh) -> None:
     delete_with_confirm(page, model, item_id, refresh, "确定删除该记录？")
 
 
+# 历史数据/导入可能带中文 kind（支出/收入/转账），同步载荷也可能来自旧客户端：
+# 一律先归一化再取符号，直接下标会 KeyError 把整页渲染打挂。
+_KIND_BY_LABEL = {"支出": "expense", "收入": "income", "转账": "transfer"}
+_KIND_SIGNS = {"income": "+", "expense": "-", "transfer": "⇄"}
+
+
+def _kind_code(raw: str | None) -> str:
+    code = str(raw or "").strip()
+    return _KIND_BY_LABEL.get(code, code) or "expense"
+
+
+def _kind_sign(raw: str | None) -> str:
+    return _KIND_SIGNS.get(_kind_code(raw), "-")
+
+
 def _tx_row(tx: Transaction, page, refresh, show_actions: bool = True) -> ft.Control:
-    sign = {"income": "+", "expense": "-", "transfer": "⇄"}[tx.kind]
-    color = th.PRIMARY if tx.kind == "income" else (th.ACCENT if tx.kind == "expense" else th.TEXT_MUTED)
-    note = tx.category or ("转账" if tx.kind == "transfer" else "")
+    kind = _kind_code(tx.kind)
+    sign = _kind_sign(kind)
+    color = th.PRIMARY if kind == "income" else (th.ACCENT if kind == "expense" else th.TEXT_MUTED)
+    note = tx.category or ("转账" if kind == "transfer" else "")
     actions = []
     if show_actions:
         actions = [
@@ -252,9 +268,10 @@ def _render_overview(page: ft.Page, refresh, data) -> ft.Control:
     # 最新收支：5 条纯展示，不支持筛选
     recent_rows = []
     for tx in recent_txs:
-        sign = {"income": "+", "expense": "-", "transfer": "⇄"}[tx.kind]
-        color = th.PRIMARY if tx.kind == "income" else (th.ACCENT if tx.kind == "expense" else th.TEXT_MUTED)
-        note_label = tx.category or ("转账" if tx.kind == "transfer" else "")
+        kind = _kind_code(tx.kind)
+        sign = _kind_sign(kind)
+        color = th.PRIMARY if kind == "income" else (th.ACCENT if kind == "expense" else th.TEXT_MUTED)
+        note_label = tx.category or ("转账" if kind == "transfer" else "")
         recent_rows.append(
             ft.Row(
                 [

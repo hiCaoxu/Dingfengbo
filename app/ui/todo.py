@@ -101,7 +101,8 @@ def toggle(page: ft.Page, todo_id: str, refresh) -> None:
             # 不会漂成 2/28 再也回不到 31（锚点随配置一起同步，各端推进结果一致）。
             config_raw = item.repeat_config
             if item.repeat_rule in ANCHOR_RULES:
-                config_raw = ensure_anchor(config_raw, due)
+                # 农历任务要固化「农历日号」而不是公历日号，否则推进时整体错位。
+                config_raw = ensure_anchor(config_raw, due, lunar=bool(item.lunar_reminder))
             following = next_occurrence(
                 due, item.repeat_rule, config_raw, bool(item.lunar_reminder)
             )

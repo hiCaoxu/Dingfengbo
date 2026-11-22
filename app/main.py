@@ -22,6 +22,7 @@ from .services.dates import weekday_cn
 from .services.holidays import ensure_sample_file
 from .services.sync import queue_counts, sync_client
 from .ui import ai_assistant, diary as diary_ui
+from .ui import autosave as autosave_ui
 from .ui import entertainment, finance_ui, health_ui, home, notes
 from .ui import help as help_ui
 from .ui import reports as reports_ui
@@ -539,14 +540,30 @@ def main(page: ft.Page) -> None:
                 navigate(modules[index])
             return
 
+    def flush_autosave() -> None:
+        """把还在防抖窗口里的日记/笔记内容立刻落盘。
+
+        关窗、收托盘、退出都要先走这一步：自动保存有 ~700ms 防抖，用户打完字立刻
+        关窗时 Timer 还没触发，daemon 线程随进程退出被终止，最后一段输入就丢了。
+        """
+        try:
+            autosave_ui.flush_now()
+        except Exception:
+            logger.exception("退出前保存未落盘内容失败")
+
     def request_close(_=None) -> None:
         """关闭窗口：开了「关闭到托盘」就先隐藏；没有托盘依赖时最小化到任务栏。"""
+        flush_autosave()
         if not load_settings().get("close_to_tray"):
             page.run_task(page.window.close)
             return
         if system_integration.tray_available():
             try:
-                system_integration.start_tray(page, on_quit=lambda: page.window.close())
+                def quit_from_tray() -> None:
+                    flush_autosave()
+                    page.window.close()
+
+                system_integration.start_tray(page, on_quit=quit_from_tray)
                 # 等一小会儿确认托盘真的起来了：pystray 在 setup 阶段失败时线程会
                 # 直接退出，若此时已经把窗口藏起来，用户就再也找不回界面了。
                 if system_integration.tray_running(wait=0.6):
@@ -577,7 +594,11 @@ def main(page: ft.Page) -> None:
         try:
             system_integration.bind_loop(asyncio.get_running_loop())
             if load_settings().get("close_to_tray") and system_integration.tray_available():
-                system_integration.start_tray(page, on_quit=lambda: page.window.close())
+                def quit_from_tray() -> None:
+                    flush_autosave()
+                    page.window.close()
+
+                system_integration.start_tray(page, on_quit=quit_from_tray)
         except Exception:
             logger.debug("托盘/事件循环初始化失败", exc_info=True)
 

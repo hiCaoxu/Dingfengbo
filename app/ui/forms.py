@@ -141,13 +141,18 @@ def _number(
 ) -> tuple[float | None, str | None]:
     """解析数值输入，返回 ``(值, 错误说明)``。
 
-    空输入 → ``(None, None)``（由调用方决定用默认值）；非法 / 非有限 / 越界 →
-    ``(None, 错误)``。``float()`` 会接受 "nan" 与 "inf"，必须显式挡掉：nan 会一路
-    污染金额与统计，inf 在取整（``int(inf)``）时还会直接抛 OverflowError。
+    空输入：``allow_empty=True`` → ``(None, None)``（由调用方决定用默认值）；
+    ``allow_empty=False``（必填）→ ``(None, "<label>不能为空")``。
+    非法 / 非有限 / 越界 → ``(None, 错误)``。``float()`` 会接受 "nan" 与 "inf"，
+    必须显式挡掉：nan 会一路污染金额与统计，inf 在取整（``int(inf)``）时还会直接抛
+    OverflowError。
     """
     text = str(raw or "").strip()
     if not text:
-        return (None, None) if allow_empty else (0.0, None)
+        # 必填字段（allow_empty=False）必须返回**错误**而不是 0.0：返 0 会让
+        # 调用方拿到一个"合法"的 0 继续往下走（例如金额 0、体重 0 落库），
+        # 也会让 round(None)/int(None) 这类路径在别的字段上炸掉。
+        return (None, None) if allow_empty else (None, f"{label}不能为空")
     try:
         value = float(text)
     except ValueError as exc:
@@ -736,7 +741,10 @@ def open_transaction_dialog(page: ft.Page, kind: str = "expense", tx: Transactio
     )
 
     def save(_):
-        parsed, error = _number(amount.value, label="金额", minimum=0.01, maximum=MAX_NUMBER)
+        parsed, error = _number(
+            amount.value, label="金额", minimum=0.01, maximum=MAX_NUMBER,
+            allow_empty=False,
+        )
         if error:
             snack(page, error, th.ACCENT)
             return
@@ -796,7 +804,8 @@ def open_exercise_dialog(page: ft.Page, item: Exercise | None = None, on_done: C
 
     def save(_):
         minutes_value, error = _number(
-            minutes.value, label="时长（分钟）", minimum=1, maximum=24 * 60
+            minutes.value, label="时长（分钟）", minimum=1, maximum=24 * 60,
+            allow_empty=False,
         )
         if error:
             snack(page, error, th.ACCENT)
@@ -862,7 +871,9 @@ def open_diet_dialog(page: ft.Page, item: Diet | None = None, on_done: Callable 
         page.update()
 
     def save(_):
-        weight, error = _number(grams.value, label="重量", minimum=0.1, maximum=100_000)
+        weight, error = _number(
+            grams.value, label="重量", minimum=0.1, maximum=100_000, allow_empty=False
+        )
         if error:
             snack(page, error, th.ACCENT)
             return
@@ -904,7 +915,9 @@ def open_weight_dialog(page: ft.Page, item: Weight | None = None, on_done: Calla
     day = form_field("日期 YYYY-MM-DD", item.date.isoformat() if item else date.today().isoformat())
 
     def save(_):
-        weight, error = _number(kg.value, label="体重", minimum=1, maximum=500)
+        weight, error = _number(
+            kg.value, label="体重", minimum=1, maximum=500, allow_empty=False
+        )
         if error:
             snack(page, error, th.ACCENT)
             return

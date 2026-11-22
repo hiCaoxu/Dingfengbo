@@ -18,6 +18,20 @@ from sqlalchemy.orm import Session
 from ..db.models import Diary, Entertainment, Note, Todo, Transaction
 from ..db.session import session_scope
 
+
+def _utc_bounds(start: date | None, end: date | None) -> tuple[datetime | None, datetime | None]:
+    """本地日期区间 → naive UTC 瞬时。
+
+    ``Note.updated_at`` / ``Entertainment.updated_at`` 存的是 naive UTC，而搜索的
+    「今天/本周/本月」是本地日历边界。直接 ``datetime.combine(本地日期)`` 去比较会
+    整体偏一个时区（UTC+8 下 8 小时：今天 00:00–07:59 编辑的记录会被判成昨天）。
+    这里把本地边界减去当前时区偏移，换算成 UTC 再下推。
+    """
+    offset = datetime.now().astimezone().utcoffset() or timedelta()
+    lower = datetime.combine(start, time.min) - offset if start else None
+    upper = datetime.combine(end, time.max) - offset if end else None
+    return lower, upper
+
 logger = logging.getLogger(__name__)
 
 # 模块中文名 → 表名（自然语言过滤用）
@@ -243,12 +257,12 @@ def _search_notes(session: Session, query: Query, limit: int) -> list[Hit]:
         )
     # 日期过滤也要对笔记生效：此前 only todos/diaries/transactions 支持
     # 「本周/上月」这类限定，笔记会无视时间范围全部返回，结果与提示不符。
-    if query.since:
-        stmt = stmt.where(Note.updated_at >= datetime.combine(query.since, time.min))
-    if query.until:
-        stmt = stmt.where(
-            Note.updated_at <= datetime.combine(query.until, time.max)
-        )
+    # 边界要先换算成 UTC：updated_at 是 naive UTC，本地日历边界直接用会偏一个时区。
+    lower, upper = _utc_bounds(query.since, query.until)
+    if lower is not None:
+        stmt = stmt.where(Note.updated_at >= lower)
+    if upper is not None:
+        stmt = stmt.where(Note.updated_at <= upper)
     order: list = []
     title_first = _title_first(Note.title, query.keywords)
     if title_first is not None:
@@ -347,14 +361,11 @@ def _search_entertainments(session: Session, query: Query, limit: int) -> list[H
             | or_(*[_like(Entertainment.note, k) for k in query.keywords])
         )
     # 与笔记一致：日期过滤对娱乐同样生效（否则「上个月看的电影」会把全部记录带出来）。
-    if query.since:
-        stmt = stmt.where(
-            Entertainment.updated_at >= datetime.combine(query.since, time.min)
-        )
-    if query.until:
-        stmt = stmt.where(
-            Entertainment.updated_at <= datetime.combine(query.until, time.max)
-        )
+    lower, upper = _utc_bounds(query.since, query.until)
+    if lower is not None:
+        stmt = stmt.where(Entertainment.updated_at >= lower)
+    if upper is not None:
+        stmt = stmt.where(Entertainment.updated_at <= upper)
     order: list = []
     title_first = _title_first(Entertainment.title, query.keywords)
     if title_first is not None:
