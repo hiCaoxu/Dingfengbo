@@ -58,17 +58,27 @@ Invoke-Remote "chown -R 10001:10001 '$RemoteDir/data' && echo chown-ready" "chow
 # Back up the cloud DB BEFORE shipping new code: the new image runs schema migrations
 # at startup, and a bad migration would otherwise rewrite the only copy in place.
 # sqlite3's .backup API is WAL-safe (plain cp is not); keep the newest 5 snapshots.
-# Single-quoted here-string: PowerShell expands nothing, so $(date ...) runs remotely.
-$backupCmd = @'
-if [ -f "__DIR__/data/cloud.db" ]; then
-  docker run --rm -v "__DIR__/data:/data" python:3.11-slim python -c "import sqlite3; src = sqlite3.connect('/data/cloud.db'); dst = sqlite3.connect('/data/cloud.db.bak-' + __STAMP__); src.backup(dst); dst.close(); src.close()" && echo db-backed-up || echo db-backup-failed
-  ls -1t __DIR__/data/cloud.db.bak-* 2>/dev/null | tail -n +6 | xargs -r rm -f
+# The remote script is base64-encoded: passing quotes/parens through PowerShell + ssh
+# mangles them (observed: bash syntax error near '('), so ship opaque bytes instead.
+$backupScript = @'
+set -e
+DIR="__DIR__"
+if [ -f "$DIR/data/cloud.db" ]; then
+  STAMP=$(date +%Y%m%d-%H%M%S)
+  docker run --rm -v "$DIR/data:/data" python:3.11-slim python -c "import sqlite3, sys; s = sqlite3.connect('/data/cloud.db'); d = sqlite3.connect('/data/cloud.db.bak-' + sys.argv[1]); s.backup(d); d.close(); s.close()" "$STAMP"
+  ls -1t "$DIR"/data/cloud.db.bak-* 2>/dev/null | tail -n +6 | xargs -r rm -f
+  echo db-backed-up
 else
   echo db-missing
 fi
 '@
-$backupCmd = $backupCmd.Replace("__DIR__", $RemoteDir).Replace("__STAMP__", '$(date +%Y%m%d-%H%M%S)')
-Invoke-Remote $backupCmd "backup-db"
+$backupScript = $backupScript.Replace("__DIR__", $RemoteDir)
+# The script file is CRLF; bash would read "set -e\r" and fail with "set: -: invalid option".
+# Normalize to LF before encoding.
+$backupScript = $backupScript.Replace("`r`n", "`n").Replace("`r", "")
+$backupBytes = [System.Text.Encoding]::UTF8.GetBytes($backupScript)
+$backupB64 = [Convert]::ToBase64String($backupBytes)
+Invoke-Remote "echo $backupB64 | base64 -d | bash" "backup-db"
 
 Send-Files "app" "$RemoteDir/" "copy-app"
 Send-Files "server" "$RemoteDir/" "copy-server"
@@ -95,6 +105,9 @@ curl -fsS http://127.0.0.1:8000/api/health
 # Use string replacement instead of PowerShell's -f operator: -f collapses
 # {{.Status}} into {.Status}, which breaks docker's --format argument.
 $deploy = $deploy.Replace("__REMOTE_DIR__", $RemoteDir)
+# Same CRLF trap as the backup script: bash would see "set -e\r" and abort with
+# "set: -: invalid option". Normalize to LF before shipping the command.
+$deploy = $deploy.Replace("`r`n", "`n").Replace("`r", "")
 
 Invoke-Remote $deploy "compose-up"
 Write-Host "Deploy done: http://${HostIp}:8000"
