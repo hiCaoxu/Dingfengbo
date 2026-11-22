@@ -114,8 +114,23 @@ class Todo(SyncMixin, Base):
 
 
 class Diary(SyncMixin, Base):
+    """日记：每天一篇（软删除后允许同日重建）。
+
+    约束必须是**部分唯一索引**（``WHERE is_deleted = 0``），不能是全表
+    ``UniqueConstraint``：删除后墓碑仍占着 ``(owner_id, date)``，而 ``ensure_diary``
+    只查活跃行，在墓碑被物理清理前同日重建必然撞唯一约束。
+    """
+
     __tablename__ = "diaries"
-    __table_args__ = (UniqueConstraint("owner_id", "date", name="uq_diary_owner_date"),)
+    __table_args__ = (
+        Index(
+            "uq_diaries_owner_date_active",
+            "owner_id",
+            "date",
+            unique=True,
+            sqlite_where=text("is_deleted = 0"),
+        ),
+    )
 
     date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(120), nullable=False)

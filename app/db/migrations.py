@@ -10,7 +10,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 from sqlalchemy import Connection, Engine, Integer, func, inspect, select, text, update
 
-from .models import SYNC_MODELS, Base, utcnow
+from .models import SYNC_MODELS, Base, Diary, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,7 @@ MONEY_SCHEMA_VERSION = 1
 TIMESTAMP_SCHEMA_VERSION = 2
 TEMPLATE_FLAG_SCHEMA_VERSION = 3
 TODO_FIELD_SCHEMA_VERSION = 4
+DIARY_UNIQUE_SCHEMA_VERSION = 5
 
 # 历史上任务弹窗直接存了中文优先级，而象限推导/搜索只认英文码。
 _PRIORITY_CODES = (("高", "high"), ("中", "medium"), ("低", "low"))
@@ -331,6 +332,71 @@ def _normalize_todo_fields(connection: Connection) -> None:
         logger.info("已归一 %d 条待办字段（优先级英文码 / 清空手选象限）", fixed)
 
 
+_DEDUPE_ACTIVE_DIARIES = """
+UPDATE diaries SET is_deleted = 1
+WHERE is_deleted = 0
+  AND id NOT IN (
+    SELECT id FROM (
+      SELECT id, ROW_NUMBER() OVER (
+        PARTITION BY owner_id, date ORDER BY updated_at DESC, id DESC
+      ) AS rn
+      FROM diaries WHERE is_deleted = 0
+    ) WHERE rn = 1
+  )
+"""
+
+
+def _has_table_unique_constraint(connection: Connection, table: str) -> bool:
+    """表上是否还有内联 UNIQUE 约束（SQLite 会为它建 origin='u' 的自动索引）。"""
+    for row in connection.exec_driver_sql(f'PRAGMA index_list("{table}")'):
+        # 行结构：(seq, name, unique, origin, partial)
+        if len(row) >= 4 and str(row[3]) == "u" and int(row[2]):
+            return True
+    return False
+
+
+def _rebuild_diaries_partial_unique(connection: Connection) -> None:
+    """把 diaries 的全表 UNIQUE(owner_id, date) 换成「仅活跃行唯一」的部分唯一索引。
+
+    全表约束会让墓碑一直占着 ``(owner_id, date)``：删掉某天的日记后，在墓碑被物理
+    清理前重建同日日记必然 IntegrityError。SQLite 不能 DROP 内联 UNIQUE 约束，
+    只能重建表；重建前先把重复的**活跃行**收敛成一行（留 updated_at 最新的），
+    否则新索引建不起来。
+    """
+    if _schema_version(connection) >= DIARY_UNIQUE_SCHEMA_VERSION:
+        return
+    existing = set(inspect(connection).get_table_names())
+    rebuilt = False
+    if "diaries" in existing and _has_table_unique_constraint(connection, "diaries"):
+        connection.exec_driver_sql(_DEDUPE_ACTIVE_DIARIES)
+        legacy = "diaries_legacy_unique"
+        connection.exec_driver_sql(f'DROP TABLE IF EXISTS "{legacy}"')
+        connection.exec_driver_sql(f'ALTER TABLE "diaries" RENAME TO "{legacy}"')
+        # SQLite 的 RENAME 会把普通索引一起带过去、名字不变（ix_diaries_date 等），
+        # 新建同名表时 CREATE INDEX 就会撞名。先把旧表的命名索引删干净再建新表。
+        # 注意要先取完 PRAGMA 结果再执行 DDL：边遍历结果集边改 schema 会报
+        # "database table is locked"。
+        stale_indexes = [
+            str(row[1])
+            for row in connection.exec_driver_sql(f'PRAGMA index_list("{legacy}")')
+            if str(row[3]) == "c"
+        ]
+        for name in stale_indexes:
+            connection.exec_driver_sql(f'DROP INDEX IF EXISTS "{name}"')
+        Diary.__table__.create(connection)
+        old_columns = {item["name"] for item in inspect(connection).get_columns(legacy)}
+        columns = [column.name for column in Diary.__table__.columns if column.name in old_columns]
+        column_list = ", ".join(f'"{name}"' for name in columns)
+        connection.exec_driver_sql(
+            f'INSERT INTO "diaries" ({column_list}) SELECT {column_list} FROM "{legacy}"'
+        )
+        connection.exec_driver_sql(f'DROP TABLE "{legacy}"')
+        rebuilt = True
+    connection.exec_driver_sql(f"PRAGMA user_version = {DIARY_UNIQUE_SCHEMA_VERSION}")
+    if rebuilt:
+        logger.info("diaries 已重建为「仅活跃行唯一」的部分唯一索引")
+
+
 def initialize_schema(engine: Engine) -> None:
     """创建新表；旧版整数主键库在一个事务内迁移为 UUID。"""
     with engine.begin() as connection:
@@ -339,6 +405,7 @@ def initialize_schema(engine: Engine) -> None:
         _normalize_timestamp_inversions(connection)
         _repair_template_flags(connection)
         _normalize_todo_fields(connection)
+        _rebuild_diaries_partial_unique(connection)
         inspector = inspect(connection)
         existing = set(inspector.get_table_names())
         legacy_tables = [
