@@ -175,11 +175,19 @@ class SyncClient:
             logger.warning("时钟偏移 %.0f 秒，超过阈值", self.clock_offset)
 
     @staticmethod
-    def selected_tables(settings: dict[str, Any]) -> set[str]:
-        """选择性同步：设置里勾选的表；空列表表示全部。"""
+    def selected_tables(settings: dict[str, Any]) -> set[str] | None:
+        """选择性同步：返回勾选的表。
+
+        ``None`` 表示「全部」（``sync_all_tables`` 为真，默认值，也兼容老配置）；
+        否则返回勾选集合，**空集表示一个都不选**——旧实现用空列表同时表示两种含义，
+        于是「全部取消勾选」保存后反而变成了「全部同步」。
+        """
+        if settings.get("sync_all_tables", True):
+            return None
         raw = settings.get("sync_tables") or []
-        tables = {str(item) for item in raw if str(item)} if isinstance(raw, list) else set()
-        return tables
+        if not isinstance(raw, list):
+            return None
+        return {str(item) for item in raw if str(item)}
 
     def _remember_device(self, settings: dict[str, Any]) -> None:
         """记录本机同步过的服务端（设备列表是本地记录，不上传）。"""
@@ -250,9 +258,10 @@ class SyncClient:
             before = {table: dict(cursor) for table, cursor in cursors.items()}
             sent_at = utcnow()
             body: dict[str, Any] = {"cursors": cursors, "limit": 200}
-            if selected:
+            if selected is not None:
                 # 让服务端只查勾选的表：未勾选的表每页都被查出再丢弃，既费流量，
                 # 又会让 has_more 永远为真、只能靠「无进展」兜底退出。
+                # 空列表 = 一个都不选，服务端会返回空页。
                 body["tables"] = sorted(selected)
             response = client.post(
                 self._endpoint("/api/sync/pull"),
@@ -264,7 +273,7 @@ class SyncClient:
             self._observe_server_time(payload, sent_at)
             raw_changes = payload.get("changes", [])
             remote_changes = raw_changes
-            if selected:
+            if selected is not None:
                 remote_changes = [
                     change for change in raw_changes
                     if str(change.get("table")) in selected
@@ -273,7 +282,7 @@ class SyncClient:
             updates = payload.get("cursors", {})
             if isinstance(updates, dict):
                 # 选择性同步时不要推进未选表的游标，否则以后勾选回来会漏拉历史。
-                if selected:
+                if selected is not None:
                     updates = {
                         table: cursor for table, cursor in updates.items() if table in selected
                     }
@@ -301,7 +310,7 @@ class SyncClient:
         selected = self.selected_tables(load_settings())
         with session_scope() as session:
             changes = pending_changes(session)
-        if selected:
+        if selected is not None:
             changes = [change for change in changes if str(change.get("table")) in selected]
         self.pending_upload = len(changes)
         if not changes:

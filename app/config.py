@@ -85,7 +85,11 @@ _DEFAULT_SETTINGS: dict[str, Any] = {
     # 系统集成：开机自启、关闭窗口最小化（有 pystray 时收入托盘）
     "autostart": False,
     "close_to_tray": False,
-    # 同步：选择性同步（空列表=全部模块都同步）
+    # 同步：选择性同步。
+    # ``sync_all_tables=True`` 表示「全部同步」（``sync_tables`` 被忽略）；
+    # 关闭后才按 ``sync_tables`` 过滤，且**空列表 = 一个都不选**。
+    # 早期版本用「空列表 = 全部」表达，导致「全部取消勾选」保存后反而变成全部同步。
+    "sync_all_tables": True,
     "sync_tables": [],
     # 数据导入导出：最近一次导出目录
     "last_export_dir": "",

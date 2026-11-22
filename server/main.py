@@ -225,7 +225,7 @@ def pull(payload: PullRequest, authorization: str | None = Header(default=None))
         changes: list[dict[str, Any]] = []
         next_cursors: dict[str, dict[str, int]] = {}
         has_more = False
-        wanted = set(payload.tables) if payload.tables else None
+        wanted = None if payload.tables is None else set(payload.tables)
         for table, model in MODEL_BY_TABLE.items():
             if wanted is not None and table not in wanted:
                 continue

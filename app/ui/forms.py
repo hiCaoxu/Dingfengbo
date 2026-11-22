@@ -629,6 +629,11 @@ def open_note_dialog(page: ft.Page, note: Note | None = None, on_done: Callable 
 
 _EXPENSE_CATEGORIES = ["餐饮", "交通", "购物", "居住", "娱乐", "医疗", "教育", "通讯", "人情", "其他"]
 _INCOME_CATEGORIES = ["工资", "奖金", "理财", "兼职", "礼金", "报销", "其他"]
+# 交易类型：库内存英文码，界面显示中文；同时兼容历史中文值，避免下标 KeyError。
+_KIND_LABELS = {
+    "expense": "支出", "income": "收入", "transfer": "转账",
+    "支出": "支出", "收入": "收入", "转账": "转账",
+}
 
 
 def open_account_dialog(page: ft.Page, account: Account | None = None, on_done: Callable | None = None):
@@ -676,7 +681,10 @@ def open_transaction_dialog(page: ft.Page, kind: str = "expense", tx: Transactio
         return None
     account_ids = [str(account_id) for account_id, _ in account_options]
     kind_value = tx.kind if tx else kind
-    kind_dd = dropdown("类型", ["支出", "收入", "转账"], {"expense": "支出", "income": "收入", "transfer": "转账"}[kind_value])
+    # kind 可能是历史值/脏数据（"" 或 "支出"这类标签）：直接下标会 KeyError，
+    # 打开编辑弹窗就整块崩掉，这里统一兜底成「支出」。
+    kind_label = _KIND_LABELS.get(str(kind_value or ""), "支出")
+    kind_dd = dropdown("类型", ["支出", "收入", "转账"], kind_label)
     amount = form_field("金额 *", str(tx.amount) if tx else "")
 
     def category_options(kind_key: str) -> list[str]:
@@ -727,7 +735,9 @@ def open_transaction_dialog(page: ft.Page, kind: str = "expense", tx: Transactio
         except ValueError:
             snack(page, "日期格式不正确", th.ACCENT)
             return
-        mapped = {"支出": "expense", "收入": "income", "转账": "transfer"}[kind_dd.value]
+        mapped = {"支出": "expense", "收入": "income", "转账": "transfer"}.get(
+            kind_dd.value, "expense"
+        )
         account_id = str(account_dd.value)
         if mapped == "transfer" and (
             len(account_ids) < 2 or not to_dd.value or str(to_dd.value) == account_id

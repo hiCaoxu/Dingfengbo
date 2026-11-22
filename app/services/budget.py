@@ -320,9 +320,7 @@ def save_rule(
             rule = session.get(RecurringRule, rule_id)
             if rule is None:
                 return
-            update(
-                session,
-                rule,
+            fields = dict(
                 name=name,
                 amount=amount,
                 kind=kind,
@@ -334,7 +332,10 @@ def save_rule(
                 note=note,
             )
             if rule.next_date is None or rule.next_date < date.today():
-                rule.next_date = initial_next_date(day, period)
+                # next_date 必须和其余字段一起走 update()：直接赋值不经过 mark_dirty，
+                # 不会标脏进同步队列，这条修改就只能等下一次别的编辑顺带推上去。
+                fields["next_date"] = initial_next_date(day, period)
+            update(session, rule, **fields)
         else:
             create(
                 session,

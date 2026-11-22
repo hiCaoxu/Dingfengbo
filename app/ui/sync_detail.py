@@ -40,7 +40,12 @@ def _load_lists():
         errors = list_error_records(session)
         conflicts = list_conflicts(session)
     settings = load_settings()
-    selected = set(settings.get("sync_tables") or [])
+    # None = 全部勾选（sync_all_tables）；空集 = 一个都没选
+    selected = (
+        set(MODEL_BY_TABLE)
+        if settings.get("sync_all_tables", True)
+        else set(settings.get("sync_tables") or [])
+    )
     return {
         "stats": stats,
         "errors": errors,
@@ -66,7 +71,12 @@ def open_sync_detail(page: ft.Page, refresh_status=None) -> ft.AlertDialog:
             data["conflicts"] = list_conflicts(session)
         data["history"] = sync_history()
         data["devices"] = sync_devices()
-        data["selected"] = set(load_settings().get("sync_tables") or [])
+        latest = load_settings()
+        data["selected"] = (
+            set(MODEL_BY_TABLE)
+            if latest.get("sync_all_tables", True)
+            else set(latest.get("sync_tables") or [])
+        )
         render()
 
     def render() -> None:
@@ -285,7 +295,9 @@ def open_sync_detail(page: ft.Page, refresh_status=None) -> ft.AlertDialog:
         ]
 
     def _selective_view() -> list[ft.Control]:
-        selected = data["selected"] or set(MODEL_BY_TABLE)
+        selected = data["selected"]
+        if selected is None:
+            selected = set(MODEL_BY_TABLE)
         boxes = []
         for table in MODEL_BY_TABLE:
             if table_label(table) == table:
@@ -310,9 +322,11 @@ def open_sync_detail(page: ft.Page, refresh_status=None) -> ft.AlertDialog:
         def save(_) -> None:
             chosen = [box.data for box in boxes if box.value]
             if len(chosen) == len(boxes):
-                save_settings({"sync_tables": []})
+                # 全选 = 不限制。旧实现存 []，而 [] 同时表示「一个都不选」，
+                # 于是「全部取消勾选」保存后反而变成「全部同步」。
+                save_settings({"sync_all_tables": True, "sync_tables": []})
             else:
-                save_settings({"sync_tables": chosen})
+                save_settings({"sync_all_tables": False, "sync_tables": chosen})
             snack(page, "选择性同步已保存，下一轮同步生效", th.PRIMARY)
             reload()
 

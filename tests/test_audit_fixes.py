@@ -204,6 +204,8 @@ class SyncPullGuardTests(unittest.TestCase):
             "server_url": "http://127.0.0.1:8000",
             "sync_token": "tok",
             "sync_enabled": True,
+            # 只同步 todos：transactions 的积压不应让分页无限循环
+            "sync_all_tables": False,
             "sync_tables": ["todos"],
         })
 

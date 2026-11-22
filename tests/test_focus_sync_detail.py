@@ -120,12 +120,22 @@ class SyncDetailTests(unittest.TestCase):
             self.assertEqual(clear_conflicts(session), 1)
 
     def test_selective_tables_setting(self) -> None:
-        self.assertEqual(SyncClient.selected_tables({"sync_tables": []}), set())
+        # 默认（sync_all_tables=True）= 全部，None 表示不做过滤
+        self.assertIsNone(SyncClient.selected_tables({"sync_tables": []}))
+        self.assertIsNone(SyncClient.selected_tables({"sync_all_tables": True}))
+        # 显式关闭后才按列表过滤；空列表 = 一个都不选
         self.assertEqual(
-            SyncClient.selected_tables({"sync_tables": ["todos", "notes"]}),
+            SyncClient.selected_tables({"sync_all_tables": False, "sync_tables": []}), set()
+        )
+        self.assertEqual(
+            SyncClient.selected_tables(
+                {"sync_all_tables": False, "sync_tables": ["todos", "notes"]}
+            ),
             {"todos", "notes"},
         )
-        self.assertEqual(SyncClient.selected_tables({"sync_tables": "bad"}), set())
+        self.assertIsNone(
+            SyncClient.selected_tables({"sync_all_tables": False, "sync_tables": "bad"})
+        )
 
 
 if __name__ == "__main__":
