@@ -62,3 +62,23 @@ class SettingsGuardTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MissingSettingsFileTests(unittest.TestCase):
+    """首次运行没有 settings.json 不该报 WARNING（只是还没配置过）。"""
+
+    def test_missing_file_is_not_a_warning(self) -> None:
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        from app import config
+
+        missing = Path(tempfile.mkdtemp(prefix="dfb-nosettings-")) / "settings.json"
+        with mock.patch.object(config, "SETTINGS_PATH", missing):
+            with self.assertLogs("app.config", level="DEBUG") as captured:
+                self.assertEqual(config._raw_disk_settings(), {})
+        self.assertFalse(
+            [line for line in captured.output if line.startswith("WARNING")],
+            "文件不存在不应产生 WARNING",
+        )

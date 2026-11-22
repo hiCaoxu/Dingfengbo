@@ -239,8 +239,12 @@ def _raw_disk_settings() -> dict[str, Any]:
     """按原样读取 settings.json（不解密），用于安全地保留原密文。"""
     try:
         data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        # 首次运行本来就没有设置文件，不是异常，别在日志里吓人。
+        logger.debug("还没有设置文件，使用默认设置")
+        return {}
     except (OSError, ValueError) as exc:
-        # 读不到设置就按默认值跑，但「为什么设置没生效」必须能查。
+        # 文件存在但读不出来/不是合法 JSON：设置会静默退回默认值，必须留痕。
         logger.warning("读取设置文件失败，使用默认设置：%s", exc)
         return {}
     return data if isinstance(data, dict) else {}
