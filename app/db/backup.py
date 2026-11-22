@@ -54,8 +54,14 @@ def backup_database(
     dest_dir: Path | None = None,
     keep: int | None = None,
     label: str = "auto",
+    prune: bool = True,
 ) -> Path:
-    """生成一份一致性快照并清理超期备份，返回新文件路径。"""
+    """生成一份一致性快照并（默认）清理超期备份，返回新文件路径。
+
+    ``prune=False`` 用于「恢复前再备份一份当前库」：那份快照可能正是本次要恢复的
+    源文件（同一备份目录、label 匹配），顺手清理会把它删掉，随后复制就报
+    FileNotFoundError。
+    """
     source = Path(db_path or DB_PATH)
     if not source.exists():
         raise FileNotFoundError(f"数据库不存在：{source}")
@@ -76,7 +82,8 @@ def backup_database(
         sqlite3.connect(target)
     ) as dst:
         src.backup(dst)
-    _prune(target_dir, configured_keep() if keep is None else keep)
+    if prune:
+        _prune(target_dir, configured_keep() if keep is None else keep)
     return target
 
 
@@ -169,6 +176,18 @@ def verify_backup(path: Path | str) -> tuple[bool, str]:
         return False, f"无法打开：{exc}"
 
 
+class SyncCursorResetError(RuntimeError):
+    """同步游标重置失败：调用方必须把它当成失败处理（不能提示成功、不能恢复自动同步）。"""
+
+
+class RestoreError(RuntimeError):
+    """恢复失败：现有数据库保持不变（绝不半覆盖）。"""
+
+
+class RestoreIncomplete(RestoreError):
+    """数据库已替换，但收尾步骤失败（如重置同步游标）：不能提示成功、不能恢复自动同步。"""
+
+
 def reset_sync_cursors() -> None:
     """清空同步游标，让下一次 pull 按表从头全量拉取。
 
@@ -176,21 +195,25 @@ def reset_sync_cursors() -> None:
     （恢复备份、手工拷库、清库重来）后，旧游标往往比库里的数据新，pull 会只请求
     "序列号更大的变更"，云端更旧的记录被永久过滤掉——界面表现为「同步一直成功，
     但列表全空」。清空后 pull 不带游标，服务端从第一页返回，合并是幂等的。
+
+    保存失败**必须抛出去**：调用方若以为成功，就会带着旧游标继续同步，表现成
+    「同步成功但数据还是空的」，比直接报错难查得多。
     """
     try:
         save_settings({"sync_cursors": {}})
-        logger.info("已重置同步游标，下次同步将重新全量拉取")
-    except Exception:
+    except Exception as exc:
         logger.exception("重置同步游标失败")
+        raise SyncCursorResetError(f"重置同步游标失败：{exc}") from exc
+    logger.info("已重置同步游标，下次同步将重新全量拉取")
 
 
 def _atomic_replace(source: Path, target: Path) -> None:
-    """把 source 覆盖到 target：优先原子替换，Windows 句柄占用时退化为覆盖复制。
+    """把 source 覆盖到 target：只做原子替换，失败就抛错。
 
-    ``os.replace`` 需要目标文件的 DELETE 权限；只要同进程还有别的连接（或测试里
-    故意留着的句柄）打开着目标库，Windows 就会返回 WinError 5。这里先做几次短重试
-    （句柄多半是 Python 侧刚释放、GC 还没跑），实在不行再退化为原地覆盖——此时
-    WAL 已 checkpoint 且临时文件已校验，属于「可接受的最后手段」。
+    **绝不退化为原地覆盖复制**：``shutil.copyfile`` 会先截断目标再写，磁盘满、进程
+    被杀或写异常都会把主库留成半份；而恢复是最后一道保险，宁可恢复失败也不能毁库。
+    ``os.replace`` 需要目标文件的 DELETE 权限，同进程还有连接打开着时 Windows 会返回
+    WinError 5，这里只做几次短重试（句柄多半是刚释放、GC 还没跑）。
     """
     last_error: OSError | None = None
     for _attempt in range(3):
@@ -204,11 +227,8 @@ def _atomic_replace(source: Path, target: Path) -> None:
         except OSError as exc:
             last_error = exc
             break
-    logger.warning("原子替换失败（%s），退化为原地覆盖：%s", last_error, target)
-    try:
-        shutil.copyfile(source, target)
-    finally:
-        source.unlink(missing_ok=True)
+    logger.error("原子替换失败，现有数据库保持不变：%s（%s）", target, last_error)
+    raise RestoreError(f"无法原子替换数据库文件：{last_error}") from last_error
 
 
 def restore_database(backup_path: Path | str, db_path: Path | None = None) -> dict:
@@ -225,7 +245,9 @@ def restore_database(backup_path: Path | str, db_path: Path | None = None) -> di
     safety: Path | None = None
     if target.exists():
         try:
-            safety = backup_database(db_path=target, label="pre-restore")
+            # prune=False：这次安全备份和 source 在同一个目录里，按保留数清理有可能
+            # 把正在恢复的 source 删掉，随后复制就报 FileNotFoundError。
+            safety = backup_database(db_path=target, label="pre-restore", prune=False)
         except Exception:
             logger.exception("恢复前备份失败")
             raise
@@ -261,11 +283,23 @@ def restore_database(backup_path: Path | str, db_path: Path | None = None) -> di
             except OSError:
                 logger.warning("删除 %s 失败", stale)
 
-    _atomic_replace(tmp, target)
+    try:
+        _atomic_replace(tmp, target)
+    except RestoreError:
+        tmp.unlink(missing_ok=True)
+        raise
     logger.info("已从备份恢复数据库：%s", source.name)
     # 恢复进来的是另一份库，库内 sync_seq 与 settings 里的同步游标不再对应，
     # 必须一起重置；否则「同步成功但数据全空」会一直持续下去。
-    reset_sync_cursors()
+    try:
+        reset_sync_cursors()
+    except SyncCursorResetError as exc:
+        # 库已经换好了，但游标没重置：绝不能提示成功、也不能恢复自动同步，
+        # 否则下一轮同步会带着旧游标只拉增量，界面看着「同步成功但数据是空的」。
+        raise RestoreIncomplete(
+            f"数据库已恢复，但同步游标重置失败（{exc}）；自动同步保持暂停，"
+            "请修复设置文件后在同步明细里手动全量重拉"
+        ) from exc
     return {"restored": target, "safety": safety}
 
 

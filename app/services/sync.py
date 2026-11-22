@@ -13,6 +13,7 @@ import httpx
 from ..config import DEFAULT_SERVER_URL, load_settings, save_settings
 from ..db.models import utcnow
 from ..db.repo import (
+    _record_issue,
     apply_remote,
     mark_clean,
     mark_rejected,
@@ -191,6 +192,35 @@ class SyncClient:
         )
         save_settings({"sync_history": history[:30]})
 
+    def _apply_page(self, changes: list[dict[str, Any]]) -> int:
+        """逐条应用一页远端变更，返回失败的条数。
+
+        整页共用一个事务时，一条毒记录（``updated_at`` 缺失/非法、字段转换失败、
+        约束冲突）会让整页回滚、游标不推进，pull/push/purge 从此每轮都卡在同一条上。
+        这里给每条一个 savepoint：坏记录只回滚它自己，明细写进同步问题表（同步明细
+        可见、可查询），其余记录照常提交，游标照常推进。
+        """
+        failed = 0
+        with session_scope() as session:
+            for change in changes:
+                table = str(change.get("table") or "")
+                data = change.get("data") or {}
+                try:
+                    with session.begin_nested():
+                        apply_remote(session, [change], owner_id="local")
+                except Exception as exc:
+                    failed += 1
+                    record_id = str(data.get("id") or "")
+                    logger.warning("拉取单条失败，已跳过（%s/%s）：%s", table, record_id, exc)
+                    try:
+                        _record_issue(session, table, record_id, f"拉取失败：{exc}")
+                        session.flush()
+                    except Exception:
+                        logger.exception("记录拉取失败明细失败")
+        if failed:
+            logger.warning("本页有 %d 条记录拉取失败，已记录明细并继续", failed)
+        return failed
+
     def _pull(self, client: httpx.Client, settings: dict[str, Any]) -> None:
         cursors = self._load_cursors(settings)
         selected = self.selected_tables(settings)
@@ -212,8 +242,7 @@ class SyncClient:
                     change for change in raw_changes
                     if str(change.get("table")) in selected
                 ]
-            with session_scope() as session:
-                apply_remote(session, remote_changes, owner_id="local")
+            self._apply_page(remote_changes)
             updates = payload.get("cursors", {})
             if isinstance(updates, dict):
                 # 选择性同步时不要推进未选表的游标，否则以后勾选回来会漏拉历史。

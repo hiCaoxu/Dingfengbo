@@ -18,6 +18,7 @@ from ..config import (
     DEFAULT_HEIGHT_CM,
     DEFAULT_SERVER_URL,
     InsufficientSecretProtection,
+    SettingsUnreadable,
     dpapi_available,
     load_settings,
     save_settings,
@@ -1232,6 +1233,10 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
             ))
         except InsufficientSecretProtection as exc:
             # 缺 DPAPI 时拒绝把凭据写成 base64：留在弹窗里让用户勾选「允许弱保护存储」重试。
+            snack(page, str(exc), th.ACCENT)
+            return
+        except SettingsUnreadable as exc:
+            # 设置文件损坏时拒绝回写（否则会把整份配置覆盖成默认值），保留弹窗让用户先修文件。
             snack(page, str(exc), th.ACCENT)
             return
         # 开机自启写注册表（失败只提示，不影响其他设置保存）

@@ -7,6 +7,7 @@ import sqlite3
 import tempfile
 import unittest
 import zipfile
+from contextlib import closing
 from datetime import date
 from pathlib import Path
 
@@ -24,9 +25,12 @@ class BackupCenterTests(unittest.TestCase):
     def setUp(self) -> None:
         self.root = Path(tempfile.mkdtemp(prefix="dfb-center-"))
         self.db = self.root / "app.db"
-        with sqlite3.connect(self.db) as conn:
+        # 必须用 closing 真正关闭连接：`with sqlite3.connect(...)` 只提交事务、不关句柄，
+        # Windows 上留着的句柄会让 os.replace 报 WinError 5，恢复因此失败。
+        with closing(sqlite3.connect(self.db)) as conn:
             conn.execute("CREATE TABLE t(x INTEGER)")
             conn.execute("INSERT INTO t VALUES (1)")
+            conn.commit()
         self.dest = self.root / "backups"
 
     def tearDown(self) -> None:
@@ -73,10 +77,11 @@ class BackupCenterTests(unittest.TestCase):
 
     def test_restore_replaces_database_and_keeps_safety_copy(self) -> None:
         path = backup_database(db_path=self.db, dest_dir=self.dest, keep=0, label="manual")
-        with sqlite3.connect(self.db) as conn:
+        with closing(sqlite3.connect(self.db)) as conn:
             conn.execute("INSERT INTO t VALUES (2)")
+            conn.commit()
         result = restore_database(path, db_path=self.db)
-        with sqlite3.connect(self.db) as conn:
+        with closing(sqlite3.connect(self.db)) as conn:
             rows = conn.execute("SELECT x FROM t").fetchall()
         self.assertEqual(rows, [(1,)])
         self.assertIsNotNone(result["safety"])

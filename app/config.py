@@ -251,8 +251,20 @@ def _deobfuscate_token(value: str) -> str:
     return value
 
 
+class SettingsUnreadable(RuntimeError):
+    """设置文件存在但无法解析：此时禁止回写。
+
+    以前读取失败会静默回退默认值，随后任意一次后台保存（同步游标、设备列表）都会
+    把整份配置和凭据覆盖成默认值——用户的同步令牌、AI Key、模块顺序全没了。
+    文件损坏时宁可让保存失败并显式报错，也不能覆写原文件。
+    """
+
+
+_LOAD_FAILED = False
+
+
 def load_settings() -> dict[str, Any]:
-    global _SETTINGS_CACHE
+    global _SETTINGS_CACHE, _LOAD_FAILED
     try:
         stat = SETTINGS_PATH.stat()
         stamp: tuple[int, int] | None = (stat.st_mtime_ns, stat.st_size)
@@ -265,10 +277,17 @@ def load_settings() -> dict[str, Any]:
     if stamp is not None:
         try:
             loaded = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                settings.update(loaded)
+            if not isinstance(loaded, dict):
+                raise ValueError("设置文件顶层不是对象")
+            settings.update(loaded)
+            _LOAD_FAILED = False
         except (OSError, ValueError):
-            logger.exception("读取设置文件失败，使用默认设置")
+            _LOAD_FAILED = True
+            logger.exception(
+                "读取设置文件失败，已回退默认值；为避免覆盖原配置，本次不会回写"
+            )
+    else:
+        _LOAD_FAILED = False
     token = settings.get("sync_token")
     if token:
         raw_token = str(token)
@@ -285,7 +304,7 @@ def load_settings() -> dict[str, Any]:
             _DECRYPT_FAILED.discard("ai_api_key")
         else:
             _DECRYPT_FAILED.add("ai_api_key")
-    if stamp is not None:
+    if stamp is not None and not _LOAD_FAILED:
         _SETTINGS_CACHE = (stamp, copy.deepcopy(settings))
     return settings
 
@@ -293,9 +312,14 @@ def load_settings() -> dict[str, Any]:
 def save_settings(settings: dict[str, Any]) -> None:
     global _SETTINGS_CACHE
     with _SETTINGS_LOCK:
+        merged = load_settings()
+        if _LOAD_FAILED:
+            raise SettingsUnreadable(
+                f"设置文件无法解析（{SETTINGS_PATH}），已拒绝覆盖保存；"
+                "请修复或删除该文件后重试"
+            )
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         raw = _raw_disk_settings()
-        merged = load_settings()
         merged.update(settings)
         allow_weak = bool(merged.get("allow_weak_secret_storage"))
         for key in ("sync_token", "ai_api_key"):

@@ -22,7 +22,7 @@ from ..db.repo import (
     retry_issue,
     sync_queue_stats,
 )
-from ..db.backup import reset_sync_cursors
+from ..db.backup import SyncCursorResetError, reset_sync_cursors
 from ..services.dates import local_datetime_from_utc
 from ..services.sync import mark_pending_write, sync_devices, sync_history
 from .widgets import close_modal, modal, snack
@@ -340,7 +340,12 @@ def open_sync_detail(page: ft.Page, refresh_status=None) -> ft.AlertDialog:
     def do_reset_cursors(_=None) -> None:
         """游标与库内容不匹配时自救：恢复备份/手工换库后，旧游标会让云端旧数据
         永远拉不回来（表现为「同步成功但列表空」）。清空后重新拉全量。"""
-        reset_sync_cursors()
+        try:
+            reset_sync_cursors()
+        except SyncCursorResetError as exc:
+            # 保存失败必须让用户看到：此时游标还是旧的，提示「已重置」会把人带偏。
+            snack(page, f"{exc}（游标未重置，请检查设置文件是否可写）", th.ACCENT)
+            return
         mark_pending_write()  # 走「写入后 10 秒同步」通道，不必手动再点一次
         snack(page, "同步游标已重置，10 秒内会重新拉取云端全量数据", th.PRIMARY)
         reload()

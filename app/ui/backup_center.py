@@ -179,6 +179,7 @@ def open_backup_center(page: ft.Page, refresh=None) -> ft.AlertDialog:
             from .scheduler import pause_auto_sync, resume_auto_sync
 
             pause_auto_sync("备份恢复中")
+            settled = False
             try:
                 sync_client.wait_idle()
                 result = restore_database(path)
@@ -186,9 +187,13 @@ def open_backup_center(page: ft.Page, refresh=None) -> ft.AlertDialog:
                 from ..db.session import init_db
 
                 init_db()
+                # 只有整条链路（含游标重置）都成功才恢复自动同步：RestoreIncomplete
+                # 表示库换了但游标没重置，此时恢复同步会带着旧游标只拉增量。
+                settled = True
                 return result
             finally:
-                resume_auto_sync()
+                if settled:
+                    resume_auto_sync()
 
         def done(payload, error) -> None:
             if error is not None:
