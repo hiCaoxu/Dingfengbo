@@ -7,6 +7,7 @@ import logging
 import threading
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -72,6 +73,22 @@ def _remember_superseded(session, item: dict) -> None:
         _parse_iso(item.get("local_updated_at")),
         _parse_iso(item.get("remote_updated_at")),
     )
+
+
+def insecure_remote_server(server_url: str) -> bool:
+    """是否在向「非本机的明文 HTTP」服务端同步。
+
+    同步令牌是唯一身份凭证，明文 HTTP 下可被同链路嗅探；本机/局域网调试服务不受影响。
+    """
+    parts = urlsplit(str(server_url or ""))
+    if parts.scheme != "http":
+        return False
+    host = (parts.hostname or "").lower()
+    if not host:
+        return False
+    if host in ("localhost", "127.0.0.1", "::1") or host.endswith(".local"):
+        return False
+    return True
 
 
 class SyncClient:
@@ -225,11 +242,21 @@ class SyncClient:
         cursors = self._load_cursors(settings)
         selected = self.selected_tables(settings)
         while True:
+            if _auto_pause.is_set():
+                # 备份恢复期间库会被整库替换：飞行中的多页 pull 必须立刻停手，
+                # 否则后续页面会写进已被替换/已关闭的库。
+                logger.info("自动同步已暂停，停止本轮拉取")
+                return
             before = {table: dict(cursor) for table, cursor in cursors.items()}
             sent_at = utcnow()
+            body: dict[str, Any] = {"cursors": cursors, "limit": 200}
+            if selected:
+                # 让服务端只查勾选的表：未勾选的表每页都被查出再丢弃，既费流量，
+                # 又会让 has_more 永远为真、只能靠「无进展」兜底退出。
+                body["tables"] = sorted(selected)
             response = client.post(
                 self._endpoint("/api/sync/pull"),
-                json={"cursors": cursors, "limit": 200},
+                json=body,
                 headers=self._headers(),
             )
             response.raise_for_status()
@@ -279,6 +306,10 @@ class SyncClient:
         self.pending_upload = len(changes)
         if not changes:
             return
+        if _auto_pause.is_set():
+            # 推送前也要复查：暂停可能发生在收集队列之后、真正发请求之前。
+            logger.info("自动同步已暂停，取消本次推送")
+            return
         sent_at = utcnow()
         response = client.post(
             self._endpoint("/api/sync/push"),
@@ -313,6 +344,11 @@ class SyncClient:
             if not settings.get("sync_enabled", True):
                 self.status = "同步已关闭"
                 return self.status
+            if insecure_remote_server(settings.get("server_url", DEFAULT_SERVER_URL)):
+                logger.warning(
+                    "同步服务端为明文 HTTP（%s）：令牌与数据可能在链路被嗅探，建议改用 https",
+                    settings.get("server_url"),
+                )
             token = settings.get("sync_token", "").strip()
             if not token:
                 self.status = "未配置令牌"

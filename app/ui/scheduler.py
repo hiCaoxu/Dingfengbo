@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Callable
 
 import flet as ft
 
 from ..db.session import session_scope
-from ..services.notify import notify
+from ..services.notify import NotifyResult, notify
 from ..services.reminders import collect_due
 from ..services.sync import (
     auto_sync_paused as _core_auto_paused,
@@ -24,6 +25,32 @@ from .. import theme as th
 from .widgets import snack
 
 logger = logging.getLogger(__name__)
+
+# 提醒发送完全失败时的退避：同一 (todo, fire_at) 按 1/2/4… 分钟重试，封顶 30 分钟。
+# 不做退避的话，通知系统整体不可用时会每分钟硬敲一次 PowerShell（每次最长 15 秒）。
+_NOTIFY_RETRY: dict[tuple[str, str], tuple[int, float]] = {}
+_NOTIFY_RETRY_CAP_SECONDS = 1800.0
+
+
+def _notify_key(item: dict) -> tuple[str, str]:
+    return (str(item.get("todo_id") or ""), str(item.get("fire_at") or ""))
+
+
+def _notify_retry_ready(item: dict) -> bool:
+    record = _NOTIFY_RETRY.get(_notify_key(item))
+    return record is None or time.time() >= record[1]
+
+
+def _mark_notify_failed(item: dict) -> None:
+    key = _notify_key(item)
+    count = (_NOTIFY_RETRY.get(key) or (0, 0.0))[0] + 1
+    delay = min(_NOTIFY_RETRY_CAP_SECONDS, 60.0 * (2 ** (count - 1)))
+    _NOTIFY_RETRY[key] = (count, time.time() + delay)
+    logger.warning("提醒发送失败 %d 次，%.0f 秒后重试", count, delay)
+
+
+def _clear_notify_failure(item: dict) -> None:
+    _NOTIFY_RETRY.pop(_notify_key(item), None)
 
 _page: ft.Page | None = None
 _refresh_status: Callable[[], None] | None = None
@@ -143,14 +170,25 @@ def _reminder_tick() -> None:
         logger.exception("待办提醒检查失败")
         due = []
     if due:
+        delivered = 0
         for item in due:
+            if not _notify_retry_ready(item):
+                continue
             try:
-                notify(item["title"], item["body"])
+                result = notify(item["title"], item["body"])
             except Exception:
                 logger.exception("系统提醒发送失败：%s", item.get("todo_id"))
+                result = NotifyResult.FAILED
+            if result is NotifyResult.FAILED:
+                # 只有「通知与提示音都没成功」才值得重试；只响了一声提示音也算提醒到了。
+                _mark_notify_failed(item)
                 _forget_reminder(item)
-        _show_reminder_snack(len(due))
-        logger.info("已发送 %d 条待办提醒", len(due))
+                continue
+            _clear_notify_failure(item)
+            delivered += 1
+        if delivered:
+            _show_reminder_snack(delivered)
+            logger.info("已发送 %d 条待办提醒", delivered)
     _start_reminder_loop()
 
 

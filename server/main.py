@@ -84,6 +84,19 @@ class PullRequest(BaseModel):
     cursors: dict[str, PullCursor] = Field(default_factory=dict)
     limit: int = Field(default=200, ge=1, le=500)
     since: str | None = None  # 兼容旧客户端
+    # 选择性同步：客户端只关心勾选的表。服务端据此跳过其余表，
+    # 否则未勾选的表每页都被查出、再被客户端丢弃，has_more 也会永远为真。
+    tables: list[str] | None = Field(default=None, max_length=64)
+
+    @field_validator("tables")
+    @classmethod
+    def _known_tables(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        unknown = [name for name in value if name not in MODEL_BY_TABLE]
+        if unknown:
+            raise ValueError(f"未知数据表: {unknown[:3]}")
+        return list(dict.fromkeys(value))
 
 
 class Change(BaseModel):
@@ -114,7 +127,9 @@ class Change(BaseModel):
 
 
 class PushRequest(BaseModel):
-    changes: list[dict[str, Any]] = Field(default_factory=list)
+    # 条数上限：pull 有 ≤500 的 limit，push 也必须有限制，否则一次请求塞几万条
+    # 就能把服务端内存与单事务撑爆。
+    changes: list[dict[str, Any]] = Field(default_factory=list, max_length=500)
 
 
 def owner_of(authorization: str | None) -> str:
@@ -210,7 +225,10 @@ def pull(payload: PullRequest, authorization: str | None = Header(default=None))
         changes: list[dict[str, Any]] = []
         next_cursors: dict[str, dict[str, int]] = {}
         has_more = False
+        wanted = set(payload.tables) if payload.tables else None
         for table, model in MODEL_BY_TABLE.items():
+            if wanted is not None and table not in wanted:
+                continue
             stmt = select(model).where(model.owner_id == owner)
             cursor = payload.cursors.get(table)
             if cursor:

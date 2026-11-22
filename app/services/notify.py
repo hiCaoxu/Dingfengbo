@@ -11,8 +11,21 @@ import logging
 import shutil
 import subprocess
 import sys
+from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+
+class NotifyResult(str, Enum):
+    """提醒的送达程度：用来决定「要不要重试」。
+
+    ``BEEP`` 表示 Toast 失败但提示音响了——用户已经被提醒到，重试只会重复打扰；
+    只有 ``FAILED``（Toast 与提示音都没成功）才值得退避重试。
+    """
+
+    TOAST = "toast"
+    BEEP = "beep"
+    FAILED = "failed"
 
 # Windows 已注册的 PowerShell AppID：直接拿来发 Toast 可避免「通知不显示」。
 _APP_ID = r"{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe"
@@ -73,20 +86,23 @@ def _powershell_toast(title: str, message: str) -> bool:
     return True
 
 
-def _beep() -> None:
+def _beep() -> bool:
     if sys.platform != "win32":
-        return
+        return False
     try:
         import winsound
 
         winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+        return True
     except Exception:
         logger.debug("提示音播放失败", exc_info=True)
+        return False
 
 
-def notify(title: str, message: str) -> bool:
-    """弹出系统通知；返回是否成功走了 Toast（否则至少响了一声）。"""
+def notify(title: str, message: str) -> NotifyResult:
+    """弹出系统通知，返回送达程度（Toast / 仅提示音 / 完全失败）。"""
     if sys.platform == "win32" and _powershell_toast(title, message):
-        return True
-    _beep()
-    return False
+        return NotifyResult.TOAST
+    if _beep():
+        return NotifyResult.BEEP
+    return NotifyResult.FAILED

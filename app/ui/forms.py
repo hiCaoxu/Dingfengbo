@@ -1322,6 +1322,16 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
             # 设置文件损坏时拒绝回写（否则会把整份配置覆盖成默认值），保留弹窗让用户先修文件。
             snack(page, str(exc), th.ACCENT)
             return
+        # 明文 HTTP 同步：令牌是唯一身份凭证，值得显著提示一次（不阻断，本机/内网调试常见）。
+        from ..services.sync import insecure_remote_server
+
+        if insecure_remote_server(server.value or DEFAULT_SERVER_URL):
+            snack(
+                page,
+                "设置已保存。注意：同步服务地址是明文 HTTP，令牌与数据可能在链路被窃听，"
+                "建议改用 https 或反代 TLS。",
+                th.ACCENT,
+            )
         # 开机自启写注册表（失败只提示，不影响其他设置保存）
         from ..services import system_integration
 
