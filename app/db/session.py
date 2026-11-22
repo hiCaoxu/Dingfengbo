@@ -43,7 +43,8 @@ FOOD_SEED: list[tuple[str, str, float]] = [
 
 
 def init_db() -> None:
-    initialize_schema(engine)
+    # 客户端不分配 sync_seq（由服务端统一发号），启动时不必逐行补号。
+    initialize_schema(engine, assign_sequences=False)
     with SessionLocal() as session:
         count = session.scalar(select(Food.id).limit(1))
         if count is None:

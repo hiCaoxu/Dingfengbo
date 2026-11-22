@@ -36,8 +36,12 @@ def _balances_decimal(session: Session) -> dict[str, Decimal]:
         .group_by(Transaction.account_id, Transaction.kind)
     )
     for account_id, kind, total in rows:
+        if account_id not in balances:
+            # 已删除账户 / 孤儿交易（导入时账户对不上）：不要再为它造一个「幽灵键」，
+            # 否则界面会多出一个查不到名字的余额，报表按账户聚合时也会算进总数。
+            continue
         amount = to_decimal(total)
-        current = balances.get(account_id, ZERO)
+        current = balances[account_id]
         if kind == "income":
             balances[account_id] = current + amount
         elif kind in ("expense", "transfer"):
@@ -52,9 +56,9 @@ def _balances_decimal(session: Session) -> dict[str, Decimal]:
         .group_by(Transaction.to_account_id)
     )
     for account_id, total in incoming:
-        if account_id is None:
+        if account_id is None or account_id not in balances:
             continue
-        balances[account_id] = balances.get(account_id, ZERO) + to_decimal(total)
+        balances[account_id] = balances[account_id] + to_decimal(total)
     return balances
 
 

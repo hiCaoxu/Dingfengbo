@@ -296,7 +296,6 @@ def _budget_section(session: Session, start: date, end: date) -> dict[str, Any]:
     monthly: dict[str, Decimal] = {}
     standing: dict[str, Decimal] = {}
     total_monthly = ZERO
-    total_standing = ZERO
     for item in budgets:
         amount = quantize(item.amount)
         if item.category:
@@ -304,10 +303,10 @@ def _budget_section(session: Session, start: date, end: date) -> dict[str, Any]:
             bucket[item.category] = bucket.get(item.category, ZERO) + amount
         elif item.month:
             total_monthly += amount
-        else:
-            total_standing += amount
+        # 无 month 的「长期总预算」不计入本月合计：拿长期额度去减本月支出，
+        # 「剩余」会严重失真（报告里显示成一个大负数或大正数）。
     category_budgets = {**standing, **monthly}
-    total_budget = total_monthly or total_standing
+    total_budget = total_monthly
     categories = [
         {
             "category": category,

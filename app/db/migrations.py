@@ -29,6 +29,39 @@ TIMESTAMP_SCHEMA_VERSION = 2
 TEMPLATE_FLAG_SCHEMA_VERSION = 3
 TODO_FIELD_SCHEMA_VERSION = 4
 DIARY_UNIQUE_SCHEMA_VERSION = 5
+INDEX_SCHEMA_VERSION = 6
+
+# 只有本地意义的表：它们没有 owner_id / sync_seq，不该建同步复合索引。
+_LOCAL_ONLY_TABLES = ("foods", "sync_sequences", "sync_issues", "sync_conflicts", "todo_reminders")
+
+
+def _drop_zombie_indexes(connection: Connection) -> None:
+    """清掉历史遗留的「本地表同步索引」（常量表达式索引）。
+
+    旧版 ``_ensure_indexes`` 遍历了全部元数据表，对本地表也执行 CREATE INDEX；SQLite
+    的双引号宽松解析把它当成字符串常量而不是列名，于是静默生成了
+    ``ix_foods_owner_sync_seq`` 这类常量索引。真实库里沉淀了 10 个，这里清理一次。
+    """
+    if _schema_version(connection) >= INDEX_SCHEMA_VERSION:
+        return
+    existing = set(inspect(connection).get_table_names())
+    dropped = 0
+    for table in _LOCAL_ONLY_TABLES:
+        if table not in existing:
+            continue
+        # 先把 PRAGMA 结果取完再执行 DDL：边遍历结果集边改 schema 会报 table is locked。
+        names = {
+            str(row[1])
+            for row in connection.exec_driver_sql(f'PRAGMA index_list("{table}")')
+        }
+        for template, _first, _second in _COMPOSITE_INDEXES:
+            name = template % table
+            if name in names:
+                connection.exec_driver_sql(f'DROP INDEX IF EXISTS "{name}"')
+                dropped += 1
+    connection.exec_driver_sql(f"PRAGMA user_version = {INDEX_SCHEMA_VERSION}")
+    if dropped:
+        logger.info("已清理 %d 个本地表僵尸索引", dropped)
 
 # 历史上任务弹窗直接存了中文优先级，而象限推导/搜索只认英文码。
 _PRIORITY_CODES = (("高", "high"), ("中", "medium"), ("低", "low"))
@@ -217,16 +250,23 @@ def _ensure_indexes(connection: Connection) -> None:
 
     ``create_all`` 只建缺失的表，不会给已存在的表补索引；升级后的老库需要这一步
     才能拿到与新建库一致的索引。习惯打卡的重复行必须先收敛，否则唯一索引建不上。
+
+    只遍历 ``SYNC_MODELS``：早期实现遍历全部元数据表，对没有 ``owner_id``/``sync_seq``
+    的本地表（foods / sync_sequences / sync_issues / sync_conflicts / todo_reminders）
+    也执行 CREATE INDEX。SQLite 的双引号宽松解析（DQS）把它当成字符串常量，于是静默
+    生成了 10 个「常量表达式」僵尸索引——schema 污染，且在关闭 DQS 的环境里会让库
+    直接打不开。
     """
     existing = set(inspect(connection).get_table_names())
-    for table in Base.metadata.tables.values():
-        if table.name not in existing:
+    for model in SYNC_MODELS:
+        table = model.__tablename__
+        if table not in existing:
             continue
         for template, first, second in _COMPOSITE_INDEXES:
             connection.execute(
                 text(
-                    f"CREATE INDEX IF NOT EXISTS {_quote(template % table.name)} "
-                    f"ON {_quote(table.name)} ({_quote(first)}, {_quote(second)})"
+                    f"CREATE INDEX IF NOT EXISTS {_quote(template % table)} "
+                    f"ON {_quote(table)} ({_quote(first)}, {_quote(second)})"
                 )
             )
     if "habit_logs" not in existing:
@@ -397,8 +437,13 @@ def _rebuild_diaries_partial_unique(connection: Connection) -> None:
         logger.info("diaries 已重建为「仅活跃行唯一」的部分唯一索引")
 
 
-def initialize_schema(engine: Engine) -> None:
-    """创建新表；旧版整数主键库在一个事务内迁移为 UUID。"""
+def initialize_schema(engine: Engine, *, assign_sequences: bool = True) -> None:
+    """创建新表；旧版整数主键库在一个事务内迁移为 UUID。
+
+    ``assign_sequences=False`` 给客户端用：客户端的 ``sync_seq`` 一律由服务端分配，
+    本地每次启动逐行补号既浪费写入，也会让「缺号」在两端各算一次。服务端仍保留该步骤
+    （升级存量库时要先把计数器锚定到全表最大值）。
+    """
     with engine.begin() as connection:
         # 库级迁移必须最先做：后续所有写入都会经过 MoneyCents（元 → 分）。
         _migrate_money_to_cents(connection)
@@ -406,6 +451,7 @@ def initialize_schema(engine: Engine) -> None:
         _repair_template_flags(connection)
         _normalize_todo_fields(connection)
         _rebuild_diaries_partial_unique(connection)
+        _drop_zombie_indexes(connection)
         inspector = inspect(connection)
         existing = set(inspector.get_table_names())
         legacy_tables = [
@@ -418,7 +464,8 @@ def initialize_schema(engine: Engine) -> None:
             Base.metadata.create_all(connection)
             _add_missing_columns(connection)
             _ensure_indexes(connection)
-            _assign_missing_sequences(connection)
+            if assign_sequences:
+                _assign_missing_sequences(connection)
             return
         if "transactions" in legacy_tables and "accounts" not in legacy_tables:
             raise RuntimeError("无法迁移交易引用：账户表未使用旧版整数主键")
@@ -477,4 +524,5 @@ def initialize_schema(engine: Engine) -> None:
             connection.execute(text(f"DROP TABLE {_quote(f'_legacy_uuid_{table}')}"))
         _add_missing_columns(connection)
         _ensure_indexes(connection)
-        _assign_missing_sequences(connection)
+        if assign_sequences:
+            _assign_missing_sequences(connection)

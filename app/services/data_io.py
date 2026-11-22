@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import os
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -72,6 +73,21 @@ def counts() -> dict[str, int]:
 # ------------------------------------------------------------------ JSON
 
 
+def _atomic_write_text(target: Path, text: str) -> None:
+    """先写同目录临时文件再原子替换。
+
+    导出中途失败（磁盘满、进程被杀）会留下半截文件；直接写在目标路径上，
+    用户看到的是一份「看起来存在但导入报错」的备份。临时文件与目标同目录，
+    ``os.replace`` 才是原子的。
+    """
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, target)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def export_json(dest: Path | str, tables: list[str] | None = None) -> Path:
     target = Path(dest)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -82,7 +98,7 @@ def export_json(dest: Path | str, tables: list[str] | None = None) -> Path:
         "exported_at": datetime.now().isoformat(timespec="seconds"),
         "tables": {table: _rows(table) for table in selected},
     }
-    target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_text(target, json.dumps(payload, ensure_ascii=False, indent=2))
     return target
 
 
@@ -321,11 +337,17 @@ def export_csv(table: str, dest: Path | str) -> Path:
         raise ValueError(f"未知数据表：{table}")
     columns = [column.name for column in model.__table__.columns]
     rows = _rows(table)
-    with target.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=columns, extrasaction="ignore")
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({column: _csv_safe(row.get(column)) for column in columns})
+    # 先写临时文件再原子替换：中途失败不会在目标路径留下半截 CSV。
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    try:
+        with tmp.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=columns, extrasaction="ignore")
+            writer.writeheader()
+            for row in rows:
+                writer.writerow({column: _csv_safe(row.get(column)) for column in columns})
+        os.replace(tmp, target)
+    finally:
+        tmp.unlink(missing_ok=True)
     return target
 
 

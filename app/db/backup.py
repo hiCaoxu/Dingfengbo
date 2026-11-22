@@ -23,6 +23,7 @@ import zipfile
 from contextlib import closing
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote
 
 from ..config import DATA_DIR, DB_PATH, SETTINGS_PATH, get_setting, save_settings
 
@@ -161,7 +162,10 @@ def verify_backup(path: Path | str) -> tuple[bool, str]:
     if not target.exists():
         return False, "文件不存在"
     try:
-        with closing(sqlite3.connect(f"file:{target}?mode=ro", uri=True, timeout=10)) as conn:
+        # 只读 URI 必须做百分号编码：路径里有 % / # / 中文或空格时，未编码的 URI
+        # 会被 SQLite 解析成别的文件名，一份好好的备份反而「无法打开」。
+        uri = f"file:{quote(str(target.as_posix()))}?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True, timeout=10)) as conn:
             result = conn.execute("PRAGMA quick_check").fetchone()
             message = str(result[0]) if result else "无返回"
             if message.lower() != "ok":

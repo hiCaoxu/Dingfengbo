@@ -438,10 +438,12 @@ def _list_query() -> tuple[str, list]:
     query = (_state["query"] or "").strip()
     conditions = [Diary.is_deleted.is_(False), func.length(Diary.content) > 0]
     if query:
+        # 用 contains(autoescape=True)（与 search 层同一写法）：用户输入的 % / _ 是
+        # LIKE 通配符，不转义的话搜 "100%" 会命中所有日记、搜 "_" 直接全表。
         conditions.append(
             or_(
-                func.strftime("%Y-%m-%d", Diary.date).like(f"%{query}%"),
-                Diary.title.like(f"%{query}%"),
+                func.strftime("%Y-%m-%d", Diary.date).contains(query, autoescape=True),
+                Diary.title.contains(query, autoescape=True),
             )
         )
     with session_scope() as session:

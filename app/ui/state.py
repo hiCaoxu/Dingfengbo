@@ -12,16 +12,25 @@ from typing import Any
 
 
 class _StateBase:
-    """支持字典式访问的类型化状态基类，便于从散落的字典平滑迁移。"""
+    """支持字典式访问的类型化状态基类，便于从散落的字典平滑迁移。
+
+    语义要跟 dict 对齐：缺键抛 ``KeyError``（不是 ``AttributeError``），``get()``
+    在值为 None 时也返回 default。否则 ``state["current"]`` 的错误处理分支和
+    ``dict`` 用法会写出两套行为。
+    """
 
     def __getitem__(self, key: str):
-        return getattr(self, key)
+        try:
+            return getattr(self, key)
+        except AttributeError as exc:
+            raise KeyError(key) from exc
 
     def __setitem__(self, key: str, value) -> None:
         setattr(self, key, value)
 
     def get(self, key: str, default=None):
-        return getattr(self, key, default)
+        value = getattr(self, key, None)
+        return default if value is None else value
 
     def update(self, **kwargs) -> None:
         for key, value in kwargs.items():
