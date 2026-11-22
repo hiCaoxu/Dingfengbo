@@ -94,6 +94,22 @@ def insecure_remote_server(server_url: str) -> bool:
     return True
 
 
+# 明文 HTTP 的提醒每轮同步都会命中：只对同一个地址提醒一次，避免 5 分钟一条刷满日志。
+_insecure_warned: set[str] = set()
+
+
+def _warn_insecure_once(server_url: str) -> None:
+    """同一服务端地址只警告一次（换地址会重新提醒）。"""
+    key = str(server_url or "").rstrip("/")
+    if not key or key in _insecure_warned:
+        return
+    _insecure_warned.add(key)
+    logger.warning(
+        "同步服务端为明文 HTTP（%s）：令牌与数据可能在链路被嗅探，建议改用 https",
+        safe_url(key),
+    )
+
+
 class SyncClient:
     def __init__(self) -> None:
         self.status = "未连接"
@@ -383,10 +399,7 @@ class SyncClient:
                 self.status = "同步已关闭"
                 return self.status
             if insecure_remote_server(settings.get("server_url", DEFAULT_SERVER_URL)):
-                logger.warning(
-                    "同步服务端为明文 HTTP（%s）：令牌与数据可能在链路被嗅探，建议改用 https",
-                    safe_url(settings.get("server_url")),
-                )
+                _warn_insecure_once(settings.get("server_url", DEFAULT_SERVER_URL))
             token = settings.get("sync_token", "").strip()
             if not token:
                 self.status = "未配置令牌"

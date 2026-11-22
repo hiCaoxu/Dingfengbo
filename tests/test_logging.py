@@ -164,3 +164,78 @@ class SyncCorrelationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class ThirdPartyNoiseTests(unittest.TestCase):
+    """httpx 每条请求一行的 INFO 日志要压掉（且它的 URL 里可能带签名）。"""
+
+    def setUp(self) -> None:
+        import logging as _logging
+
+        root = _logging.getLogger()
+        self._saved_handlers = list(root.handlers)
+        self._saved_level = root.level
+        self._saved_httpx = _logging.getLogger("httpx").level
+        for handler in root.handlers[:]:
+            root.removeHandler(handler)
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+
+    def tearDown(self) -> None:
+        import logging as _logging
+
+        root = _logging.getLogger()
+        for handler in root.handlers[:]:
+            handler.close()
+            root.removeHandler(handler)
+        for handler in self._saved_handlers:
+            root.addHandler(handler)
+        root.setLevel(self._saved_level)
+        _logging.getLogger("httpx").setLevel(self._saved_httpx)
+        self.temp.cleanup()
+
+    def test_httpx_is_quiet_at_info(self) -> None:
+        import logging as _logging
+
+        from app.logging_setup import setup_logging
+
+        with mock.patch.dict("os.environ", {"DINGFENGBO_LOG_LEVEL": "INFO"}):
+            setup_logging(Path(self.temp.name))
+        self.assertEqual(_logging.getLogger("httpx").level, _logging.WARNING)
+
+    def test_httpx_is_visible_at_debug(self) -> None:
+        import logging as _logging
+
+        from app.logging_setup import setup_logging
+
+        with mock.patch.dict("os.environ", {"DINGFENGBO_LOG_LEVEL": "DEBUG"}):
+            setup_logging(Path(self.temp.name))
+        self.assertEqual(_logging.getLogger("httpx").level, _logging.DEBUG)
+
+
+class InsecureWarningThrottleTests(unittest.TestCase):
+    """明文 HTTP 提醒每轮同步都会命中，只能提醒一次（换地址重新提醒）。"""
+
+    def setUp(self) -> None:
+        from app.services import sync
+
+        self.sync = sync
+        self._saved = set(sync._insecure_warned)
+        sync._insecure_warned.clear()
+
+    def tearDown(self) -> None:
+        self.sync._insecure_warned.clear()
+        self.sync._insecure_warned.update(self._saved)
+
+    def test_same_url_warns_once(self) -> None:
+        with self.assertLogs("app.services.sync", level="WARNING") as captured:
+            self.sync._warn_insecure_once("http://43.142.92.115:8000")
+            self.sync._warn_insecure_once("http://43.142.92.115:8000/")
+        warnings = [line for line in captured.output if "明文 HTTP" in line]
+        self.assertEqual(len(warnings), 1, "同一地址重复同步不应反复刷警告")
+        self.assertIn("43.142.92.115:8000", warnings[0])
+
+    def test_new_url_warns_again(self) -> None:
+        with self.assertLogs("app.services.sync", level="WARNING") as captured:
+            self.sync._warn_insecure_once("http://a.example:8000")
+            self.sync._warn_insecure_once("http://b.example:9000")
+        warnings = [line for line in captured.output if "明文 HTTP" in line]
+        self.assertEqual(len(warnings), 2, "换了服务端地址应重新提醒")

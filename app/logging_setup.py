@@ -29,6 +29,10 @@ MAX_BYTES = 2_000_000
 BACKUP_COUNT = 5
 DEFAULT_LEVEL = "INFO"
 _LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+# 第三方库的 INFO 级噪音：httpx 每条请求打一行、还会带完整 URL（query 里可能有签名）。
+# 正常情况下压到 WARNING；只有在 DINGFENGBO_LOG_LEVEL=DEBUG 时才放出来，
+# 因为那时用户明确要「一条请求都不漏」。
+_NOISY_LOGGERS = ("httpx", "httpcore", "urllib3", "asyncio")
 
 
 def resolve_level(raw: str | None = None) -> int:
@@ -99,3 +103,13 @@ def setup_logging(logs_dir: Path) -> None:
     console_handler.setFormatter(formatter)
     setattr(console_handler, _HANDLER_MARK, True)
     root.addHandler(console_handler)
+
+    _quiet_third_party(root.level)
+
+
+def _quiet_third_party(root_level: int) -> None:
+    """按根级别压制第三方库的请求日志（DEBUG 时保持原样）。"""
+    for name in _NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(
+            logging.DEBUG if root_level <= logging.DEBUG else logging.WARNING
+        )
