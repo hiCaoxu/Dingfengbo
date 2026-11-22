@@ -67,7 +67,9 @@ if (Test-Path "docker/Caddyfile") {
 }
 
 $deploy = @'
-cd __REMOTE_DIR__ && docker compose -f docker/docker-compose.yml up -d --build
+set -e
+cd __REMOTE_DIR__
+docker compose -f docker/docker-compose.yml up -d --build
 for i in $(seq 1 30); do
   curl -fsS http://127.0.0.1:8000/api/health >/dev/null 2>&1 && echo health-ready && break
   sleep 1
@@ -75,8 +77,8 @@ done
 docker ps --filter name=dingfengbo-sync --format '{{.Status}}'
 curl -fsS http://127.0.0.1:8000/api/health
 '@
-# 用字符串替换而不是 PowerShell 的 -f：格式化运算符会把 {{.Status}} 折叠成 {.Status}，
-# 传给 docker 的 --format 就失效了。
+# Use string replacement instead of PowerShell's -f operator: -f collapses
+# {{.Status}} into {.Status}, which breaks docker's --format argument.
 $deploy = $deploy.Replace("__REMOTE_DIR__", $RemoteDir)
 
 Invoke-Remote $deploy "compose-up"
