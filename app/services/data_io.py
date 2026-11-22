@@ -10,16 +10,17 @@ from __future__ import annotations
 import csv
 import json
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy import update as sql_update
 
-from ..db.models import MODEL_BY_TABLE, Account, table_label
+from ..db.models import MODEL_BY_TABLE, Account, table_label, utcnow
 from ..db.repo import apply_remote, serialize
 from ..db.session import session_scope
+from .clock import get_clock_offset
 from .money import to_float
 
 logger = logging.getLogger(__name__)
@@ -141,6 +142,32 @@ def _coerce(column, value: Any) -> Any:
 # 否则构造一份带 sync_seq / is_deleted 的 JSON 就能污染同步队列或伪造墓碑。
 _IMPORT_BLOCKED_FIELDS = {"owner_id", "sync_status", "sync_seq", "is_deleted"}
 
+# 导入允许文件带 updated_at，但不允许「未来时间」：未来版本会让这条记录在本机和
+# 其他设备上产生的较早编辑被 LWW 判旧（推送被拒、版本分叉）。5 分钟容差吸收
+# 多端时钟抖动，超过就钳到当前对齐时间并告警。
+_IMPORT_FUTURE_TOLERANCE = timedelta(minutes=5)
+
+
+def _aligned_now() -> datetime:
+    """当前时间按服务端时间轴对齐（与 repo.mark_dirty 同一口径）。"""
+    return utcnow() + timedelta(seconds=get_clock_offset())
+
+
+def _clamp_future_updated_at(data: dict[str, Any]) -> bool:
+    """把数据里明显在未来的 updated_at 钳到当前时间，返回是否做了钳制。"""
+    raw = data.get("updated_at")
+    if not raw:
+        return False
+    try:
+        parsed = datetime.fromisoformat(str(raw)[:19])
+    except ValueError:
+        return False
+    limit = _aligned_now()
+    if parsed <= limit + _IMPORT_FUTURE_TOLERANCE:
+        return False
+    data["updated_at"] = limit.isoformat(sep=" ")
+    return True
+
 
 def _sanitize(model, row: dict[str, Any]) -> dict[str, Any]:
     """按模型列白名单过滤导入载荷。"""
@@ -211,6 +238,11 @@ def import_json(path: Path | str) -> dict[str, Any]:
                 # 导入是「恢复」语义：文件里的记录一律视为未删除，否则会写进墓碑行，
                 # 用户看到「导入成功」但界面上什么都没有。
                 data["is_deleted"] = False
+                if _clamp_future_updated_at(data):
+                    errors.append(
+                        f"{table_label(table)} 第 {index} 条：updated_at 在未来，"
+                        "已钳制到当前时间（否则后续编辑会被判旧）"
+                    )
                 try:
                     # 单条一个 savepoint：某条落库失败只回滚它自己，后面的行继续。
                     with session.begin_nested():
@@ -251,6 +283,25 @@ def import_json(path: Path | str) -> dict[str, Any]:
 # ------------------------------------------------------------------ CSV
 
 
+_CSV_DANGEROUS_PREFIXES = ("=", "+", "-", "@", "\t", "\r", "\n")
+
+
+def _csv_safe(value: Any) -> Any:
+    """CSV 公式注入防护：文本单元格以危险字符开头时加前导单引号。
+
+    数值（int/float/bool/None）原样写出——负数本来就要以 ``-`` 开头，加引号会把它
+    变成文本，回灌时类型就错了。文本既查首字符，也查「前导空白 + 危险字符」，
+    以及制表符/回车/换行开头这些变体。
+    """
+    if value is None or isinstance(value, (int, float, bool)):
+        return value
+    text = str(value)
+    stripped = text.lstrip()
+    if text[:1] in _CSV_DANGEROUS_PREFIXES or stripped[:1] in _CSV_DANGEROUS_PREFIXES:
+        return "'" + text
+    return text
+
+
 def export_csv(table: str, dest: Path | str) -> Path:
     target = Path(dest)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -263,7 +314,7 @@ def export_csv(table: str, dest: Path | str) -> Path:
         writer = csv.DictWriter(handle, fieldnames=columns, extrasaction="ignore")
         writer.writeheader()
         for row in rows:
-            writer.writerow({column: row.get(column) for column in columns})
+            writer.writerow({column: _csv_safe(row.get(column)) for column in columns})
     return target
 
 
