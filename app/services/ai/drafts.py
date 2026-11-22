@@ -132,6 +132,24 @@ def _parse_date(value: Any, today: date) -> date | None:
         return None
 
 
+def _parse_time(value: Any) -> str:
+    """草稿里的到期时间：只接受 HH:MM / H:MM，其余一律清空。
+
+    模型输出可能带时区、秒或中文（"下午3点"），直接截前 5 个字符会写进 "下午3点"
+    或 "15:00:00" 这类脏值，列表按文本排序、提醒解析都会跟着出错。
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    match = re.fullmatch(r"(\d{1,2}):(\d{2})", text)
+    if not match:
+        return ""
+    hour, minute = int(match.group(1)), int(match.group(2))
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return ""
+    return f"{hour:02d}:{minute:02d}"
+
+
 def _tags(value: Any) -> str:
     if isinstance(value, list):
         items = [str(item).strip() for item in value if str(item).strip()]
@@ -165,7 +183,7 @@ def _normalize(item: dict[str, Any], today: date) -> Draft:
             "title": title[:200],
             "note": str(item.get("note") or "")[:2000],
             "due_date": due,
-            "due_time": str(item.get("due_time") or "")[:5],
+            "due_time": _parse_time(item.get("due_time")),
             "priority": priority,
             "tags": _tags(item.get("tags")),
             "completed": False,
@@ -279,10 +297,19 @@ def save(drafts: list[Draft]) -> list[dict[str, Any]]:
             elif draft.type == "note":
                 created = create(session, Note, **fields)
             elif draft.type == "transaction":
-                account_id = fields.pop("account_id", "") or (account.id if account else "")
-                if not account_id:
-                    draft.reason = "没有可用账户，请先在记账里添加账户"
-                    continue
+                account_id = str(fields.pop("account_id", "") or "")
+                if account_id:
+                    chosen = session.get(Account, account_id)
+                    if chosen is None or chosen.is_deleted:
+                        # 模型给的账户 id 可能不存在（无外键约束），直接落库会变成孤儿交易，
+                        # 报表按账户聚合时静默算错。
+                        draft.reason = "草稿指定的账户不存在，请手动选择账户后再保存"
+                        continue
+                else:
+                    account_id = account.id if account else ""
+                    if not account_id:
+                        draft.reason = "没有可用账户，请先在记账里添加账户"
+                        continue
                 created = create(session, Transaction, account_id=account_id, **fields)
             elif draft.type == "entertainment":
                 created = create(session, Entertainment, **fields)

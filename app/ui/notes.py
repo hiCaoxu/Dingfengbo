@@ -13,6 +13,7 @@ from ..db.models import Note
 from ..db.repo import create, update
 from ..db.session import session_scope
 from ..icons import ACTIONS, ico
+from ..services.covers import is_safe_remote_url
 from ..services.markdown import highlight_lines, inline_spans, parse
 from ..services.sync import mark_pending_write
 from .. import theme as th
@@ -164,17 +165,28 @@ def render_blocks(blocks: list[dict]) -> ft.Control:
         elif kind == "table":
             controls.append(_table(block["header"], block["rows"]))
         elif kind == "image":
-            controls.append(
-                ft.Image(
-                    src=block["src"],
-                    fit=ft.BoxFit.CONTAIN,
-                    border_radius=8,
-                    error_content=ft.Text(
-                        block.get("alt") or "图片加载失败", size=th.FONT_CAPTION,
-                        color=th.TEXT_MUTED,
-                    ),
+            src = str(block.get("src") or "")
+            # 图片行也要过与封面相同的 SSRF 过滤：笔记正文可能来自同步/AI，
+            # 不过滤就会让应用替任意地址发起请求（内网探测、云元数据端点）。
+            if not is_safe_remote_url(src):
+                controls.append(
+                    ft.Text(
+                        f"（已拦截不安全的图片地址：{block.get('alt') or src[:60]}）",
+                        size=th.FONT_CAPTION, color=th.TEXT_MUTED,
+                    )
                 )
-            )
+            else:
+                controls.append(
+                    ft.Image(
+                        src=src,
+                        fit=ft.BoxFit.CONTAIN,
+                        border_radius=8,
+                        error_content=ft.Text(
+                            block.get("alt") or "图片加载失败", size=th.FONT_CAPTION,
+                            color=th.TEXT_MUTED,
+                        ),
+                    )
+                )
         else:
             controls.append(ft.Text(spans=inline_spans(block["text"]), size=13))
     return ft.Column(controls, spacing=10, scroll=ft.ScrollMode.AUTO, expand=True)

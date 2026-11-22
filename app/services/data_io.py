@@ -87,6 +87,9 @@ def export_json(dest: Path | str, tables: list[str] | None = None) -> Path:
 
 
 _DATE_FORMATS = ("%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d", "%Y年%m月%d日", "%d/%m/%Y", "%m/%d/%Y")
+# 日/月与月/日都能解析的那两种写法：11/22/2026 只有月/日成立，05/06/2026 两种都成立
+# 且结果不同——静默按「日/月」解释会把 5 月 6 日读成 6 月 5 日。
+_AMBIGUOUS_DATE_FORMATS = ("%d/%m/%Y", "%m/%d/%Y")
 # 金额列导入时统一量化到分，避免 CSV 里的 0.1 变成二进制浮点后累加出分位误差。
 _MONEY_FIELDS = {"amount", "initial_balance"}
 
@@ -94,8 +97,9 @@ _MONEY_FIELDS = {"amount", "initial_balance"}
 def _coerce_date(value: Any) -> date | None:
     """宽松解析日期：兼容 Excel/本地化导出的 `2026/1/1`、`2026.01.01` 等写法。
 
-    只认常见分隔符与「年月日」；解析不出来返回 None，由调用方决定是跳过还是报错——
-    直接把字符串塞进 Date 列会触发 SQLAlchemy 的 StatementError，整行失败且提示含糊。
+    只认常见分隔符与「年月日」；解析不出来、或者「日/月 vs 月/日」有两种不同结果时
+    返回 None，由调用方决定是跳过还是报错——直接把字符串塞进 Date 列会触发
+    SQLAlchemy 的 StatementError，整行失败且提示含糊。
     """
     text = str(value).strip()
     if not text:
@@ -104,12 +108,19 @@ def _coerce_date(value: Any) -> date | None:
         return date.fromisoformat(text[:10])
     except ValueError:
         pass
+    ambiguous: set[date] = set()
     for fmt in _DATE_FORMATS:
         try:
-            return datetime.strptime(text[:19], fmt).date()
+            parsed = datetime.strptime(text[:19], fmt).date()
         except ValueError:
             continue
-    return None
+        if fmt not in _AMBIGUOUS_DATE_FORMATS:
+            return parsed
+        ambiguous.add(parsed)
+    if len(ambiguous) > 1:
+        logger.warning("日期写法有歧义（日/月 与 月/日 都成立），已拒绝：%s", text)
+        return None
+    return next(iter(ambiguous), None)
 
 
 def _coerce(column, value: Any) -> Any:

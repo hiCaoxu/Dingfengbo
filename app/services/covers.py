@@ -130,8 +130,11 @@ def _blocked_host(host: str) -> bool:
     try:
         infos = socket.getaddrinfo(host, None)
     except OSError:
-        # 解析不了就交给 httpx 按网络错误处理，这里不额外拦截。
-        return False
+        # 解析失败必须按「不安全」处理（fail-closed）：放行等于把「域名解析不出来」
+        # 变成绕过内网校验的通道——攻击者只要让 DNS 解析失败，请求就会被交给下游
+        # 客户端按它自己的解析结果去连。这里宁可拒绝一张封面。
+        logger.warning("封面地址解析失败，按不安全拒绝：%s", host)
+        return True
     for info in infos:
         try:
             ip = ipaddress.ip_address(info[4][0])

@@ -109,7 +109,13 @@ class MarkdownImageTests(unittest.TestCase):
         self.assertEqual(image["alt"], "封面")
 
     def test_preview_renders_ft_image(self) -> None:
-        control = notes.render_blocks(parse("![图](http://h/files/a.jpg)"))
+        # 这里只验证「图片块 → ft.Image」的渲染，SSRF 过滤由
+        # test_external_boundaries.MarkdownImageSafetyTests 单独覆盖；
+        # 否则测试会依赖对 "h" 这个假域名的真实 DNS 解析。
+        from unittest import mock
+
+        with mock.patch.object(notes, "is_safe_remote_url", return_value=True):
+            control = notes.render_blocks(parse("![图](http://h/files/a.jpg)"))
         images_ = [c for c in control.controls if isinstance(c, ft.Image)]
         self.assertEqual(len(images_), 1)
         self.assertEqual(images_[0].src, "http://h/files/a.jpg")
