@@ -297,22 +297,31 @@ def tag_counts(days: int = 365, today: date | None = None) -> list[tuple[str, in
             for tag in _tags(row.tags):
                 counts[tag] += 1
                 sources[tag].add("任务")
-        for row in session.execute(select(Note.tags).where(Note.is_deleted.is_(False))):
+        for row in session.execute(
+            select(Note.tags).where(
+                Note.is_deleted.is_(False),
+                # 窗口口径必须与任务一致：旧实现只给 Todo 加了时间窗，
+                # 笔记标签统计了全部历史，两栏数字对不上。
+                Note.created_at >= datetime.combine(start, time.min),
+            )
+        ):
             for tag in _tags(row.tags):
                 counts[tag] += 1
                 sources[tag].add("笔记")
         for row in session.execute(
             select(Entertainment.kind, Entertainment.status).where(
-                Entertainment.is_deleted.is_(False)
+                Entertainment.is_deleted.is_(False),
+                Entertainment.created_at >= datetime.combine(start, time.min),
             )
         ):
             for tag in (row.kind, row.status):
                 if tag:
                     counts[tag] += 1
                     sources[tag].add("娱乐")
+        # 习惯只作为「来源」标注，不计入标签次数：每加一次 1 再减掉毫无意义，
+        # 旧实现写的是 `counts[row.name] += 0`（死代码）。
         for row in session.execute(select(Habit.name).where(Habit.is_deleted.is_(False))):
-            counts[row.name] += 0
-            sources[row.name].add("习惯")
+            sources[str(row.name)].add("习惯")
     ordered = sorted(counts.items(), key=lambda item: -item[1])
     return [(tag, count, sources[tag]) for tag, count in ordered if count > 0]
 
@@ -347,13 +356,40 @@ def record_title(session: Session, table: str, record_id: str) -> str:
     if model is None:
         return table_label(table)
     obj = session.get(model, record_id)
-    if obj is None:
+    if obj is None or obj.is_deleted:
+        # 软删的行仍能被 get 到：不过滤就会把已删除记录的旧标题显示出来。
         return "（已删除）"
+    return _title_of(table, obj)
+
+
+def _title_of(table: str, obj: Any) -> str:
+    """由已加载的对象取展示标题（record_title / links_for 共用）。"""
     field = _TITLE_FIELDS.get(table, "title")
     value = getattr(obj, field, "") or ""
     if table == "transactions":
         return f"{obj.category or '未分类'} ¥{float(obj.amount or 0):,.2f}" if value == "" else value
     return str(value) or table_label(table)
+
+
+def _load_titles(session: Session, pairs: set[tuple[str, str]]) -> dict[tuple[str, str], str]:
+    """批量取对端标题：按表一次 IN 查询，避免每条关联都 session.get（N+1）。"""
+    by_table: dict[str, set[str]] = defaultdict(set)
+    for table, record_id in pairs:
+        by_table[table].add(record_id)
+    titles: dict[tuple[str, str], str] = {}
+    for table, ids in by_table.items():
+        model = _TITLE_MODELS.get(table)
+        if model is None:
+            for record_id in ids:
+                titles[(table, record_id)] = table_label(table)
+            continue
+        for obj in session.scalars(select(model).where(model.id.in_(ids))):
+            titles[(table, obj.id)] = (
+                "（已删除）" if obj.is_deleted else _title_of(table, obj)
+            )
+        for record_id in ids:
+            titles.setdefault((table, record_id), "（已删除）")
+    return titles
 
 
 def create_link(
@@ -391,25 +427,35 @@ def delete_link(link_id: str) -> None:
 def links_for(table: str, record_id: str) -> list[dict[str, Any]]:
     """某条记录的关联（双向），含对端标题。"""
     with session_scope() as session:
-        rows = session.scalars(
-            select(RecordLink).where(
-                RecordLink.is_deleted.is_(False),
-                ((RecordLink.from_table == table) & (RecordLink.from_id == record_id))
-                | ((RecordLink.to_table == table) & (RecordLink.to_id == record_id)),
+        rows = list(
+            session.scalars(
+                select(RecordLink).where(
+                    RecordLink.is_deleted.is_(False),
+                    ((RecordLink.from_table == table) & (RecordLink.from_id == record_id))
+                    | ((RecordLink.to_table == table) & (RecordLink.to_id == record_id)),
+                )
             )
         )
+        peers = [
+            (
+                (link.to_table if link.from_table == table and link.from_id == record_id
+                 else link.from_table),
+                (link.to_id if link.from_table == table and link.from_id == record_id
+                 else link.from_id),
+            )
+            for link in rows
+        ]
+        # 对端标题按表批量取：逐条 session.get 会让每条关联各来一次查询（N+1）。
+        titles = _load_titles(session, set(peers))
         result = []
-        for link in rows:
-            outgoing = link.from_table == table and link.from_id == record_id
-            peer_table = link.to_table if outgoing else link.from_table
-            peer_id = link.to_id if outgoing else link.from_id
+        for link, (peer_table, peer_id) in zip(rows, peers):
             result.append(
                 {
                     "id": link.id,
                     "table": peer_table,
                     "record_id": peer_id,
                     "label": link.label or table_label(peer_table),
-                    "title": record_title(session, peer_table, peer_id),
+                    "title": titles.get((peer_table, peer_id), "（已删除）"),
                 }
             )
         return result

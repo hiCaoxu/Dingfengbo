@@ -11,6 +11,7 @@ from collections import defaultdict, deque
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -69,6 +70,10 @@ class _ImmutableStaticFiles(StaticFiles):
     def file_response(self, *args, **kwargs):
         response = super().file_response(*args, **kwargs)
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        # 上传内容只做了魔数校验，仍可能被当作 HTML/脚本被浏览器嗅探执行；
+        # 强制按声明类型处理，配合「文件名是摘要」也避免 URL 泄漏后被当页面打开。
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers.setdefault("Content-Security-Policy", "default-src 'none'")
         return response
 
 
@@ -432,9 +437,27 @@ def _image_suffix(data: bytes) -> str:
 
 
 def _public_base(request: Request) -> str:
-    """对外可访问的站点前缀；反向代理/自定义域名时用环境变量覆盖。"""
+    """对外可访问的站点前缀；反向代理/自定义域名时用环境变量覆盖。
+
+    未配置时**不能直接回显请求里的 Host**：Host 由客户端控制，攻击者可以把
+    上传接口的返回值污染成自己的域名（并随记录同步进用户数据）。这里只接受
+    与监听地址一致的 Host，否则回落到服务端自己的地址。
+    """
     configured = os.environ.get("DINGFENGBO_SERVER_PUBLIC_URL", "").strip().rstrip("/")
-    return configured or str(request.base_url).rstrip("/")
+    if configured:
+        return configured
+    host = (request.headers.get("host") or "").strip().lower()
+    allowed = {
+        (os.environ.get("DINGFENGBO_SERVER_PUBLIC_HOST") or "").strip().lower(),
+        f"127.0.0.1:{request.url.port or 8000}",
+        f"localhost:{request.url.port or 8000}",
+    }
+    allowed.discard("")
+    if host in allowed:
+        return str(request.base_url).rstrip("/")
+    # 不信任 Host：用监听地址拼一个固定前缀（反代场景请配置 PUBLIC_URL）。
+    port = request.url.port or 8000
+    return f"http://127.0.0.1:{port}" if port else "http://127.0.0.1"
 
 
 @app.post("/api/upload")
@@ -477,8 +500,13 @@ async def upload(
     name = f"{owner[:12]}-{digest[:24]}{suffix}"
     target = FILES_DIR / name
     if not target.exists():
-        tmp = target.with_suffix(target.suffix + ".tmp")
-        tmp.write_bytes(data)
-        os.replace(tmp, target)
+        # 临时文件名带上进程内唯一后缀：同一张图并发上传时原先共用一个 .tmp，
+        # Windows 下后一个写会被占用句柄顶掉（偶发 PermissionError 500）。
+        tmp = target.with_suffix(target.suffix + f".{uuid4().hex}.tmp")
+        try:
+            tmp.write_bytes(data)
+            os.replace(tmp, target)
+        finally:
+            tmp.unlink(missing_ok=True)
     logger.info("上传图片：%s（%d 字节）", name, len(data))
     return {"url": f"{_public_base(request)}/files/{name}", "name": name}

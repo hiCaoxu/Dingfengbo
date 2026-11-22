@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 
 import flet as ft
 from sqlalchemy import func, select
@@ -118,7 +118,11 @@ def _stat_card(title: str, value: str, accent: bool = False, width: int | None =
 
 
 def _activity_counts(since: date | None = None) -> dict[date, int]:
-    """热力图按日计数，聚合下推 SQL；只统计窗口内的记录。"""
+    """热力图按日计数，聚合下推 SQL；只统计窗口内的记录。
+
+    Todo 的完成时间存的是 naive UTC，要按**本地日期**归档，所以最后一段仍在 Python
+    侧换算——但只取 ``completed_at`` 这一列，不再把整张表的 ORM 对象都加载出来。
+    """
     counts: dict[date, int] = defaultdict(int)
     with session_scope() as session:
         for model in (Diary, Exercise, Diet, Weight, Sleep, Transaction):
@@ -128,13 +132,23 @@ def _activity_counts(since: date | None = None) -> dict[date, int]:
             stmt = stmt.group_by(model.date)
             for day, n in session.execute(stmt):
                 counts[day] += n
-        # Todo 以完成时间计入，需本地时区换算，保留 Python 侧计数。
-        todo_stmt = select(Todo).where(Todo.completed.is_(True), Todo.is_deleted.is_(False))
-        for obj in session.scalars(todo_stmt):
-            if obj.completed_at:
-                day = local_date_from_utc(obj.completed_at)
-                if since is None or day >= since:
-                    counts[day] += 1
+        todo_stmt = select(Todo.completed_at).where(
+            Todo.completed.is_(True),
+            Todo.is_deleted.is_(False),
+            Todo.completed_at.is_not(None),
+        )
+        if since is not None:
+            # 本地窗口起点换算成 UTC 下推过滤（当地时区偏移由系统给出），
+            # 避免为了「窗口内」把历史全部完成记录都读出来。
+            offset = datetime.now().astimezone().utcoffset() or timedelta()
+            utc_start = datetime.combine(since, time.min) - offset
+            todo_stmt = todo_stmt.where(Todo.completed_at >= utc_start)
+        for (completed_at,) in session.execute(todo_stmt):
+            if completed_at is None:
+                continue
+            day = local_date_from_utc(completed_at)
+            if since is None or day >= since:
+                counts[day] += 1
     return counts
 
 

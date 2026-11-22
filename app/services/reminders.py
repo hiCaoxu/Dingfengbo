@@ -16,7 +16,7 @@ from datetime import datetime, time, timedelta
 from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
-from ..db.models import Todo, TodoReminder
+from ..db.models import Todo, TodoReminder, utcnow
 from .dates import parse_hm
 
 logger = logging.getLogger(__name__)
@@ -143,7 +143,7 @@ def collect_due(session: Session, now: datetime | None = None) -> list[dict]:
                     "body": _body(todo, offset),
                 }
             )
-    _prune(session, now)
+    _prune(session)
     return fired
 
 
@@ -160,6 +160,12 @@ def forget(session: Session, todo_id: str, fire_at: datetime) -> None:
     )
 
 
-def _prune(session: Session, now: datetime) -> None:
-    cutoff = now - timedelta(days=PRUNE_DAYS)
+def _prune(session: Session) -> None:
+    """清理过期登记。
+
+    ``TodoReminder.created_at`` 是 naive UTC（模型默认 ``utcnow``），而提醒的
+    ``fire_at`` 用本地时间。旧实现拿本地 ``now`` 去减保留天数再比 UTC 列，
+    UTC+8 下整整偏了 8 小时——过期行会多留半天，清理窗口也一并偏移。
+    """
+    cutoff = utcnow() - timedelta(days=PRUNE_DAYS)
     session.execute(delete(TodoReminder).where(TodoReminder.created_at < cutoff))

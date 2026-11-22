@@ -148,12 +148,22 @@ def _show_completed() -> bool:
 
 
 def _query() -> dict:
-    """一次查回任务与习惯，三栏共用一个后台加载结果。"""
+    """一次查回任务与习惯，三栏共用一个后台加载结果。
+
+    状态过滤下推 SQL：任务表会随使用年限增长，全表加载再在 Python 里按状态过滤，
+    几千条之后切模块就会明显卡顿。模板行只在「已完成/全部」视图里才有意义，
+    未完成视图直接排除。
+    """
+    conditions = [Todo.is_deleted.is_(False)]
+    if _state.status == "未完成":
+        conditions.extend([Todo.completed.is_(False), Todo.is_template.is_(False)])
+    elif _state.status == "已完成":
+        conditions.append(Todo.completed.is_(True))
     with session_scope() as session:
         todos = list(
             session.scalars(
                 select(Todo)
-                .where(Todo.is_deleted.is_(False))
+                .where(*conditions)
                 .order_by(Todo.due_date, Todo.due_time, Todo.id)
             )
         )
