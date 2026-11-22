@@ -14,7 +14,11 @@ if (-not (Test-Path $built)) { throw "PyInstaller did not produce $built" }
 Copy-Item -LiteralPath $built -Destination (Join-Path $appDir "定风波.exe") -Force
 
 # 绿色分发包：整个程序文件夹 + 使用说明，文件名带版本号（版本号唯一来源 app\__init__.py）
-$version = (Select-String -Path (Join-Path "$root\app\__init__.py") -Pattern '__version__\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+# 注意：这里不能用 Join-Path "$root\app\__init__.py"——Join-Path 需要两个参数，
+# 单参数会抛 MissingMandatoryParameter 并让整个脚本中断（历史踩过，见 git log）。
+$versionFile = "$root\app\__init__.py"
+$version = (Select-String -Path $versionFile -Pattern '__version__\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+if (-not $version) { throw "无法从 $versionFile 解析 __version__" }
 $readme = Join-Path $appDir "使用说明.txt"
 @"
 定风波 · 个人工作台 v$version
