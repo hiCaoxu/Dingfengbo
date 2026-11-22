@@ -67,6 +67,13 @@ class OverviewLayoutTests(unittest.TestCase):
         # 竖排卡片要横向拉伸：Column 默认 START 会让卡片缩成文字宽度，右侧留白
         self.assertEqual(stack.horizontal_alignment, ft.CrossAxisAlignment.STRETCH)
         self.assertTrue(all(control.expand == 1 for control in stack.controls))
+        # 卡片正文也要撑满，图标与文字才会在整张卡里居中
+        for entry_card in stack.controls:
+            self.assertEqual(
+                entry_card.content.horizontal_alignment,
+                ft.CrossAxisAlignment.STRETCH,
+                "入口卡正文需要 STRETCH，否则文字贴在左边",
+            )
 
     def test_three_cards_share_one_row_and_equal_height(self) -> None:
         bottom = self.root.controls[3]

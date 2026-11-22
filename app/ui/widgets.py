@@ -24,7 +24,14 @@ def card(
     width: int | float | None = None,
     alignment: ft.Alignment | None = None,
     title_size: int = th.FONT_CARD_TITLE,
+    horizontal_alignment: ft.CrossAxisAlignment | None = None,
 ) -> ft.Container:
+    """统一卡片容器。
+
+    ``horizontal_alignment`` 控制卡片正文 Column 的横向对齐：默认 START（列表类卡片
+    按左对齐排布）；传 STRETCH 时正文会撑满整张卡片宽度——入口类卡片需要它，
+    否则正文只有文字那么宽、贴在左边，卡片右侧空一截。
+    """
     header: list[ft.Control] = []
     if title:
         header.append(
@@ -49,7 +56,13 @@ def card(
     # expand 必须一路传给内层 Column：否则卡片高度撑满了，内部带 expand 的
     # 列表/滚动区拿不到高度，Flet 会渲染成一块空白。
     return ft.Container(
-        content=ft.Column(body, spacing=12, tight=not fills, expand=True if fills else None),
+        content=ft.Column(
+            body,
+            spacing=12,
+            tight=not fills,
+            expand=True if fills else None,
+            horizontal_alignment=horizontal_alignment or ft.CrossAxisAlignment.START,
+        ),
         bgcolor=th.CARD,
         border=th.card_border(),
         border_radius=th.CARD_RADIUS,

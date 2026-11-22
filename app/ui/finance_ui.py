@@ -192,6 +192,8 @@ def _render_overview(page: ft.Page, refresh, data) -> ft.Control:
             ),
             on_click=lambda e: _go(page, refresh, target),
             expand=1,
+            # 正文撑满卡片，图标与两行文字才会在整张卡里居中
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         )
 
     # 收支记录 / 账户列表：两张入口卡上下排列，紧接在「收支趋势」右侧，
