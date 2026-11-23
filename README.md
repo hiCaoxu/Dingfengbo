@@ -4,7 +4,7 @@
 
 | 项目 | 说明 |
 |---|---|
-| 版本 | 1.2.0 |
+| 版本 | 1.2.2 |
 | 运行环境 | Windows 10/11；源码运行需 Python 3.11 |
 | 技术栈 | Flet（Flutter 渲染）+ SQLAlchemy 2.x + SQLite；同步服务端 FastAPI |
 | 数据目录 | `D:\Data\Dingfengbo\`（与程序目录分离，替换升级不丢数据） |
@@ -27,7 +27,7 @@
 
 ## 快速开始
 
-**绿色版**：解压 `定风波-v1.2.0.zip`，双击 `定风波.exe`。`_internal\` 必须与 exe 同目录，只拷 exe 会启动失败。
+**绿色版**：解压 `定风波-v1.2.2.zip`，双击 `定风波.exe`。`_internal\` 必须与 exe 同目录，只拷 exe 会启动失败。
 
 **源码运行**：
 
@@ -69,7 +69,9 @@ python main.py
 - **本地优先**：写操作先落 SQLite 再进待同步队列，界面不等网络。
 - **触发**：启动一次、每 5 分钟、本地写入后 10 秒，以及顶栏「立即同步」。
 - **接口**：`POST /api/sync/pull`、`POST /api/sync/push`、`GET /api/sync/check`、`GET /api/health`、`POST /api/upload`；Bearer token 鉴权，服务端按 `owner_id` 隔离数据。
-- **冲突**：按 `updated_at` 最后写入获胜（LWW）；删除为软删除，同步完成后再物理清理。被丢弃的远端旧版本记入 `sync_conflicts`（不参与同步），在「同步明细 → 冲突」核对。
+- **冲突**：按 `updated_at` 最后写入获胜（LWW）；删除为软删除，同步完成后再物理清理。被丢掉的那一版正文记入 `sync_conflicts.discarded_payload`（不参与同步），在「同步明细 → 冲突」核对，并可「恢复这一版」（恢复后重新进入待同步队列）。
+- **拉取失败**：字段非法的记录跳过并记入同步问题，游标继续前进。数据库锁、磁盘错误这类瞬时失败会整页回滚，**不推进游标**，下一轮再拉同一页。
+- **服务端白名单**：设置环境变量 `DINGFENGBO_SYNC_TOKEN`（或逗号分隔的 `DINGFENGBO_SYNC_TOKENS`）后，不在名单里的令牌直接 401，不会再开出新租户。`deploy.ps1` 会把本机设置里的令牌写到服务器 `.env`（权限 600）。未配置时仍接受任意令牌，只适合本机调试。同步请求体上限 8MB，上传仍是 12MB；pull / push / upload / check 另有按 IP 的每分钟 120 次限流。
 - **序列**：服务端用全局单调递增的 `sync_seq` 发号，客户端以 `sync_seq > cursor` 增量拉取。升级已有数据的服务端库时会把计数器锚定到存量最大值；自检可跑 `python scripts/check_sync_sequence.py <cloud.db 路径>`。
 - **队列可见性**：顶栏在有待同步/失败记录时显示「待同步 N · 失败 M」（单条 `UNION ALL` 聚合，不额外往返）。点击打开「同步明细」：单条重试/忽略、看冲突、同步历史、本机设备、按模块选择性同步（未勾选模块的游标不推进，重新勾选会补拉历史）。
 - **被拒记录**：push 校验失败由服务端回传 `table`/`id`/`reason`，本地标 `error` 退出队列不再无限重推；原因存 `sync_issues`，设置页列出「哪张表 / 哪条记录 / 为什么」，点「全部重试」放回队列；重新编辑该记录也会自动回到 `pending`。
@@ -114,9 +116,9 @@ app/
   ui/                各模块页面与弹窗
 server/main.py       同步服务端（FastAPI）
 docker/              Dockerfile、compose、Caddyfile、deploy.ps1
-packaging/           PyInstaller spec、build.ps1、字体子集化
+packaging/           PyInstaller spec、build.ps1
 scripts/             运维脚本（同步序列自检等）
-tests/               65 个测试文件
+tests/               单元测试（pytest）
 ```
 
 约定：
@@ -134,7 +136,7 @@ tests/               65 个测试文件
 - **注释**：模块/函数用中文 docstring 讲**为什么**（LWW 决胜、时间戳方向、金额单位边界、
   SQLite 怪癖这类反直觉处必须写），不复述代码在做什么；改到这些地方时顺手补一句，
   比事后集中补注释更省力。
-- 界面文案新增生僻字会影响字体子集，改完跑 `python packaging\subset_font.py`（见下）。
+- 界面文案的字形由系统字体提供（Segoe UI / 微软雅黑 UI），不再有字体子集与随包字体。
 - 金额：库里存**整数分**（`models.MoneyCents` 类型装饰器，写元读元），同步载荷与 CSV/JSON 导出仍是「元」——旧客户端按元推送不会被读成 1/100；`app/services/money.py` 统一 Decimal 舍入与比较。迁移由 `PRAGMA user_version` 保证只执行一次。
 - 已知技术债：Caddy TLS 仅文档就绪，未在真实域名生产演练。
 
@@ -146,7 +148,7 @@ tests/               65 个测试文件
 
 产物在 `dist\`：
 
-- `Dingfengbo\`：PyInstaller **onedir** 产物，含 `定风波.exe` / `Dingfengbo.exe`、`_internal\`（Python 运行时、Flet 客户端、字体）与 `使用说明.txt`。
+- `Dingfengbo\`：PyInstaller **onedir** 产物，含 `定风波.exe` / `Dingfengbo.exe`、`_internal\`（Python 运行时、Flet 客户端）与 `使用说明.txt`。
 - `定风波-v{版本号}.zip`：上面的整个文件夹，版本号读自 `app/__init__.py` 的 `__version__`。
 
 分发要点：
@@ -158,16 +160,13 @@ tests/               65 个测试文件
 - 用 onedir 而非 onefile：onefile 每次启动都要解压全部内容到临时目录，冷启动慢且易被杀软拦；代价是发布物变成文件夹。
 - exe 带版本资源，右键属性可见版本号。
 
-### 字体子集化
+### 字体
 
-`assets\fonts` 里是裁过的霞鹜文楷（18.42MB → 3.46MB，7727 个字形），不是全量字体：
-
-- 范围 = ASCII / Latin-1 / 通用与 CJK 标点 / 全角 + **GB2312 全集**（6763 汉字）+ 源码与 README 实际出现的所有字符 + `EXTRA_CHARS` 手工补充字。
-- 全量原字体在 `packaging\fonts\`（不进包，仅供重新子集化）。
-- 重新生成：`python packaging\subset_font.py`；只校验缺字与体积上限：`--check`。
-- GB2312 之外的生僻字不会被裁掉，由 Flutter 回退系统字体渲染（字形不同但可读）；要固定成文楷就把字加进 `EXTRA_CHARS` 重跑脚本。
-- `tests\test_font_subset.py` 反查 cmap，确保代码里出现过的字一个不缺。
-- 许可：霞鹜文楷为 SIL OFL 1.1，`assets\fonts\OFL.txt` 随包分发；子集由原字体直接生成，字体内部的版权与许可字段完整保留。
+界面不随包分发字体：西文用系统自带的 **Segoe UI**，中文由 Flutter 回退到 **微软雅黑 UI**
+（`app/theme.py` 的 `FONT_LATIN` / `FONT_FALLBACK`，在 `theme.apply_fonts()` 里注入所有
+`Text`/`TextStyle`）。早先随包分发过霞鹜文楷（子集 3.6MB + 一套子集化脚本），现在已移除：
+系统字体在高分屏下更锐利，也省掉字体文件与打包步骤。要再换成别的字体，改这两个常量即可
+（可执行文件 / 其他系统上没有该字体时会继续回退到系统默认字体）。
 
 ## 服务端部署
 
@@ -222,6 +221,6 @@ docker compose --profile tls up -d
 
 ## 许可与致谢
 
-- 界面字体：[霞鹜文楷](https://github.com/lxgw/LxgwWenKai)，SIL Open Font License 1.1，许可证见 `assets\fonts\OFL.txt`。
+- 界面字体：系统自带的 Segoe UI（西文）+ 微软雅黑 UI（中文），不随包分发字体文件。
 - 代码字体：Consolas（系统自带）。
 - 农历换算：[zhdate](https://github.com/CutePandaSh/zhdate)。

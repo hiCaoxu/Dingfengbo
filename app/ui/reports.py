@@ -25,9 +25,6 @@ logger = logging.getLogger(__name__)
 
 EXPORT_DIR = DATA_DIR / "exports"
 
-# 同行卡片统一高度：内容多少不同也不会一张高一张矮。
-_ROW_H = 176
-
 
 def _metric(title: str, value: str, hint: str = "", color: str | None = None) -> ft.Control:
     return ft.Column(
@@ -38,16 +35,17 @@ def _metric(title: str, value: str, hint: str = "", color: str | None = None) ->
             ft.Text(hint, size=th.FONT_CAPTION, color=th.TEXT_MUTED, max_lines=1,
                     overflow=ft.TextOverflow.ELLIPSIS, tooltip=hint or None),
         ],
-        spacing=2,
+        spacing=1,
         tight=True,
     )
 
 
-def _section_row(items: list[ft.Control], spacing: int = 18) -> ft.Row:
+def _section_row(items: list[ft.Control], spacing: int = 14) -> ft.Row:
+    # 一行三张卡后卡片变窄，指标会换行：行间距收紧一点，把高度留给内容。
     return ft.Row(
         items,
         spacing=spacing,
-        run_spacing=8,
+        run_spacing=4,
         wrap=True,
         vertical_alignment=ft.CrossAxisAlignment.START,
     )
@@ -105,12 +103,11 @@ def _render(page: ft.Page, refresh, report: dict) -> ft.Control:
                     overflow=ft.TextOverflow.ELLIPSIS,
                 ),
             ],
-            spacing=10,
+            spacing=8,
             scroll=ft.ScrollMode.AUTO,
         ),
         title="任务",
-        expand=2,
-        height=_ROW_H,
+        expand=1,
     )
 
     diary_card = card(
@@ -127,12 +124,11 @@ def _render(page: ft.Page, refresh, report: dict) -> ft.Control:
                     overflow=ft.TextOverflow.ELLIPSIS,
                 ),
             ],
-            spacing=10,
+            spacing=8,
             scroll=ft.ScrollMode.AUTO,
         ),
         title="记录",
         expand=1,
-        height=_ROW_H,
     )
 
     health_card = card(
@@ -162,7 +158,6 @@ def _render(page: ft.Page, refresh, report: dict) -> ft.Control:
         ),
         title="健康",
         expand=1,
-        height=_ROW_H,
     )
 
     finance_card = card(
@@ -194,12 +189,11 @@ def _render(page: ft.Page, refresh, report: dict) -> ft.Control:
                     overflow=ft.TextOverflow.ELLIPSIS,
                 ),
             ],
-            spacing=10,
+            spacing=8,
             scroll=ft.ScrollMode.AUTO,
         ),
         title="财务",
-        expand=2,
-        height=_ROW_H,
+        expand=1,
     )
 
     fun_lines = list(fun["finished"]) + [f"在看：{title}" for title in fun["watching"]]
@@ -222,7 +216,6 @@ def _render(page: ft.Page, refresh, report: dict) -> ft.Control:
         ),
         title="阅读与娱乐",
         expand=1,
-        height=_ROW_H,
     )
 
     habit_card = card(
@@ -242,7 +235,6 @@ def _render(page: ft.Page, refresh, report: dict) -> ft.Control:
         ),
         title="习惯",
         expand=1,
-        height=_ROW_H,
     )
 
     narrative_text = ft.Text(
@@ -329,6 +321,10 @@ def _render(page: ft.Page, refresh, report: dict) -> ft.Control:
         title=f"{report['period_label']} AI 总结",
     )
 
+    # 布局：AI 总结通栏在上，下面两行、每行三张卡。
+    # 两行都带 expand：整页按窗口高度瓜分剩余空间（不再固定 176 高、页面滚动），
+    # 窗口越大卡片越高；上一行三张卡的指标会换行、内容更高，所以多分一点高度
+    # （5:4）。内容超长时在卡片内部滚动。
     return ft.Column(
         [
             page_header(
@@ -337,13 +333,11 @@ def _render(page: ft.Page, refresh, report: dict) -> ft.Control:
                 actions=[period_tabs],
             ),
             ai_card,
-            equal_height_row([todo_card, diary_card], spacing=12, height=_ROW_H),
-            equal_height_row([health_card, finance_card], spacing=12, height=_ROW_H),
-            equal_height_row([fun_card, habit_card], spacing=12, height=_ROW_H),
+            equal_height_row([todo_card, diary_card, health_card], spacing=12, expand=5),
+            equal_height_row([finance_card, fun_card, habit_card], spacing=12, expand=4),
         ],
         spacing=8,
         expand=True,
-        scroll=ft.ScrollMode.AUTO,
     )
 
 

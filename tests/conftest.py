@@ -13,6 +13,9 @@ import tempfile
 
 _TMP_DIR = tempfile.mkdtemp(prefix="dingfengbo-tests-")
 os.environ["DINGFENGBO_DATA_DIR"] = _TMP_DIR
+# 开发机上如果导出了同步令牌，服务端会进入白名单模式，单测用的任意 Bearer 会全部 401。
+os.environ.pop("DINGFENGBO_SYNC_TOKEN", None)
+os.environ.pop("DINGFENGBO_SYNC_TOKENS", None)
 
 
 @atexit.register

@@ -127,12 +127,13 @@ class PurgeMark(Base):
     墓碑被物理清理后，「这条记录曾经存在、且已被删除」的知识就彻底消失了：离线超过
     保留窗口的设备再来推送时，服务端看到的是一个「不存在的 id」，会把它当成新记录
     插回去——已删除的数据被复活。记下清理时的截止时间后，服务端可以拒绝这类
-    「比墓碑还老」的推送，要求对方先全量重拉。``owner_id="*"`` 表示全局一条。
+    「比墓碑还老」的推送，要求对方先全量重拉。水位按 ``owner_id``（令牌摘要，64 位
+    十六进制）各记一条；历史库里的 ``owner_id="*"`` 仍作为全局兜底读取。
     """
 
     __tablename__ = "purge_marks"
 
-    owner_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     purged_before: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     purged_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     purged_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -374,8 +375,8 @@ class SyncIssue(Base):
 class SyncConflict(Base):
     """同步冲突记录（本地辅助表，不参与同步）。
 
-    LWW 合并时远端版本更旧、本次拉取被丢弃，就记一条，供「同步明细 → 冲突」
-    展示与人工核对；同一记录只保留最近一次，避免长期使用时无限膨胀。
+    LWW 合并时败方正文写入 ``discarded_payload``，供「同步明细 → 冲突」核对并恢复。
+    同一记录只保留最近一次，避免长期使用时无限膨胀。
     """
 
     __tablename__ = "sync_conflicts"
@@ -386,6 +387,8 @@ class SyncConflict(Base):
     local_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     remote_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    # 被丢掉的那一版业务字段（JSON）。空串表示这次冲突没有可恢复的正文。
+    discarded_payload: Mapped[str] = mapped_column(Text, default="")
 
 
 class TodoReminder(Base):

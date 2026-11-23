@@ -6,7 +6,6 @@ import asyncio
 import logging
 import threading
 from datetime import date, datetime
-from pathlib import Path
 
 import flet as ft
 
@@ -31,14 +30,12 @@ from .ui import todo
 from .ui.command_palette import open_command_palette
 from .ui.forms import open_settings_dialog
 from .ui.scheduler import bind as bind_sync
+from .ui.state import sync_today
 from .ui.sync_detail import open_sync_detail
 from .ui import theme_switch
 from .ui.widgets import icon_button
 
 logger = logging.getLogger(__name__)
-
-# assets 用绝对路径：打包后工作目录可能不是项目根
-ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
 
 # 全部可用模块；实际顺序与显隐由设置里的 module_order / hidden_modules 决定。
 MODULES = [
@@ -164,8 +161,8 @@ def main(page: ft.Page) -> None:
     page.window.bgcolor = th.BG
     # 隐藏系统标题栏，改用自定义标题栏（可拖动 + 最小化/最大化/关闭按钮）
     page.window.title_bar_hidden = True
-    # 中文霞鹜文楷 + 外文 Consolas（见 theme.apply_fonts）
-    th.apply_fonts(page)
+    # 界面字体：外文 Segoe UI + 中文微软雅黑 UI（系统自带，见 theme.apply_fonts）
+    th.apply_fonts()
     # 显式给出明/暗两套 Material 主题并联动 theme_mode：否则输入框、下拉菜单、
     # 弹窗背景始终停在浅色 scheme，暗色下会「白花花一片」且浅色文字看不清。
     page.theme = th.build_theme()
@@ -484,6 +481,9 @@ def main(page: ft.Page) -> None:
 
     def refresh(force: bool = True) -> None:
         _refresh_clock_texts()
+        # 常驻过夜：把首页年份、日记选中日期/月历这些「按启动日固化」的状态
+        # 推进到今天，否则刷新后仍停在昨天的日期。
+        sync_today()
         current = state["current"]
         if not force and current == "note_preview":
             # 后台同步完成不做整页重建：编辑页被重建会用控件初值覆盖正在输入的内容。
@@ -609,11 +609,10 @@ def main(page: ft.Page) -> None:
 
 
 def run() -> None:
-    # assets 里放霞鹜文楷字体，必须用绝对路径注册，否则换工作目录就找不到
     if hasattr(ft, "run"):
-        ft.run(main, assets_dir=str(ASSETS_DIR))
+        ft.run(main)
     else:
-        ft.app(target=main, assets_dir=str(ASSETS_DIR))
+        ft.app(target=main)
 
 
 if __name__ == "__main__":

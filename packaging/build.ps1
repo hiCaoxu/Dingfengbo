@@ -1,10 +1,35 @@
 ﻿# Build Windows app: PyInstaller onedir -> dist\Dingfengbo\ (Dingfengbo.exe + 定风波.exe + _internal\)
 $ErrorActionPreference = "Stop"
+# 本脚本可能在 Windows PowerShell 5.1 下运行，它会把「原生命令写到 stderr 的提示」
+# 当成终止错误——pip 一句「有新版本可用」就能让整个构建中断（历史踩过）。
+# 因此调用外部命令期间临时放宽 ErrorActionPreference，改为显式检查退出码。
+# PS 7.3+ 额外有这个同名开关，设了也无害。
+$PSNativeCommandUseErrorActionPreference = $false
+
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
-python -m pip install -r requirements.txt
-python -m PyInstaller --clean --noconfirm "packaging\dingfengbo.spec"
+function Invoke-Native {
+    param(
+        [Parameter(Mandatory = $true)][string]$What,
+        [Parameter(Mandatory = $true)][string]$Exe,
+        [Parameter(Mandatory = $true)][string[]]$ArgList
+    )
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $Exe @ArgList
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    $code = $LASTEXITCODE
+    if ($code -ne 0) { throw "$What 失败（exit $code）" }
+}
+
+Invoke-Native -What "pip install" -Exe "python" `
+    -ArgList @("-m", "pip", "install", "-r", "requirements.txt")
+Invoke-Native -What "PyInstaller" -Exe "python" `
+    -ArgList @("-m", "PyInstaller", "--clean", "--noconfirm", "packaging\dingfengbo.spec")
 
 $appDir = Join-Path "$root\dist" "Dingfengbo"
 $built = Join-Path $appDir "Dingfengbo.exe"

@@ -156,9 +156,14 @@ class HabitTests(unittest.TestCase):
         self.assertEqual(habit_service.streak(days, today), 2)
 
     def test_week_count_uses_calendar_week(self) -> None:
-        today = date.today()
+        # 固定日期而不是 date.today()：今天是周一时 week_start 与 today 是同一天，
+        # {start, today} 只会算成 1 次，用例就会随星期几随机失败。
+        today = date(2026, 11, 21)  # 周六
         start = today - timedelta(days=today.weekday())
-        self.assertEqual(habit_service.week_count({start, today}, today), 2)
+        self.assertEqual(start, date(2026, 11, 16))  # 本周一
+        # 11-15（上周日）落在「最近 7 天」里，但不属于本周历周，必须被排除。
+        days = {start, today, start - timedelta(days=1)}
+        self.assertEqual(habit_service.week_count(days, today), 2)
 
     def test_check_in_is_idempotent(self) -> None:
         habit_id = self.ids["habit_id"]

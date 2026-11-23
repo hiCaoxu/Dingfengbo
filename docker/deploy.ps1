@@ -11,6 +11,7 @@ param(
     [Parameter(Mandatory = $true)][string]$HostIp,
     [string]$User = "root",
     [string]$RemoteDir = "/opt/dingfengbo-sync",
+    [string]$SyncToken = "",
     [int]$Retries = 4
 )
 
@@ -103,7 +104,7 @@ if [ -z "$DINGFENGBO_PIP_INDEX" ]; then
   fi
 fi
 echo "pip index: ${DINGFENGBO_PIP_INDEX:-https://pypi.org/simple}"
-docker compose -f docker/docker-compose.yml up -d --build
+docker compose --env-file .env -f docker/docker-compose.yml up -d --build
 for i in $(seq 1 30); do
   curl -fsS http://127.0.0.1:8000/api/health >/dev/null 2>&1 && echo health-ready && break
   sleep 1
@@ -114,6 +115,27 @@ curl -fsS http://127.0.0.1:8000/api/health
 # Image tag follows app/__init__.py __version__ (single source of truth), so the
 # running container is always traceable to a release number.
 $appVersion = (Select-String -Path "app/__init__.py" -Pattern '__version__\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+
+# Token allowlist: the server rejects every bearer that is not this value.
+# Read it from this machine's settings when -SyncToken was not passed. The value
+# is written to a remote .env (mode 600) and is never printed.
+if (-not $SyncToken) {
+    $SyncToken = (& python -c "from app.config import load_settings; print(load_settings().get('sync_token',''), end='')" | Out-String).Trim()
+}
+if (-not $SyncToken) {
+    throw "Sync token is empty. Pass -SyncToken or configure it in the desktop app settings."
+}
+$envLocal = Join-Path $env:TEMP ("dingfengbo-sync-" + [guid]::NewGuid().ToString("n") + ".env")
+$escaped = $SyncToken.Replace('\', '\\').Replace('"', '\"')
+$envBody = 'DINGFENGBO_SYNC_TOKEN="' + $escaped + '"' + "`n"
+$utf8 = New-Object System.Text.UTF8Encoding $false
+[System.IO.File]::WriteAllText($envLocal, $envBody.Replace("`r`n", "`n").Replace("`r", ""), $utf8)
+try {
+    Send-Files $envLocal "$RemoteDir/.env" "copy-env"
+} finally {
+    Remove-Item -LiteralPath $envLocal -Force -ErrorAction SilentlyContinue
+}
+Invoke-Remote "chmod 600 '$RemoteDir/.env' && echo env-ready" "chmod-env"
 # Use string replacement instead of PowerShell's -f operator: -f collapses
 # {{.Status}} into {.Status}, which breaks docker's --format argument.
 $deploy = $deploy.Replace("__REMOTE_DIR__", $RemoteDir).Replace("__VERSION__", $appVersion)

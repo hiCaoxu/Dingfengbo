@@ -52,8 +52,12 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(categories["餐饮"]["actual"], 32.5)
 
     def test_habit_and_entertainment_sections(self) -> None:
-        report = build_report("week", date.today())
-        self.assertEqual(report["habit"]["checkins"], 2)
+        today = date.today()
+        start, _ = range_of("week", today)
+        report = build_report("week", today)
+        # seed 写入的是「今天」和「昨天」；周一运行时昨天属于上一周，本周只剩
+        # 今天这 1 次，硬编码 2 会随星期几随机失败。
+        self.assertEqual(report["habit"]["checkins"], 2 if start < today else 1)
         self.assertIn("电影测试", report["entertainment"]["watching"])
 
     def test_markdown_contains_core_sections(self) -> None:

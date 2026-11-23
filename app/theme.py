@@ -162,23 +162,23 @@ def icon_size() -> int:
 
 
 # ---------------------------------------------------------------- 字体
-# 中文用「霞鹜文楷」，外文用「Consolas」。
-# Flutter 只在主字体缺字形时才走 font_family_fallback，所以主字体必须是没有
-# 中文字形的 Consolas，中文回退到随包分发的霞鹜文楷（assets/fonts）。
-FONT_LATIN = "Consolas"
-FONT_CJK = "LXGW WenKai"
-# 相对 ft.run(assets_dir=...) 的路径
-FONT_CJK_ASSET = "fonts/LXGWWenKai-Regular.ttf"
-FONT_FALLBACK = [FONT_CJK]
+# 界面直接用系统字体：西文 Segoe UI，中文回退微软雅黑 UI（Windows 10/11 自带）。
+# 早先随包分发过霞鹜文楷（3.6MB 子集 + 一套子集化脚本），但系统字体在高分屏下
+# 更锐利、字形也更统一，还省掉字体文件与打包步骤，于是改回系统字体。
+# Flutter 只在主字体缺字形时才走 font_family_fallback，Segoe UI 没有中文字形，
+# 中文按下面的顺序回退。
+FONT_LATIN = "Segoe UI"
+FONT_CJK = "Microsoft YaHei UI"
+FONT_FALLBACK = [FONT_CJK, "Microsoft YaHei", "SimHei"]
 
 _FONT_PATCHED = False
 
 
-def apply_fonts(page: ft.Page) -> None:
-    """注册霞鹜文楷，并把「外文 Consolas + 中文霞鹜」注入所有文本控件。"""
-    fonts = dict(page.fonts or {})
-    fonts[FONT_CJK] = FONT_CJK_ASSET
-    page.fonts = fonts
+def apply_fonts() -> None:
+    """把「外文 Segoe UI + 中文微软雅黑 UI」注入所有文本控件。
+
+    页面不再注册 ``page.fonts``：全部用系统已装字体。
+    """
     _patch_control_fonts()
 
 

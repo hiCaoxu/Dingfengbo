@@ -19,6 +19,7 @@ from ..db.repo import (
     ignore_issue,
     list_conflicts,
     list_error_records,
+    restore_conflict,
     retry_issue,
     sync_queue_stats,
 )
@@ -187,7 +188,7 @@ def open_sync_detail(page: ft.Page, refresh_status=None) -> ft.AlertDialog:
         conflicts = data.get("conflicts") or []
         controls: list[ft.Control] = [
             ft.Text(
-                "同步冲突：远端版本比本地旧，本地获胜并保留了冲突记录，供人工核对。",
+                "同步冲突：被盖掉的那一版留在这里。可以恢复（恢复后会重新同步），或只作核对。",
                 size=th.FONT_CAPTION,
                 color=th.TEXT_MUTED,
             )
@@ -229,6 +230,12 @@ def open_sync_detail(page: ft.Page, refresh_status=None) -> ft.AlertDialog:
                                 expand=True,
                                 tight=True,
                             ),
+                            ft.TextButton(
+                                "恢复这一版",
+                                disabled=not row.get("restorable"),
+                                tooltip="写回被盖掉的内容，并在下次同步时推送",
+                                on_click=lambda e, cid=row.get("conflict_id"): do_restore(cid),
+                            ),
                         ],
                         spacing=6,
                     ),
@@ -237,6 +244,26 @@ def open_sync_detail(page: ft.Page, refresh_status=None) -> ft.AlertDialog:
                     border_radius=8,
                 )
             )
+
+        def do_restore(conflict_id) -> None:
+            if not conflict_id:
+                snack(page, "这条冲突没有留下可恢复的内容", th.DANGER)
+                return
+            try:
+                with session_scope() as session:
+                    title = restore_conflict(session, conflict_id)
+            except ValueError as exc:
+                snack(page, str(exc), th.DANGER)
+                return
+            except Exception:
+                logger.exception("恢复冲突失败")
+                snack(page, "恢复失败，请稍后重试", th.DANGER)
+                return
+            mark_pending_write()
+            snack(page, f"已恢复「{title}」，将在下次同步推送", th.PRIMARY)
+            if refresh_status:
+                refresh_status()
+            reload()
 
         def clear(_) -> None:
             with session_scope() as session:

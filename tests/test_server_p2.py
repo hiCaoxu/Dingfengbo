@@ -200,7 +200,16 @@ class UploadSizeGuardTests(unittest.TestCase):
     def test_other_paths_are_untouched(self) -> None:
         too_big = str(13 * 1024 * 1024).encode()
         start, body, called = self._run(
-            "/api/sync/push", [(b"content-length", too_big)], [b"{}"]
+            "/api/health", [(b"content-length", too_big)], [b"{}"]
         )
         self.assertTrue(called)
         self.assertEqual(start.get("status"), 200)
+
+    def test_sync_push_over_8mb_is_rejected(self) -> None:
+        too_big = str(9 * 1024 * 1024).encode()
+        start, body, called = self._run(
+            "/api/sync/push", [(b"content-length", too_big)], [b"{}"]
+        )
+        self.assertEqual(start.get("status"), 413)
+        self.assertFalse(called)
+        self.assertIn("8MB", body.decode("utf-8"))

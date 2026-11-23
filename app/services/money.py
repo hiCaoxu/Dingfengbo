@@ -91,7 +91,8 @@ def cents(value: object) -> int:
 def from_cents(value: object) -> Decimal:
     """整数分 → Decimal「元」。
 
-    SQL 的 ``SUM(金额列)`` 拿到的是**分**（列里就是这么存的），聚合后必须经过这里
-    换算回元，否则整条链路会大 100 倍。
+    只给 ``MoneyCents.process_result_value`` 用：那里读到的是库里的原始整数分。
+    ``func.sum(金额列)`` 的结果会再走一遍类型装饰器，已经是「元」，业务代码用
+    ``to_decimal`` 即可，不要再套 ``from_cents``。
     """
     return Decimal(int(to_decimal(value))) / 100

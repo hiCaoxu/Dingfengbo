@@ -16,6 +16,8 @@ packaging/version_info.txt
 *.db-shm
 *.log
 *.tmp
+.env
+docker/.env
 .vscode/
 .idea/
 .codebuddy/

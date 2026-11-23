@@ -11,9 +11,10 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 import httpx
+from sqlalchemy.exc import OperationalError
 
 from ..config import DEFAULT_SERVER_URL, load_settings, save_settings
-from ..db.models import utcnow
+from ..db.models import MODEL_BY_TABLE, utcnow
 from ..logging_setup import safe_url
 from ..db.repo import (
     _record_issue,
@@ -23,6 +24,7 @@ from ..db.repo import (
     pending_changes,
     purge_deleted,
     record_superseded,
+    serialize,
     sync_queue_stats,
 )
 from ..db.session import session_scope
@@ -69,18 +71,32 @@ def _parse_iso(value: Any) -> datetime | None:
         return None
 
 
+class SyncPaused(Exception):
+    """同步在应用本页结果前被暂停：这一页不能写库，也不能推进游标。"""
+
+
 def _remember_superseded(session, item: dict) -> None:
-    """把「云端版本更新、本次推送被丢弃」写进本地冲突表，用户可在同步明细里核对。"""
+    """把「云端版本更新、本次推送被丢弃」写进本地冲突表，用户可在同步明细里核对。
+
+    出队时把还在本地的正文存进冲突记录。下一轮拉取会按 LWW 覆盖，不留底就找不回。
+    """
     table = str(item.get("table") or "")
     record_id = str(item.get("id") or "")
     if not table or not record_id:
         return
+    discarded = None
+    model = MODEL_BY_TABLE.get(table)
+    if model is not None:
+        obj = session.get(model, record_id)
+        if obj is not None:
+            discarded = serialize(obj)["data"]
     record_superseded(
         session,
         table,
         record_id,
         _parse_iso(item.get("local_updated_at")),
         _parse_iso(item.get("remote_updated_at")),
+        discarded=discarded,
     )
 
 
@@ -267,8 +283,9 @@ class SyncClient:
         if _auto_pause.is_set():
             # 暂停可能发生在「本页请求已发出、响应还没回来」的窗口里（一次请求最多 10s）。
             # 恢复备份会把整库替换掉，此时再写就是往别人的库里灌数据，直接放弃本页。
+            # 抛出而不是返回 0：调用方据此不写游标，否则本页被丢掉的记录再也不会拉到。
             self._log(logging.INFO, "同步已暂停，丢弃本页 %d 条拉取结果", len(changes))
-            return 0
+            raise SyncPaused()
         failed = 0
         with session_scope() as session:
             for change in changes:
@@ -277,6 +294,10 @@ class SyncClient:
                 try:
                     with session.begin_nested():
                         apply_remote(session, [change], owner_id="local")
+                except (OperationalError, OSError):
+                    # 锁冲突、磁盘满：整页回滚，交给 _pull 停止并保留游标。
+                    logger.warning("拉取写入瞬时失败，本页回滚：%s/%s", table, data.get("id"))
+                    raise
                 except Exception as exc:
                     failed += 1
                     record_id = str(data.get("id") or "")
@@ -323,7 +344,14 @@ class SyncClient:
                     change for change in raw_changes
                     if str(change.get("table")) in selected
                 ]
-            self._apply_page(remote_changes)
+            try:
+                self._apply_page(remote_changes)
+            except SyncPaused:
+                self._log(logging.INFO, "同步已暂停，本页游标不推进")
+                return
+            except (OperationalError, OSError):
+                self._log(logging.WARNING, "拉取写入遇到瞬时错误，本页游标不推进")
+                raise
             pages += 1
             self.last_pull_count += len(remote_changes)
             updates = payload.get("cursors", {})

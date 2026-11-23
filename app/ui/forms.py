@@ -96,6 +96,7 @@ from .widgets import (
     close_modal,
     dropdown,
     form_field,
+    form_row,
     modal,
     primary_button,
     snack,
@@ -781,8 +782,14 @@ def open_transaction_dialog(page: ft.Page, kind: str = "expense", tx: Transactio
     dialog = modal(
         page, "编辑记录" if tx else "新增记录",
         ft.Column(
-            [ft.Row([kind_dd, amount], spacing=12), ft.Row([category, account_dd, to_dd], spacing=12),
-             ft.Row([date_field], spacing=12), note],
+            [
+                form_row(kind_dd, amount, width=640),
+                # 分类与转入账户二选一显示：把「转入账户」放到日期这一行，
+                # 分类/账户才能平分宽度，不会留下一个字段那么宽的空档。
+                form_row(category, account_dd, width=640),
+                form_row(date_field, to_dd, width=640),
+                form_row(note, width=640),
+            ],
             spacing=10, tight=True,
         ),
         [ft.TextButton("取消", on_click=lambda e: _close_and_refresh(page, dialog, None)), primary_button("保存", save)],
@@ -844,8 +851,17 @@ def open_exercise_dialog(page: ft.Page, item: Exercise | None = None, on_done: C
 
     dialog = modal(
         page, "记录锻炼" if not item else "编辑锻炼",
-        ft.Column([ft.Row([kind, minutes], spacing=12), ft.Row([distance, calories], spacing=12), day, note], spacing=10, tight=True),
+        ft.Column(
+            [
+                form_row(kind, minutes, width=560),
+                form_row(distance, calories, width=560),
+                form_row(day, width=560),
+                form_row(note, width=560),
+            ],
+            spacing=10, tight=True,
+        ),
         [ft.TextButton("取消", on_click=lambda e: _close_and_refresh(page, dialog, None)), primary_button("保存", save)],
+        width=560,
     )
     return dialog
 
@@ -899,12 +915,20 @@ def open_diet_dialog(page: ft.Page, item: Diet | None = None, on_done: Callable 
 
     dialog = modal(
         page, "记录饮食" if not item else "编辑饮食",
-        ft.Column([ft.Row([meal, food], spacing=12), ft.Row([grams, calories], spacing=12), day, note,
-                   ft.Text("热量按《中国食物成分表（第 6 版）》每 100g 可食部自动计算，可手动覆盖。",
-                           size=th.FONT_CAPTION, color=th.TEXT_MUTED)],
-                  spacing=10, tight=True),
+        ft.Column(
+            [
+                form_row(meal, food, width=560),
+                form_row(grams, calories, width=560),
+                form_row(day, width=560),
+                form_row(note, width=560),
+                ft.Text("热量按《中国食物成分表（第 6 版）》每 100g 可食部自动计算，可手动覆盖。",
+                        size=th.FONT_CAPTION, color=th.TEXT_MUTED),
+            ],
+            spacing=10, tight=True,
+        ),
         [ft.TextButton("取消", on_click=lambda e: _close_and_refresh(page, dialog, None)),
          ft.TextButton("重算热量", on_click=recalc), primary_button("保存", save)],
+        width=560,
     )
     return dialog
 
@@ -986,8 +1010,16 @@ def open_sleep_dialog(page: ft.Page, item: Sleep | None = None, on_done: Callabl
 
     dialog = modal(
         page, "记录睡眠" if not item else "编辑睡眠",
-        ft.Column([ft.Row([bedtime, wake], spacing=12), quality, day], spacing=10, tight=True),
+        ft.Column(
+            [
+                form_row(bedtime, wake, width=560),
+                form_row(quality, width=560),
+                form_row(day, width=560),
+            ],
+            spacing=10, tight=True,
+        ),
         [ft.TextButton("取消", on_click=lambda e: _close_and_refresh(page, dialog, None)), primary_button("保存", save)],
+        width=560,
     )
     return dialog
 
@@ -1093,7 +1125,15 @@ def open_entertainment_dialog(page: ft.Page, item: Entertainment | None = None, 
 
     dialog = modal(
         page, "编辑条目" if item else "新增条目",
-        ft.Column([title, ft.Row([kind, status, rating], spacing=12), cover_row, note], spacing=10, tight=True),
+        ft.Column(
+            [
+                form_row(title, width=620),
+                form_row(kind, status, rating, width=620),
+                cover_row,
+                form_row(note, width=620),
+            ],
+            spacing=10, tight=True,
+        ),
         [ft.TextButton("取消", on_click=lambda e: _close_and_refresh(page, dialog, None)), primary_button("保存", save)],
         width=620,
     )
@@ -1478,7 +1518,8 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
             [
                 # 同步
                 _group("同步"),
-                server, token,
+                form_row(server, width=600),
+                form_row(token, width=600),
                 ft.Text(
                     _protection_note(),
                     size=th.FONT_CAPTION, color=th.TEXT_MUTED, max_lines=1,
@@ -1492,12 +1533,12 @@ def open_settings_dialog(page: ft.Page, on_done: Callable | None = None, refresh
                 *issue_section,
                 # 健康档案
                 _group("健康档案"),
-                ft.Row([height, gender], spacing=12),
+                form_row(height, gender, width=600),
                 # AI
                 _group("AI 助手（国产大模型）"),
-                ai_provider_dd,
-                ft.Row([ai_base_url, ai_model], spacing=12),
-                ai_key,
+                form_row(ai_provider_dd, width=600),
+                form_row(ai_base_url, ai_model, width=600),
+                form_row(ai_key, width=600),
                 ft.Row([ft.TextButton("测试 AI 连接", on_click=test_ai), ai_probe_text],
                        spacing=10, wrap=True),
                 ft.Text(

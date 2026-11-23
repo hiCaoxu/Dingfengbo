@@ -580,6 +580,26 @@ def form_field(label: str, value: str = "", multiline: bool = False, width: int 
     )
 
 
+def form_row(*controls: ft.Control, width: int, spacing: int = 12) -> ft.Row:
+    """把多个输入控件排成一行，并按弹窗内容宽度 ``width`` 均分。
+
+    Flutter 的 Row 主轴约束是「无界」的：行内 TextField 不显式给 ``width`` 时
+    会按自身期望宽度铺开，两个加起来就超过弹窗内容宽度，控件直接溢到弹窗外面
+    （记录睡眠/饮食/锻炼、新增记录、设置都踩过这个坑）。这里把 ``width`` 减去
+    固定宽度控件与间距后的剩余宽度均分给没有 ``width`` 的控件，行宽恰好等于
+    弹窗内容宽度（``modal(width=...)`` 的那个宽度）。
+    """
+    items = list(controls)
+    fixed = sum(item.width for item in items if getattr(item, "width", None))
+    flexible = [item for item in items if not getattr(item, "width", None)]
+    if flexible:
+        available = width - spacing * (len(items) - 1) - fixed
+        each = max(int(available / len(flexible)), 1)
+        for item in flexible:
+            item.width = each
+    return ft.Row(items, spacing=spacing)
+
+
 def dropdown(
     label: str,
     options: list,

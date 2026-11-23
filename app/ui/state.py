@@ -41,7 +41,6 @@ class _StateBase:
 
 @dataclass
 class HomeState(_StateBase):
-    selected_date: date = field(default_factory=date.today)
     year: int = field(default_factory=lambda: date.today().year)
     # focus=今日聚焦（行动页），overview=数据概览（原仪表盘）
     view: str = "focus"
@@ -130,6 +129,46 @@ class PageState:
         self.ai = AIState()
         self.reports = ReportsState()
         self.timeline = TimelineState()
+        # 进程启动时（或上次跨天同步时）的「今天」：各模块的日期默认值都派生自它。
+        self.today = date.today()
 
 
 state = PageState()
+
+
+def sync_today(today: date | None = None) -> date:
+    """把「按启动日固化的今天」推进到真正的今天。
+
+    各模块的日期状态（首页年份、任务月历、日记的选中日期与月历）在进程启动时
+    取了一次 ``date.today()``；应用整夜开着（或常驻托盘）时它们会停在昨天——
+    首页日历卡仍显示昨天的日期就是这么来的。
+
+    只推进**还停在旧今天**的字段：用户已经翻到别的日期/月份时保持不动，免得
+    每次刷新把正在看的内容拽回今天。
+    """
+    today = today or date.today()
+    previous = state.today
+    if today == previous:
+        return today
+    state.today = today
+
+    home = state.home
+    # 年份还停在旧今天所在的年（没手动切过年份）才跟着跨年。
+    if home.year == previous.year:
+        home.year = today.year
+
+    todo = state.todo
+    # 任务页的月历：没手动翻过月份才跟着走。
+    if (todo.year, todo.month) == (previous.year, previous.month):
+        todo.year, todo.month = today.year, today.month
+
+    diary = state.diary
+    # 整块日期状态都没被用户动过（选中日期=旧今天、月历=旧今天的月）才整体推到
+    # 今天；用户翻过别的日子/月份就整块不动，避免"日期跳了但月历没跳"。
+    if (
+        diary.selected == previous
+        and (diary.year, diary.month) == (previous.year, previous.month)
+    ):
+        diary.selected = today
+        diary.year, diary.month = today.year, today.month
+    return today

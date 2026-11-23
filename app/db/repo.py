@@ -496,10 +496,13 @@ def apply_remote(
                 # 平局（时间戳完全相同但内容不同）：拿业务载荷摘要决胜。
                 # 两端用同一算法、同一份载荷，算出的胜者一致；输的一方也必须留痕并
                 # 回执，否则推送方会一直 pending（旧实现这里直接 continue）。
-                _record_conflict(session, str(table), record_id, obj.updated_at, remote_time)
                 local_digest = payload_digest(model, serialize(obj)["data"])
                 remote_digest = payload_digest(model, data)
                 if local_digest >= remote_digest:
+                    _record_conflict(
+                        session, str(table), str(obj.id), obj.updated_at, remote_time,
+                        discarded=data,
+                    )
                     applied.append(
                         {
                             "table": table,
@@ -512,10 +515,17 @@ def apply_remote(
                         }
                     )
                     continue
-                # 远端摘要更大：远端胜出，落到下面的覆盖逻辑（本次改动生效并回执）。
+                # 远端摘要更大：先留下本地正文，再落到下面的覆盖逻辑。
+                _record_conflict(
+                    session, str(table), str(obj.id), obj.updated_at, remote_time,
+                    discarded=serialize(obj)["data"],
+                )
             elif obj.updated_at > remote_time:
                 # 远端版本更旧：本地获胜，但留下冲突记录供用户核对，并回执让客户端出队。
-                _record_conflict(session, str(table), record_id, obj.updated_at, remote_time)
+                _record_conflict(
+                    session, str(table), str(obj.id), obj.updated_at, remote_time,
+                    discarded=data,
+                )
                 applied.append(
                     {
                         "table": table,
@@ -528,6 +538,17 @@ def apply_remote(
                     }
                 )
                 continue
+        elif (
+            getattr(obj, "sync_status", None) == "pending"
+            and obj.updated_at
+            and obj.updated_at < remote_time
+        ):
+            # 本地还有没推上去的修改，远端却更新：覆盖前把本地正文留下，否则下一行
+            # setattr 之后用户再也找不回这一版。
+            _record_conflict(
+                session, str(table), str(obj.id), obj.updated_at, remote_time,
+                discarded=serialize(obj)["data"],
+            )
         for column in model.__table__.columns:
             # 按业务键（日期 / 习惯+日期）合并出的本地行保留本地主键，避免被远端 id 改写行身份。
             if column.name == "id" and merged:
@@ -549,12 +570,32 @@ def apply_remote(
     return applied
 
 
+_CONFLICT_PAYLOAD_LIMIT = 200_000
+
+
+def _conflict_blob(data: dict[str, Any]) -> str:
+    """把败方字段收成 JSON。超长时只留标题和正文开头，保证还能被 json.loads。"""
+    blob = json.dumps(data, ensure_ascii=False, default=str)
+    if len(blob) <= _CONFLICT_PAYLOAD_LIMIT:
+        return blob
+    slim = {
+        key: data[key]
+        for key in ("id", "title", "name", "category", "amount", "date", "kind")
+        if key in data
+    }
+    text = str(data.get("content") or data.get("note") or "")
+    slim["content"] = text[:4000]
+    slim["_truncated"] = True
+    return json.dumps(slim, ensure_ascii=False, default=str)
+
+
 def _record_conflict(
     session: Session,
     table_name: str,
     record_id: str,
     local_time: datetime | None,
     remote_time: datetime | None,
+    discarded: dict[str, Any] | None = None,
 ) -> None:
     row = session.scalar(
         select(SyncConflict).where(
@@ -567,6 +608,8 @@ def _record_conflict(
     row.local_updated_at = local_time
     row.remote_updated_at = remote_time
     row.created_at = utcnow()
+    if discarded:
+        row.discarded_payload = _conflict_blob(discarded)
 
 
 def record_superseded(
@@ -575,13 +618,17 @@ def record_superseded(
     record_id: str,
     server_time: datetime | None,
     pushed_time: datetime | None,
+    discarded: dict[str, Any] | None = None,
 ) -> None:
     """记一次「推送被云端更新版本覆盖」，供同步明细的冲突页展示。
 
-    被覆盖的记录已由调用方从待同步队列出队，这里只负责留痕，避免用户以为
-    自己的改动"同步成功了"却看不到任何提示。
+    被覆盖的记录已由调用方从待同步队列出队。``discarded`` 是还留在本地的那一版，
+    下一轮拉取会把它盖掉，所以必须在出队时存下来。
     """
-    _record_conflict(session, str(table_name), str(record_id), server_time, pushed_time)
+    _record_conflict(
+        session, str(table_name), str(record_id), server_time, pushed_time,
+        discarded=discarded,
+    )
 
 
 def list_conflicts(session: Session, limit: int = 50) -> list[dict]:
@@ -610,13 +657,56 @@ def list_conflicts(session: Session, limit: int = 50) -> list[dict]:
                 "table": row.table_name,
                 "table_label": table_label(row.table_name),
                 "id": row.record_id,
+                "conflict_id": row.id,
                 "title": title or row.record_id[:8],
                 "local": row.local_updated_at,
                 "remote": row.remote_updated_at,
                 "created_at": row.created_at,
+                "restorable": bool((row.discarded_payload or "").strip()),
             }
         )
     return result
+
+
+_RESTORE_SKIP = {"id", "owner_id", "sync_status", "sync_seq", "created_at"}
+
+
+def restore_conflict(session: Session, conflict_id: int) -> str:
+    """把冲突里留下的败方正文写回原记录，并重新进入待同步队列。
+
+    恢复会刷新 ``updated_at``，因此这一版在下一次 LWW 里是更新的一方。
+    """
+    row = session.get(SyncConflict, int(conflict_id))
+    if row is None or not (row.discarded_payload or "").strip():
+        raise ValueError("没有可恢复的内容")
+    try:
+        data = json.loads(row.discarded_payload)
+    except ValueError as exc:
+        raise ValueError("冲突内容已损坏") from exc
+    if not isinstance(data, dict):
+        raise ValueError("冲突内容已损坏")
+    model = MODEL_BY_TABLE.get(row.table_name)
+    if model is None:
+        raise ValueError("未知数据表")
+    record_id = str(row.record_id)
+    obj = session.get(model, record_id)
+    if obj is None:
+        obj = model()
+        obj.id = record_id
+        session.add(obj)
+    for column in model.__table__.columns:
+        if column.name in _RESTORE_SKIP or column.name not in data:
+            continue
+        value = _parse(column, data[column.name])
+        if value is None and not column.nullable:
+            value = column_fill_value(column)
+        setattr(obj, column.name, value)
+    if not getattr(obj, "owner_id", None):
+        obj.owner_id = "local"
+    mark_dirty(obj)
+    title = _display_title(obj)
+    session.delete(row)
+    return title
 
 
 def clear_conflicts(session: Session) -> int:
@@ -645,23 +735,31 @@ def max_updated_at(session: Session, owner_id: str = "local") -> str | None:
 TOMBSTONE_RETENTION_DAYS = 30
 
 
-def purge_deleted(session: Session, retention_days: int = TOMBSTONE_RETENTION_DAYS) -> int:
+def purge_deleted(
+    session: Session,
+    retention_days: int = TOMBSTONE_RETENTION_DAYS,
+    owner_id: str | None = None,
+) -> int:
     """同步完成后物理清理已删除且已同步的墓碑。
 
     保留 ``retention_days`` 天的恢复窗口（误删后仍可恢复），过期后才真正删除。
+    ``owner_id`` 给定时只清该租户，避免一次清理抬高所有身份的删除水位。
     每张表一条 DELETE：旧实现先把命中的行全部 ORM 实例化再逐行 delete，
     墓碑多时会同时占住大量对象并发出上千条单行 DELETE。
     """
     cutoff = utcnow() - timedelta(days=retention_days)
     count = 0
     for model in MODEL_BY_TABLE.values():
+        conditions = [
+            model.is_deleted.is_(True),
+            model.sync_status == "clean",
+            model.updated_at < cutoff,
+        ]
+        if owner_id is not None:
+            conditions.append(model.owner_id == owner_id)
         result = session.execute(
             delete(model)
-            .where(
-                model.is_deleted.is_(True),
-                model.sync_status == "clean",
-                model.updated_at < cutoff,
-            )
+            .where(*conditions)
             .execution_options(synchronize_session=False)
         )
         removed = int(result.rowcount or 0)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -61,31 +62,51 @@ class _BodyTooLarge(Exception):
     """内部信号：请求体超过上传上限。"""
 
 
-class _UploadSizeGuard:
-    """在 ASGI 层限制 ``/api/upload`` 的请求体大小。
+def _body_limit(path: str) -> int | None:
+    """同步与上传在解析 JSON / multipart 之前就要掐住体积。
 
-    为什么不能只在 handler 里检查：FastAPI 解析 ``file: UploadFile = File(...)`` 时
-    会先 ``await request.form()``，Starlette 把整个 multipart 体收下并 spool 到临时
-    文件（>1MB 落盘）。等 handler 跑到 ``Content-Length`` 判断时，磁盘已经被写过一遍了。
+    上传多留 4KB 给 multipart 边界。同步按 8MB：500 条变更里可以有日记正文，
+    但不能让一条请求把进程内存打满。
+    """
+    if path == "/api/upload":
+        return MAX_UPLOAD_BYTES + 4096
+    if path in {"/api/sync/pull", "/api/sync/push"}:
+        return 8 * 1024 * 1024
+    return None
+
+
+def _limit_detail(path: str) -> str:
+    if path == "/api/upload":
+        return "图片过大（超过 12MB）"
+    return "请求体过大（超过 8MB）"
+
+
+class _UploadSizeGuard:
+    """在 ASGI 层限制上传与同步接口的请求体大小。
+
+    为什么不能只在 handler 里检查：FastAPI 解析 ``file: UploadFile = File(...)`` 或
+    JSON 体时会先把整个 body 收下。等 handler 跑到长度判断时，内存已经被写过一遍了。
     这里在解析开始前拦：声明了长度的直接拒；不声明（chunked）的边读边累计，读满上限
-    立刻中断——写盘量因此被压在 12MB 附近，而不是「对方发多大就写多大」。
+    立刻中断。
     """
 
     def __init__(self, app) -> None:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope.get("type") != "http" or scope.get("path") != "/api/upload":
+        path = scope.get("path") or ""
+        limit = _body_limit(path) if scope.get("type") == "http" else None
+        if limit is None:
             await self.app(scope, receive, send)
             return
         headers = {
             key.decode("latin-1").lower(): value.decode("latin-1")
             for key, value in scope.get("headers") or ()
         }
-        limit = MAX_UPLOAD_BYTES + 4096
+        detail = _limit_detail(path)
         declared = headers.get("content-length", "").strip()
         if declared.isdigit() and int(declared) > limit:
-            await _reject_too_large(send)
+            await _reject_too_large(send, detail)
             return
 
         received = 0
@@ -102,18 +123,18 @@ class _UploadSizeGuard:
         try:
             await self.app(scope, guarded_receive, send)
         except _BodyTooLarge:
-            await _reject_too_large(send)
+            await _reject_too_large(send, detail)
         except Exception:
             # 响应已经开始发送时无法再改状态码：保持原样抛出，交给上层记日志。
             raise
 
 
-async def _reject_too_large(send) -> None:
+async def _reject_too_large(send, detail: str = "请求体过大", status: int = 413) -> None:
     # 与 HTTPException 的响应体保持同一种形状：{"detail": "..."}
-    body = json.dumps({"detail": "图片过大（超过 12MB）"}, ensure_ascii=False).encode("utf-8")
+    body = json.dumps({"detail": detail}, ensure_ascii=False).encode("utf-8")
     await send({
         "type": "http.response.start",
-        "status": 413,
+        "status": status,
         "headers": [
             (b"content-type", b"application/json; charset=utf-8"),
             (b"content-length", str(len(body)).encode()),
@@ -208,13 +229,45 @@ class PushRequest(BaseModel):
     changes: list[dict[str, Any]] = Field(default_factory=list, max_length=500)
 
 
+def _configured_tokens() -> frozenset[str]:
+    """环境变量里的令牌白名单。空集表示未配置（本地调试仍接受任意令牌）。"""
+    raw = ",".join(
+        os.environ.get(name, "")
+        for name in ("DINGFENGBO_SYNC_TOKEN", "DINGFENGBO_SYNC_TOKENS")
+    )
+    return frozenset(part.strip() for part in raw.split(",") if part.strip())
+
+
+def _token_allowed(token: str, allowed: frozenset[str]) -> bool:
+    """按摘要比较，避免明文长度不同时 compare_digest 直接抛错。"""
+    digest = hashlib.sha256(token.encode()).digest()
+    return any(
+        hmac.compare_digest(digest, hashlib.sha256(item.encode()).digest())
+        for item in allowed
+    )
+
+
+_open_registration_warned = False
+
+
 def owner_of(authorization: str | None) -> str:
+    global _open_registration_warned
     if not authorization:
         raise HTTPException(status_code=401, detail="缺少同步令牌")
     token = authorization.strip()
     if token.lower().startswith("bearer "):
         token = token[7:].strip()
     if not token:
+        raise HTTPException(status_code=401, detail="同步令牌无效")
+    allowed = _configured_tokens()
+    if not allowed:
+        if not _open_registration_warned:
+            _open_registration_warned = True
+            logger.warning(
+                "未配置 DINGFENGBO_SYNC_TOKEN：任意令牌都会成为新租户。"
+                "公网部署请在环境变量里写上白名单"
+            )
+    elif not _token_allowed(token, allowed):
         raise HTTPException(status_code=401, detail="同步令牌无效")
     # 身份键与存储分离：DB 里只存不可逆摘要，库文件泄露不再等于凭证泄露。
     return hashlib.sha256(f"dingfengbo-v1\0{token}".encode()).hexdigest()
@@ -236,13 +289,16 @@ def next_sequences(session, n: int) -> list[int]:
 
 
 # 内存滑动窗口限流：按 owner（token 摘要）限制请求频率，防单 token 刷爆服务端。
+# 另有按 IP 的总闸：换令牌不能绕过，pull / push / upload / check 共用。
 _PUSH_RATE_LIMIT = 60  # 每窗口最多 push 次数
 _UPLOAD_RATE_LIMIT = 30  # 每窗口最多 upload 次数
+_IP_RATE_LIMIT = 120  # 每窗口、每 IP、全部同步接口合计
 _PUSH_WINDOW_SECONDS = 60.0
 _RATE_MAX_OWNERS = 1000
 _push_rate_lock = threading.Lock()
 _push_rate_log: dict[str, deque[float]] = defaultdict(deque)
 _upload_rate_log: dict[str, deque[float]] = defaultdict(deque)
+_ip_rate_log: dict[str, deque[float]] = defaultdict(deque)
 
 
 def _evict_idle_owners(log: dict[str, deque[float]], now: float) -> None:
@@ -281,6 +337,35 @@ def _enforce_rate_limit(owner: str) -> None:
 
 def _enforce_upload_rate_limit(owner: str) -> None:
     _check_rate(_upload_rate_log, owner, _UPLOAD_RATE_LIMIT, "upload")
+
+
+def enforce_ip(ip: str) -> None:
+    """按来源 IP 限流。空地址（单测直接调函数）不计数。"""
+    if not ip:
+        return
+    _check_rate(_ip_rate_log, ip, _IP_RATE_LIMIT, "ip")
+
+
+class _IpRateMiddleware:
+    """换令牌不能绕过的总闸。只包 ``/api/``，健康检查留给部署脚本探测。"""
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        path = scope.get("path") or ""
+        if scope.get("type") == "http" and path.startswith("/api/") and path != "/api/health":
+            client = scope.get("client")
+            ip = client[0] if client else ""
+            try:
+                enforce_ip(ip)
+            except HTTPException as exc:
+                await _reject_too_large(send, str(exc.detail), status=exc.status_code)
+                return
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(_IpRateMiddleware)
 
 
 @app.get("/api/health")
@@ -366,8 +451,7 @@ def push(payload: PushRequest, authorization: str | None = Header(default=None))
 
     with SessionLocal() as session:
         accepted: list[dict[str, Any]] = []
-        purge_mark = session.get(PurgeMark, "*")
-        purged_before = purge_mark.purged_before if purge_mark is not None else None
+        purged_before = _purged_before(session, owner)
         for item in valid:
             reason = _stale_after_purge(session, item, purged_before)
             if reason:
@@ -404,7 +488,7 @@ def push(payload: PushRequest, authorization: str | None = Header(default=None))
             if obj is not None:
                 change["data"]["sync_seq"] = obj.sync_seq
         session.commit()
-        _maybe_purge_tombstones()
+        _maybe_purge_tombstones(owner)
     superseded = [
         {
             "table": change.get("table"),
@@ -476,7 +560,7 @@ _PURGE_INTERVAL_SECONDS = 3600.0
 _last_purge = 0.0
 
 
-def _maybe_purge_tombstones() -> None:
+def _maybe_purge_tombstones(owner: str | None = None) -> None:
     """服务端也清理过期墓碑（与客户端 30 天窗口对齐，这里放宽到 90 天）。
 
     云端只增不减会让任何一次游标重置（恢复备份/换机）把历史墓碑全量重拉一遍。
@@ -491,15 +575,17 @@ def _maybe_purge_tombstones() -> None:
     retention_days = 90
     try:
         with SessionLocal() as session:
-            removed = purge_deleted(session, retention_days=retention_days)
+            removed = purge_deleted(session, retention_days=retention_days, owner_id=owner)
             if removed:
                 # 只有真的删掉了墓碑才更新水位：没删过东西的库不该因为「跑过一次清理」
                 # 就开始拒收带旧时间戳的记录（导入的历史数据会被误伤）。
+                # 带 owner 时只抬该租户的水位；不带（旧调用/单测）仍写全局 "*"。
                 cutoff = utcnow() - timedelta(days=retention_days)
-                mark = session.get(PurgeMark, "*")
+                key = owner or "*"
+                mark = session.get(PurgeMark, key)
                 if mark is None:
                     session.add(
-                        PurgeMark(owner_id="*", purged_before=cutoff, purged_at=utcnow(),
+                        PurgeMark(owner_id=key, purged_before=cutoff, purged_at=utcnow(),
                                   purged_count=removed)
                     )
                 else:
@@ -511,6 +597,16 @@ def _maybe_purge_tombstones() -> None:
             logger.info("已清理 %d 条过期墓碑", removed)
     except Exception:
         logger.exception("清理墓碑失败")
+
+
+def _purged_before(session, owner: str):
+    """该租户的删除水位；历史库里的全局 ``*`` 仍然生效，取两者中更晚的。"""
+    stamps = []
+    for key in (owner, "*"):
+        mark = session.get(PurgeMark, key)
+        if mark is not None and mark.purged_before is not None:
+            stamps.append(mark.purged_before)
+    return max(stamps) if stamps else None
 
 
 def _stale_after_purge(session, item: dict[str, Any], purged_before) -> str | None:

@@ -19,6 +19,9 @@ services:
       DINGFENGBO_HOST: 0.0.0.0
       DINGFENGBO_PORT: 8000
       DINGFENGBO_SERVER_DB: /data/cloud.db
+      # 令牌白名单。留空时服务端仍接受任意令牌（仅限本机调试）。
+      # deploy.ps1 会把本机设置里的同步令牌写进项目目录的 .env，不进镜像。
+      DINGFENGBO_SYNC_TOKEN: ${DINGFENGBO_SYNC_TOKEN:-}
     # 日志轮转：避免容器 json-file 日志无限增长
     logging:
       driver: json-file

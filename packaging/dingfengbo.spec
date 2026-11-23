@@ -2,8 +2,8 @@
 """PyInstaller 打包配置：onedir 模式，产出 dist\\Dingfengbo\\（隐藏控制台）。
 
 onedir 与 onefile 的区别只有一个：依赖和资源不解压到临时目录，而是常驻在
-exe 旁边的 ``_internal\\`` 里。18MB 霞鹜文楷字体因此不必每次启动解压，冷启动
-快得多；代价是发布物从单个 exe 变成文件夹，必须整包分发（见 build.ps1）。
+exe 旁边的 ``_internal\\`` 里，冷启动更快；代价是发布物从单个 exe 变成文件夹，
+必须整包分发（见 build.ps1）。
 """
 
 import os
@@ -27,10 +27,6 @@ for package in ("flet", "flet_desktop", "matplotlib", "zhdate"):
 # Flet 0.86 的 flet_desktop 运行时会从包内 app/ 目录解压客户端；
 # 内置压缩包后首次启动无需联网下载（onedir 下落进 _internal/flet_desktop/app/）。
 datas.append((os.path.join(SPEC_DIR, "flet-windows.zip"), "flet_desktop/app"))
-
-# 霞鹜文楷字体（assets/fonts）：app/main.py 按 __file__ 推导 assets 目录。
-# onedir 下模块仍在 _internal 里，推导结果与 onefile 的 _MEIPASS 一致。
-datas.append((os.path.join(ROOT, "assets"), "assets"))
 
 hiddenimports = []
 for package in ("app", "flet", "flet_desktop"):

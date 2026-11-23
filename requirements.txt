@@ -19,5 +19,3 @@ Pillow>=10.0,<13.0
 python-multipart>=0.0.9
 # 可选：关闭窗口收入系统托盘（未安装时自动降级为最小化到任务栏）
 pystray>=0.19
-# 仅打包期用：packaging/subset_font.py 把霞鹜文楷裁成子集（18.42MB -> 3.46MB）
-fonttools>=4.50,<5.0
