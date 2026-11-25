@@ -1,0 +1,17 @@
+# 只给 `flet build apk` 用。桌面端继续 `python main.py` 和 PyInstaller，不读这里。
+# 入口是仓库根目录的 mobile.py。依赖只用手机端这一份，避免把 matplotlib 打进安装包。
+
+[tool.flet.app]
+module = "mobile"
+exclude = ["data", "tests", "docker", "packaging", "server"]
+
+[tool.flet.android]
+split_per_abi = true
+target_arch = ["arm64-v8a"]
+dependencies = [
+    "flet>=0.86,<2.0",
+    "SQLAlchemy>=2.0,<3.0",
+    "httpx>=0.27,<1.0",
+    "zhdate>=0.1",
+    "Pygments>=2.17,<3.0",
+]

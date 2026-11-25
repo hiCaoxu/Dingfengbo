@@ -1,0 +1,9 @@
+# 定风波手机端运行依赖。
+# 桌面端和同步服务端仍用 requirements.txt。
+# 不包含 matplotlib、fastapi、flet-desktop、pystray、Pillow：
+# 手机端不画图表、不上传图片。笔记预览沿用桌面的 Markdown 渲染，因此带上 Pygments。
+flet>=0.86,<2.0
+SQLAlchemy>=2.0,<3.0
+httpx>=0.27,<1.0
+zhdate>=0.1
+Pygments>=2.17,<3.0

@@ -50,7 +50,7 @@ def highlight_lines(code: str, lang: str = "") -> list[list[ft.TextSpan]]:
         for part in value.split("\n"):
             if part:
                 result[-1].append(
-                    ft.TextSpan(part, style=ft.TextStyle(color=_color_for(token) or th.TEXT, size=12, font_family="Consolas"))
+                    ft.TextSpan(part, style=ft.TextStyle(color=_color_for(token) or th.TEXT, size=14, font_family="Consolas"))
                 )
             if "\n" in value:
                 result.append([])
@@ -67,18 +67,20 @@ def inline_spans(text: str) -> list[ft.TextSpan]:
         if not part:
             continue
         if part.startswith("**") and part.endswith("**"):
-            spans.append(ft.TextSpan(part[2:-2], style=ft.TextStyle(size=13, color=th.TEXT, weight="bold")))
+            spans.append(ft.TextSpan(part[2:-2], style=ft.TextStyle(size=15, color=th.TEXT, weight="bold")))
         elif part.startswith("`") and part.endswith("`"):
             spans.append(
                 ft.TextSpan(
                     part[1:-1],
-                    style=ft.TextStyle(size=12, color=th.PRIMARY, font_family="Consolas", bgcolor=th.TABLE_HEAD),
+                    style=ft.TextStyle(
+                        size=14, color=th.TEXT, font_family="Consolas", bgcolor=th.SUBTLE,
+                    ),
                 )
             )
         elif part.startswith("*") and part.endswith("*"):
-            spans.append(ft.TextSpan(part[1:-1], style=ft.TextStyle(size=13, color=th.TEXT, italic=True)))
+            spans.append(ft.TextSpan(part[1:-1], style=ft.TextStyle(size=15, color=th.TEXT, italic=True)))
         else:
-            spans.append(ft.TextSpan(part, style=ft.TextStyle(size=13, color=th.TEXT)))
+            spans.append(ft.TextSpan(part, style=ft.TextStyle(size=15, height=1.7, color=th.TEXT)))
     return spans
 
 

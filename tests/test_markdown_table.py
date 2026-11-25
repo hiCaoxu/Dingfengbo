@@ -52,16 +52,52 @@ class TableRenderTests(unittest.TestCase):
         )
         blocks = parse(text)
         control = render_blocks(blocks)
-        tables = _find(control, ft.DataTable)
+
+        def walk(node):
+            yield node
+            for name in ("controls", "content"):
+                value = getattr(node, name, None)
+                if isinstance(value, list):
+                    for child in value:
+                        yield from walk(child)
+                elif isinstance(value, ft.Control):
+                    yield from walk(value)
+
+        tables = [item for item in walk(control) if getattr(item, "data", None) == "md-table"]
         self.assertEqual(len(tables), 1)
-        table = tables[0]
-        self.assertEqual(len(table.columns), 3)
-        for row in table.rows:
-            self.assertEqual(len(row.cells), 3, "每行单元格数必须等于表头列数")
+        rows = [item for item in tables[0].controls if isinstance(item, ft.Row)]
+        self.assertEqual(len(rows), 3, "表头加两行数据")
+        for row in rows:
+            self.assertEqual(len(row.controls), 3, "每行单元格数必须等于表头列数")
 
     def test_render_markdown_handles_ragged_table(self) -> None:
         control = render_markdown("| a | b |\n| --- | --- |\n| 1 |\n")
         self.assertIsNotNone(control)
+
+
+class QuoteAndCodeTests(unittest.TestCase):
+    def test_blockquote_is_not_italic(self) -> None:
+        control = render_markdown("> 一段引用")
+        texts = _find(control, ft.Text)
+        self.assertTrue(texts)
+        for text in texts:
+            self.assertIsNot(text.italic, True)
+            for span in text.spans or []:
+                style = span.style
+                if style is not None:
+                    self.assertIsNot(style.italic, True)
+
+    def test_code_block_shows_language_and_copy(self) -> None:
+        control = render_markdown("```python\nprint(1)\n```")
+        labels = [text.value for text in _find(control, ft.Text) if text.value]
+        self.assertIn("python", labels)
+        copied = [button.data for button in _find(control, ft.TextButton)]
+        self.assertIn("print(1)", copied)
+
+    def test_code_block_without_language_says_plain_text(self) -> None:
+        control = render_markdown("```\nx\n```")
+        labels = [text.value for text in _find(control, ft.Text) if text.value]
+        self.assertIn("纯文本", labels)
 
 
 if __name__ == "__main__":

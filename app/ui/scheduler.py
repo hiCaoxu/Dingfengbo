@@ -19,6 +19,7 @@ from ..services.sync import (
     auto_sync_paused as _core_auto_paused,
     pause_auto_sync as _core_pause,
     resume_auto_sync as _core_resume,
+    set_after_write,
     sync_client,
 )
 from .. import theme as th
@@ -76,6 +77,8 @@ def bind(
     _page = page
     _refresh_status = refresh_status
     _refresh_content = refresh_content
+    # 必须在启动同步之前注册：启动阶段的周期记账会调用 mark_pending_write。
+    set_after_write(lambda: schedule_sync(delay_ms=10_000))
     _run_sync_async()
     _start_interval()
     _start_reminder_loop(delay=20)  # 启动 20s 后再查，避免和首屏加载抢资源
@@ -138,16 +141,23 @@ def _run_sync_async() -> None:
     threading.Thread(target=worker, daemon=True).start()
 
 
+def _incoming_changes() -> bool:
+    """云端确实带回了内容（拉取或墓碑清理）。只推本地修改不算。"""
+    return bool(sync_client.last_pull_count or sync_client.last_purged)
+
+
 async def _after_sync() -> None:
+    # 顶栏状态由 refresh_status 自己局部刷新。这里绝不能 page.update()：
+    # 每 5 分钟（以及写完约 10 秒）都会走一遍，整页重绘会让窗口闪一下。
+    # 没有新数据时也不重建当前模块——首页一重建会先闪出「加载中…」。
     if _refresh_status:
         _refresh_status()
-    if sync_client.status.startswith("已同步") and _refresh_content:
+    if (
+        sync_client.status.startswith("已同步")
+        and _incoming_changes()
+        and _refresh_content is not None
+    ):
         _refresh_content()
-    elif _page is not None:
-        try:
-            _page.update()
-        except Exception:
-            logger.exception("同步后刷新页面失败")
 
 
 def _start_reminder_loop(delay: int = REMINDER_INTERVAL) -> None:

@@ -12,7 +12,7 @@ from datetime import date
 import flet as ft
 
 from .. import theme as th
-from ..icons import ACTIONS, ico
+from ..icons import ACTIONS
 from ..services.finance import money
 from ..services.habits import check_in
 from ..services.todo_views import priority_label
@@ -87,9 +87,9 @@ def render(
     def open_today_diary(_=None) -> None:
         on_open_diary(date.today())
 
-    def do_check_in(habit_id: str) -> None:
+    def do_check_in(habit_id: str, done: bool = True) -> None:
         try:
-            check_in(habit_id, date.today(), True)
+            check_in(habit_id, date.today(), done)
         except Exception:
             logger.exception("习惯打卡失败")
             snack(page, "打卡失败，详见日志", th.ACCENT)
@@ -137,11 +137,12 @@ def render(
             spacing=10,
             expand=True,
         ),
-        title="今日必做",        trailing=ft.Row(
+        title="今日必做",
+        trailing=ft.Row(
             [
                 primary_button("番茄钟", lambda e: open_pomodoro_dialog(page, refresh),
                                ACTIONS["timer"]),
-                primary_button("去任务", lambda e: navigate("todo"), ACTIONS["add"]),
+                primary_button("去任务", lambda e: navigate("todo")),
             ],
             spacing=6,
         ),
@@ -253,15 +254,15 @@ def render(
         habit_controls.append(
             ft.Row(
                 [
-                    ft.Icon(
-                        ico("CHECK_CIRCLE_OUTLINE" if done else "RADIO_BUTTON_UNCHECKED_OUTLINED"),
-                        size=16,
-                        color=th.PRIMARY if done else th.TEXT_MUTED,
+                    ft.Checkbox(
+                        value=done,
+                        on_change=lambda e, hid=item["id"]: do_check_in(hid, bool(e.control.value)),
                     ),
                     ft.Text(item["name"], size=th.FONT_BODY, color=th.TEXT, expand=True,
                             max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
                     ft.Text(
-                        f"连续 {item['streak']} 天 · 本周 {item['week_done']}/{item['target_per_week']}",
+                        f"连续 {item['streak']} 天 · 本周 {item['week_done']}/{item['target_per_week']}"
+                        + (f" · {item['weekdays_text']}" if item.get("weekdays_text") else ""),
                         size=th.FONT_CAPTION, color=th.TEXT_MUTED,
                         max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
                     ),
@@ -272,6 +273,7 @@ def render(
                     ),
                 ],
                 spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
             )
         )
     if not habit_controls:
@@ -280,11 +282,16 @@ def render(
     habit_card = card(
         ft.Column(habit_controls, spacing=6, scroll=ft.ScrollMode.AUTO, expand=True),
         title="习惯打卡",
-        trailing=ft.TextButton("管理", on_click=lambda e: navigate("todo")),
+        trailing=primary_button("管理", lambda e: navigate("todo")),
         expand=2,
     )
 
     note = data["note"]
+
+    def open_review(_event=None, current=note) -> None:
+        if current is not None:
+            on_open_note(current)
+
     review_card = card(
         ft.Column(
             [
@@ -296,16 +303,13 @@ def render(
                     size=th.FONT_CAPTION, color=th.TEXT_MUTED, max_lines=3,
                     overflow=ft.TextOverflow.ELLIPSIS,
                 ),
-                ft.TextButton(
-                    "打开这条笔记", on_click=(lambda e: on_open_note(note)) if note else None,
-                    disabled=note is None,
-                ),
             ],
             spacing=6,
             expand=True,
         ),
         title="随机回顾",
         expand=2,
+        on_click=open_review if note is not None else None,
     )
 
     ai_card = card(

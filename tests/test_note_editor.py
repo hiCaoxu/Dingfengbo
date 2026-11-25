@@ -48,5 +48,13 @@ class NoteSnapshotTests(unittest.TestCase):
         self.assertEqual((note_id, title, content, tags), ("n2", "标题", "内容", "[]"))
 
 
+class EditorViewTests(unittest.TestCase):
+    def test_source_preview_and_split(self) -> None:
+        self.assertEqual(notes.visible_editor_panes("source"), (True, False))
+        self.assertEqual(notes.visible_editor_panes("preview"), (False, True))
+        self.assertEqual(notes.visible_editor_panes("split"), (True, True))
+        self.assertEqual(notes.visible_editor_panes("其他"), (True, True))
+
+
 if __name__ == "__main__":
     unittest.main()

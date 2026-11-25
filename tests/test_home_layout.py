@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import inspect
 import unittest
 from datetime import date
+from types import SimpleNamespace
 
 import flet as ft
 
+from app import main as app_main
+from app import theme as th
+from app.main import SLOGAN
 from app.services.focus import today_focus
 from app.ui import focus
 
@@ -64,6 +69,77 @@ class FocusLayoutTests(unittest.TestCase):
         scrollers = [c for c in bodies(self.control) if c.scroll is not None]
         self.assertTrue(scrollers, "应至少有一个可滚动正文")
         self.assertTrue(all(c.expand for c in scrollers), "可滚动正文必须 expand 才能拿到高度")
+
+
+def _walk(control):
+    stack = [control]
+    while stack:
+        node = stack.pop()
+        yield node
+        for name in ("controls", "content"):
+            value = getattr(node, name, None)
+            if isinstance(value, list):
+                stack.extend(value)
+            elif isinstance(value, ft.Control):
+                stack.append(value)
+
+
+def _button_labeled(root, label: str):
+    for node in _walk(root):
+        if not isinstance(node, ft.Button):
+            continue
+        texts = [item.value for item in _walk(node) if isinstance(item, ft.Text)]
+        if label in texts:
+            return node
+    return None
+
+
+class FocusActionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        reset_db()
+        self.data = today_focus(date.today())
+        self.opened: list = []
+        self.control = focus.render(
+            _FakePage(), lambda: None, self.data,
+            lambda day: None, lambda note: self.opened.append(note), lambda key: None,
+        )
+
+    def test_slogan_order_and_size(self) -> None:
+        self.assertEqual(SLOGAN, "要事第一  刻意练习  持续精进")
+        source = inspect.getsource(app_main.main)
+        self.assertIn("size=th.FONT_SECTION_TITLE + 2", source)
+
+    def test_go_todo_has_no_plus_icon(self) -> None:
+        button = _button_labeled(self.control, "去任务")
+        self.assertIsNotNone(button)
+        icons = [node for node in _walk(button) if isinstance(node, ft.Icon)]
+        self.assertEqual(icons, [])
+
+    def test_habit_manage_uses_primary_background(self) -> None:
+        button = _button_labeled(self.control, "管理")
+        self.assertIsNotNone(button)
+        self.assertEqual(button.bgcolor, th.PRIMARY)
+
+    def test_review_card_opens_on_click_without_a_link_button(self) -> None:
+        texts = [node.value for node in _walk(self.control) if isinstance(node, ft.Text)]
+        self.assertNotIn("打开这条笔记", texts)
+        note = SimpleNamespace(id="n1", title="旧笔记", content="正文")
+        self.data["note"] = note
+        control = focus.render(
+            _FakePage(), lambda: None, self.data,
+            lambda day: None, lambda note: self.opened.append(note), lambda key: None,
+        )
+        clicked = False
+        for node in _walk(control):
+            if not isinstance(node, ft.Container) or node.on_click is None:
+                continue
+            titles = [item.value for item in _walk(node) if isinstance(item, ft.Text)]
+            if "随机回顾" in titles:
+                node.on_click(None)
+                clicked = True
+                break
+        self.assertTrue(clicked)
+        self.assertEqual(self.opened, [note])
 
 
 if __name__ == "__main__":

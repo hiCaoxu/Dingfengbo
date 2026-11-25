@@ -4,7 +4,7 @@
 
 | 项目 | 说明 |
 |---|---|
-| 版本 | 1.2.2 |
+| 版本 | 1.2.3 |
 | 运行环境 | Windows 10/11；源码运行需 Python 3.11 |
 | 技术栈 | Flet（Flutter 渲染）+ SQLAlchemy 2.x + SQLite；同步服务端 FastAPI |
 | 数据目录 | `D:\Data\Dingfengbo\`（与程序目录分离，替换升级不丢数据） |
@@ -27,7 +27,7 @@
 
 ## 快速开始
 
-**绿色版**：解压 `定风波-v1.2.2.zip`，双击 `定风波.exe`。`_internal\` 必须与 exe 同目录，只拷 exe 会启动失败。
+**绿色版**：解压 `定风波-v1.2.3.zip`，双击 `定风波.exe`。`_internal\` 必须与 exe 同目录，只拷 exe 会启动失败。
 
 **源码运行**：
 
@@ -184,6 +184,26 @@ python run_server.py
 ```
 
 脚本只在远端创建 `/opt/dingfengbo-sync` 并启动容器 `dingfengbo-sync`，不改动主机其他环境；数据卷 `/opt/dingfengbo-sync/data`，监听 `8000:8000`，容器内以非 root（uid 10001）运行。桌面端「设置」填 `http://<服务器IP>:8000`，点「测试同步连接」验证。
+
+### 手机端
+
+红米等 arm64 手机用单独入口，复用同一套库和同步。界面只有任务清单、当天日记、笔记阅读、健康录入、记账录入和同步设置。
+
+在电脑上先看界面：
+
+```powershell
+python mobile.py
+```
+
+数据写在项目目录 `data/mobile`，不占用桌面端的 `D:\Data\Dingfengbo`。手机上则写在应用私有目录。同步令牌在安卓上没有 DPAPI，保存时会以可解码形式放在该目录。
+
+打只含 arm64 的安装包（需要本机已装 Flet 的 Android 构建链；没有的话上面的 `python mobile.py` 仍可验收界面）：
+
+```powershell
+flet build apk --arch arm64-v8a
+```
+
+`pyproject.toml` 已把入口设为 `mobile.py`、架构设为 `arm64-v8a`。这次打包安装的是其中列出的手机端依赖（与 `requirements-mobile.txt` 相同），不会装桌面端的 `requirements.txt`。
 
 公网访问需在云厂商安全组放行 TCP 8000（腾讯云轻量在「防火墙」加规则）。
 

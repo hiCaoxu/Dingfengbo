@@ -125,6 +125,75 @@ class SchedulerFailureTests(unittest.TestCase):
             scheduler._page = None
             scheduler._refresh_status = None
 
+    def _run_until_ui(self, page: _FakePage) -> None:
+        for _ in range(40):
+            if page.tasks:
+                break
+            time.sleep(0.02)
+        self.assertTrue(page.tasks, "同步结束后应回到 UI 线程")
+        for task in page.tasks:
+            if asyncio.iscoroutine(task):
+                asyncio.run(task)
+            elif callable(task):
+                asyncio.run(task())
+
+    def test_idle_sync_does_not_rebuild_or_repaint_the_page(self) -> None:
+        """没有云端新数据时不能整页重绘，否则窗口每隔几分钟闪一下。"""
+        scheduler.resume_auto_sync()
+        page = _FakePage()
+        scheduler._page = page
+        rebuilt: list[str] = []
+        scheduler._refresh_status = lambda: None
+        scheduler._refresh_content = lambda: rebuilt.append("rebuild")
+        client = scheduler.sync_client
+        saved = (client.status, client.last_pull_count, client.last_purged)
+
+        def sync_once() -> str:
+            client.status = "已同步 20:00"
+            client.last_pull_count = 0
+            client.last_purged = 0
+            return client.status
+
+        try:
+            with mock.patch.object(client, "sync_once", side_effect=sync_once):
+                scheduler._run_sync_async()
+                self._run_until_ui(page)
+            self.assertEqual(rebuilt, [])
+            self.assertEqual(page.updates, 0)
+        finally:
+            client.status, client.last_pull_count, client.last_purged = saved
+            scheduler._page = None
+            scheduler._refresh_status = None
+            scheduler._refresh_content = None
+
+    def test_pulled_changes_still_refresh_content(self) -> None:
+        scheduler.resume_auto_sync()
+        page = _FakePage()
+        scheduler._page = page
+        rebuilt: list[str] = []
+        scheduler._refresh_status = lambda: None
+        scheduler._refresh_content = lambda: rebuilt.append("rebuild")
+        client = scheduler.sync_client
+        saved = (client.status, client.last_pull_count, client.last_purged)
+
+        def sync_once() -> str:
+            client.status = "已同步 20:01"
+            client.last_pull_count = 2
+            client.last_purged = 0
+            return client.status
+
+        try:
+            with mock.patch.object(client, "sync_once", side_effect=sync_once):
+                scheduler._run_sync_async()
+                self._run_until_ui(page)
+            self.assertEqual(rebuilt, ["rebuild"])
+            self.assertEqual(page.updates, 0)
+        finally:
+            client.status, client.last_pull_count, client.last_purged = saved
+            scheduler._page = None
+            scheduler._refresh_status = None
+            scheduler._refresh_content = None
+
 
 if __name__ == "__main__":
     unittest.main()

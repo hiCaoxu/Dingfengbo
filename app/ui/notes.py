@@ -1,4 +1,4 @@
-"""笔记：Markdown 源码/预览分栏、代码高亮与标签聚合。"""
+"""笔记：Markdown 源码、预览或并列，代码高亮与标签聚合。"""
 
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ from .widgets import (
     icon_button,
     page_header,
     primary_button,
+    snack,
     tag_chip,
 )
 
@@ -37,6 +38,9 @@ logger = logging.getLogger(__name__)
 
 _state = state.notes
 _preview: ft.Container | None = None
+# 编辑页版式跨刷新保留：源码、预览，或左右并列。
+_editor_view = "split"
+EDITOR_VIEWS = ("source", "preview", "split")
 
 # 预览防抖：每次击键不再触发全文解析，停顿 400ms 后后台渲染。
 _PREVIEW_DEBOUNCE_MS = 400
@@ -76,30 +80,82 @@ def _note_snapshot(note: Note) -> tuple[str, str, str, str]:
     return note.id, note.title, note.content, note.tags
 
 
-def _code_block(code: str, lang: str) -> ft.Control:
+def visible_editor_panes(mode: str) -> tuple[bool, bool]:
+    """返回 (显示源码, 显示预览)。未知模式按并列处理。"""
+    if mode == "source":
+        return True, False
+    if mode == "preview":
+        return False, True
+    return True, True
+
+
+def _code_block(code: str, lang: str, page: ft.Page | None = None) -> ft.Control:
+    """代码块按阅读排版：顶栏写语言并提供复制，正文不要行号和描边。"""
     lines = highlight_lines(code, lang)
-    rows = []
-    for index, spans in enumerate(lines, 1):
-        rows.append(
-            ft.Row(
-                [
-                    ft.Container(
-                        content=ft.Text(str(index), size=th.FONT_CAPTION, color=th.TEXT_MUTED,
-                                        font_family="Consolas"),
-                        width=32,
-                        alignment=ft.Alignment.CENTER_RIGHT,
-                    ),
-                    ft.Text(spans=spans, size=12, selectable=True),
-                ],
-                spacing=8,
-            )
+    rows = [
+        ft.Text(
+            spans=spans or [ft.TextSpan(" ")],
+            size=14,
+            selectable=True,
+            font_family="Consolas",
         )
+        for spans in lines
+    ] or [ft.Text(" ", size=14, font_family="Consolas")]
+
+    text = code or ""
+    # CopyToClipboard 在构造时就要拿到当前页面。预览有时在没有页面上下文的
+    # 线程里刷新（测试、以及部分后台回写），这时退回到点击后再写入剪贴板。
+    action = None
+    try:
+        action = ft.CopyToClipboard(text)
+    except RuntimeError:
+        action = None
+
+    def copied(_event=None) -> None:
+        if page is None:
+            return
+        if action is not None:
+            snack(page, "已复制", th.PRIMARY)
+            return
+
+        clip = ft.Clipboard()
+
+        async def write() -> None:
+            try:
+                await clip.set(text)
+            except Exception:
+                logger.exception("复制代码失败")
+                return
+            snack(page, "已复制", th.PRIMARY)
+
+        try:
+            page.run_task(write)
+        except Exception:
+            logger.debug("复制任务调度失败", exc_info=True)
+
+    header = ft.Row(
+        [
+            ft.Text(lang or "纯文本", size=12, color=th.TEXT_MUTED, font_family="Consolas"),
+            ft.Container(expand=True),
+            ft.TextButton(
+                "复制",
+                data=text,
+                action=action,
+                on_click=copied,
+                style=ft.ButtonStyle(padding=ft.Padding.symmetric(horizontal=8, vertical=2)),
+            ),
+        ],
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
     return ft.Container(
-        content=ft.Column(rows, spacing=0, scroll=ft.ScrollMode.AUTO),
+        content=ft.Column(
+            [header, ft.Container(height=1, bgcolor=th.DIVIDER), ft.Column(rows, spacing=1)],
+            spacing=8,
+        ),
         bgcolor=th.SUBTLE,
-        border=ft.Border.all(1, th.DIVIDER),
-        border_radius=8,
-        padding=ft.Padding.symmetric(vertical=8, horizontal=10),
+        border_radius=12,
+        padding=ft.Padding.symmetric(vertical=10, horizontal=16),
+        data="md-code",
     )
 
 
@@ -121,47 +177,109 @@ def _normalize_table_rows(header: list[str], rows: list[list[str]]) -> list[list
 
 
 def _table(header: list[str], rows: list[list[str]]) -> ft.Control:
+    """表格只留表头强调和行间细线，不使用带边框的数据表。"""
     safe_rows = _normalize_table_rows(header, rows)
-    table = ft.DataTable(
-        columns=[ft.DataColumn(ft.Text(h, size=12, weight="bold", color=th.TEXT)) for h in header],
-        rows=[
-            ft.DataRow(cells=[ft.DataCell(ft.Text(c, size=12, color=th.TEXT)) for c in row])
-            for row in safe_rows
-        ],
-        border=ft.Border.all(1, th.DIVIDER),
-        border_radius=8,
-        heading_row_color=th.TABLE_HEAD,
-    )
-    return ft.Row([table], scroll=ft.ScrollMode.AUTO)
+
+    def cells(values: list[str], bold: bool = False) -> ft.Row:
+        return ft.Row(
+            [
+                ft.Container(
+                    content=ft.Text(
+                        value, size=15, color=th.TEXT, weight="bold" if bold else None,
+                        selectable=True,
+                    ),
+                    expand=True,
+                    padding=ft.Padding.symmetric(vertical=8, horizontal=4),
+                )
+                for value in values
+            ],
+            spacing=8,
+        )
+
+    body: list[ft.Control] = [
+        cells(header, bold=True),
+        ft.Container(height=1, bgcolor=th.DIVIDER),
+    ]
+    for row in safe_rows:
+        body.append(cells(row))
+        body.append(ft.Container(height=1, bgcolor=th.DIVIDER))
+    return ft.Column(body, spacing=0, data="md-table")
 
 
-def render_blocks(blocks: list[dict]) -> ft.Control:
+def render_blocks(blocks: list[dict], page: ft.Page | None = None) -> ft.Control:
     """把 parse 得到的块列表构建为 Flet 控件树（需在 UI 线程调用）。"""
     controls: list[ft.Control] = []
     for block in blocks:
         kind = block["type"]
         if kind == "heading":
-            size = {1: 20, 2: 17, 3: 15}.get(block["level"], 13)
-            controls.append(ft.Text(block["text"], size=size, color=th.TEXT, weight="bold"))
+            # 标题比正文大两级以上，段前留白，读起来像一篇笔记而不是一排标签。
+            size = {1: 26, 2: 21, 3: 18}.get(block["level"], 16)
+            controls.append(
+                ft.Container(
+                    content=ft.Text(
+                        block["text"], size=size, color=th.TEXT, weight="bold", selectable=True,
+                    ),
+                    padding=ft.Padding.only(top=14 if controls else 0, bottom=2),
+                )
+            )
         elif kind == "code":
-            controls.append(_code_block(block["code"], block["lang"]))
+            controls.append(_code_block(block["code"], block["lang"], page))
         elif kind == "hr":
-            controls.append(divider())
+            controls.append(
+                ft.Container(
+                    height=1, bgcolor=th.DIVIDER,
+                    margin=ft.Margin.symmetric(vertical=8),
+                )
+            )
         elif kind == "quote":
             controls.append(
                 ft.Container(
-                    content=ft.Text(block["text"], size=12, color=th.TEXT_MUTED, italic=True),
+                    content=ft.Text(
+                        spans=inline_spans(block["text"]),
+                        size=15,
+                        color=th.TEXT,
+                        selectable=True,
+                    ),
                     border=ft.Border.only(left=ft.BorderSide(3, th.PRIMARY)),
-                    padding=ft.Padding.only(left=10),
+                    padding=ft.Padding.only(left=14, top=2, bottom=2),
                 )
             )
         elif kind == "list":
-            controls.append(
-                ft.Column(
-                    [ft.Row([ft.Text("•", size=12, color=th.PRIMARY), ft.Text(spans=inline_spans(t))], spacing=6) for t in block["items"]],
-                    spacing=4,
+            rows: list[ft.Control] = []
+            for raw in block["items"]:
+                text = raw
+                marker: ft.Control
+                if raw.startswith("[x] ") or raw.startswith("[X] "):
+                    text = raw[4:]
+                    marker = ft.Container(
+                        width=14, height=14, border_radius=4, bgcolor=th.PRIMARY,
+                        margin=ft.Margin.only(top=4),
+                    )
+                elif raw.startswith("[ ] "):
+                    text = raw[4:]
+                    marker = ft.Container(
+                        width=14, height=14, border_radius=4,
+                        border=ft.Border.all(1.4, th.TEXT_MUTED),
+                        margin=ft.Margin.only(top=4),
+                    )
+                else:
+                    marker = ft.Container(
+                        width=6, height=6, border_radius=3, bgcolor=th.PRIMARY,
+                        margin=ft.Margin.only(top=8),
+                    )
+                rows.append(
+                    ft.Row(
+                        [
+                            marker,
+                            ft.Text(
+                                spans=inline_spans(text), size=15, selectable=True, expand=True,
+                            ),
+                        ],
+                        spacing=10,
+                        vertical_alignment=ft.CrossAxisAlignment.START,
+                    )
                 )
-            )
+            controls.append(ft.Column(rows, spacing=8))
         elif kind == "table":
             controls.append(_table(block["header"], block["rows"]))
         elif kind == "image":
@@ -188,12 +306,19 @@ def render_blocks(blocks: list[dict]) -> ft.Control:
                     )
                 )
         else:
-            controls.append(ft.Text(spans=inline_spans(block["text"]), size=13))
-    return ft.Column(controls, spacing=10, scroll=ft.ScrollMode.AUTO, expand=True)
+            controls.append(
+                ft.Text(spans=inline_spans(block["text"]), size=15, selectable=True)
+            )
+    return ft.Column(
+        controls,
+        spacing=16,
+        scroll=ft.ScrollMode.AUTO,
+        expand=True,
+    )
 
 
-def render_markdown(markdown: str) -> ft.Control:
-    return render_blocks(parse(markdown or ""))
+def render_markdown(markdown: str, page: ft.Page | None = None) -> ft.Control:
+    return render_blocks(parse(markdown or ""), page)
 
 
 def _save_fields(note_id: str, **fields) -> bool:
@@ -356,18 +481,22 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
     def _safe_render(value: str) -> ft.Control:
         """首渲染兜底：解析/构建失败时退回纯文本并记日志，别让预览区（甚至整窗）挂掉。"""
         try:
-            return render_markdown(value)
+            return render_markdown(value, page)
         except Exception:
             logger.exception("Markdown 预览渲染失败，退回纯文本")
             return ft.Container(
                 content=ft.Text(
                     value or "（预览渲染失败，已显示原文）",
-                    size=12, color=th.TEXT_MUTED, selectable=True,
+                    size=14, color=th.TEXT_MUTED, selectable=True,
                 ),
                 expand=True,
             )
 
-    _preview = ft.Container(content=_safe_render(content_text), expand=True)
+    _preview = ft.Container(
+        content=_safe_render(content_text),
+        expand=True,
+        padding=ft.Padding.symmetric(vertical=6, horizontal=8),
+    )
     source = ft.TextField(
         value=content_text,
         multiline=True,
@@ -376,8 +505,8 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
         border_width=0,
         filled=False,
         color=th.TEXT,
-        text_style=ft.TextStyle(size=12, color=th.TEXT, font_family="Consolas", height=1.5),
-        hint_text="输入 Markdown，右侧实时预览；代码块使用 ```python 语法",
+        text_style=ft.TextStyle(size=14, color=th.TEXT, font_family="Consolas", height=1.65),
+        hint_text="输入 Markdown；可切到预览或与源码并列。代码块使用 ```python 语法",
         on_change=lambda e: (
             _schedule_save(),
             _update_preview(e.control.value or ""),
@@ -405,8 +534,9 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
                 if generation != _preview_generation:
                     return
                 if _preview is not None:
-                    _preview.content = render_blocks(blocks)
-                    page.update()
+                    _preview.content = render_blocks(blocks, page)
+                    # 只刷预览区。整页 update 会把自定义标题栏的窗口闪一帧。
+                    _preview.update()
             except Exception:
                 # 页面已销毁（切换模块/关窗）时静默放弃，与 scheduler 的处理保持一致。
                 logger.debug("预览刷新失败，页面可能已销毁", exc_info=True)
@@ -440,12 +570,74 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
         _flush_autosave()
         on_back(e)
 
+    source_card = card(ft.Column([source], spacing=10, expand=True), title="源码", expand=1)
+    preview_card = card(_preview, title="实时预览", expand=1)
+    editor_row = ft.Row(
+        spacing=14,
+        expand=True,
+        vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+    )
+    mode_buttons: dict[str, ft.Button] = {}
+
+    def _layout_editor(mode: str) -> None:
+        global _editor_view
+        if mode not in EDITOR_VIEWS:
+            mode = "split"
+        _editor_view = mode
+        show_source, show_preview = visible_editor_panes(mode)
+        panes: list[ft.Control] = []
+        if show_source:
+            source_card.expand = 1
+            panes.append(source_card)
+        if show_preview:
+            preview_card.expand = 1
+            panes.append(preview_card)
+        editor_row.controls = panes
+        for key, button in mode_buttons.items():
+            active = key == mode
+            button.bgcolor = th.PRIMARY if active else th.SUBTLE
+            label = getattr(button, "label_control", None)
+            if label is not None:
+                label.color = th.ON_PRIMARY if active else th.TEXT
+
+    def _choose_view(mode: str) -> None:
+        show_preview = visible_editor_panes(mode)[1]
+        _layout_editor(mode)
+        if show_preview and _preview is not None:
+            _cancel_preview_timer()
+            _preview.content = _safe_render(source.value or "")
+        try:
+            editor_row.update()
+            mode_row.update()
+        except Exception:
+            page.update()
+
+    for key, label in (("source", "源码"), ("preview", "预览"), ("split", "并列")):
+        text = ft.Text(label, size=12)
+        button = ft.Button(
+            content=text,
+            elevation=0,
+            on_click=lambda e, picked=key: _choose_view(picked),
+            style=ft.ButtonStyle(
+                shape=ft.RoundedRectangleBorder(radius=8),
+                padding=ft.Padding.symmetric(vertical=6, horizontal=12),
+            ),
+        )
+        button.label_control = text
+        mode_buttons[key] = button
+    mode_row = ft.Row(
+        [mode_buttons[key] for key in ("source", "preview", "split")],
+        spacing=6,
+    )
+    _layout_editor(_editor_view)
+
     return ft.Column(
         [
             page_header(
                 "编辑笔记",
-                "光标离开正文自动保存 · 预览实时刷新",
+                "自动保存 · 源码、预览或并列",
                 actions=[
+                    mode_row,
                     upload_button(page, insert_image, "插入图片", "选择要插入的图片"),
                     ft.TextButton("返回", on_click=go_back),
                 ],
@@ -456,16 +648,7 @@ def build_preview(page: ft.Page, note: Note, on_back) -> ft.Control:
                         title_field,
                         ft.Column([tags_field, suggestion_row], spacing=6),
                         divider(),
-                        # 源码 / 预览并排等高：内容长短不一也不让两张卡片底边错开
-                        ft.Row(
-                            [
-                                card(ft.Column([source], spacing=10, expand=True), title="源码", expand=1),
-                                card(_preview, title="实时预览", expand=1),
-                            ],
-                            spacing=14,
-                            expand=True,
-                            vertical_alignment=ft.CrossAxisAlignment.STRETCH,
-                        ),
+                        editor_row,
                     ],
                     spacing=8,
                     expand=True,

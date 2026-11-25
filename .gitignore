@@ -18,6 +18,7 @@ packaging/version_info.txt
 *.tmp
 .env
 docker/.env
+data/mobile/
 .vscode/
 .idea/
 .codebuddy/

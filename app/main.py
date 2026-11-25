@@ -116,6 +116,8 @@ DEFAULT_WINDOW_WIDTH = 1280
 DEFAULT_WINDOW_HEIGHT = 880
 MAX_WINDOW_WIDTH = 1440
 MAX_WINDOW_HEIGHT = 940
+# 顶栏座右铭：比栏目标题大两号，顺序固定为要事、练习、精进。
+SLOGAN = "要事第一  刻意练习  持续精进"
 
 
 def _default_window_size(screen: tuple[int, int]) -> tuple[int, int]:
@@ -194,8 +196,9 @@ def main(page: ft.Page) -> None:
     )
     greeting_text = ft.Text(f"{_greeting()}，欢迎回来", size=th.FONT_PAGE_TITLE,
                             color=th.TEXT, weight="bold")
-    slogan_text = ft.Text("刻意练习  要事第一  持续精进", size=th.FONT_SECTION_TITLE,
-                          color=th.PRIMARY, weight="bold")
+    slogan_text = ft.Text(
+        SLOGAN, size=th.FONT_SECTION_TITLE + 2, color=th.PRIMARY, weight="bold",
+    )
     dot = ft.Container(width=7, height=7, bgcolor=th.PRIMARY, border_radius=4)
 
     def toggle_maximize(_=None) -> None:
@@ -274,14 +277,26 @@ def main(page: ft.Page) -> None:
     )
     build_header_row()
 
+    def _paint(*controls: ft.Control) -> None:
+        """只刷新点名的控件。整页 ``page.update()`` 会让自定义标题栏的窗口闪一帧。"""
+        for control in controls:
+            try:
+                control.update()
+            except Exception:
+                logger.debug("局部刷新失败", exc_info=True)
+
     def fit_header(width: float | None = None) -> None:
-        """1120 宽下顶栏放不下座右铭：按窗口宽度收起，避免按钮被裁切。"""
+        """1120 宽下顶栏放不下座右铭：按窗口宽度收起，避免按钮被裁切。
+
+        宽度没跨过阈值就什么都不做。Windows 会不定期发来一次 resize，
+        每次都 ``page.update()`` 就是「放一会儿窗口闪一下」。
+        """
         current = width or page.width or page.window.width or 1280
-        slogan_box.visible = current >= 1240
-        try:
-            page.update()
-        except Exception:
-            logger.debug("顶栏自适应刷新失败", exc_info=True)
+        visible = current >= 1240
+        if slogan_box.visible == visible:
+            return
+        slogan_box.visible = visible
+        _paint(slogan_box)
 
     # 双击顶栏空白处 = 最大化/还原；拖动交给 start_dragging。
     # 不用 WindowDragArea：它的 on_double_tap 在 Windows 上收不到事件（原生拖动区把手势吃掉了）。
@@ -338,6 +353,7 @@ def main(page: ft.Page) -> None:
             (lambda e: open_sync_detail(page, refresh_status)) if parts else None
         )
         queue_box.tooltip = "点击查看同步明细（失败原因 / 重试 / 忽略）" if failed else "点击查看同步明细"
+        _paint(sync_text, queue_box)
 
     syncing = {"value": False}
 
@@ -361,8 +377,6 @@ def main(page: ft.Page) -> None:
                 refresh_status()
                 if sync_client.status.startswith("已同步"):
                     refresh(force=False)  # 拉取到新数据后刷新当前模块（笔记编辑页除外）
-                else:
-                    page.update()
 
             try:
                 page.run_task(apply)

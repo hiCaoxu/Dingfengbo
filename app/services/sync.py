@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import threading
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 from urllib.parse import urlsplit
@@ -593,9 +594,24 @@ def probe(server_url: str, token: str) -> str:
 
 sync_client = SyncClient()
 
+# 写后同步由当前进程的界面在启动时注册。桌面注册自己的调度，手机注册自己的调度。
+# 没注册就什么都不做：和以前「页面还没绑上时 schedule_sync 直接返回」一样，
+# 测试和尚未打开窗口的写入不会去碰另一端的界面模块。
+_after_write: Callable[[], None] | None = None
+
+
+def set_after_write(callback: Callable[[], None] | None) -> None:
+    """注册或清掉「本地写入后触发同步」的回调。"""
+    global _after_write
+    _after_write = callback
+
 
 def mark_pending_write() -> None:
-    """本地写操作后由 UI 调用，10 秒内触发一次同步。"""
-    from ..ui.scheduler import schedule_sync
-
-    schedule_sync(delay_ms=10_000)
+    """本地写操作后由调用方触发，具体延迟和线程由已注册的界面决定。"""
+    callback = _after_write
+    if callback is None:
+        return
+    try:
+        callback()
+    except Exception:
+        logger.exception("写后同步调度失败")
