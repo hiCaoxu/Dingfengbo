@@ -78,7 +78,7 @@ def main(page: ft.Page) -> None:
 
     page.title = "定风波"
     page.bgcolor = th.BG
-    page.padding = 12
+    page.padding = 0
     page.theme = th.build_theme()
     page.dark_theme = th.build_theme(seed=th.PALETTES["dark"]["PRIMARY"])
     page.theme_mode = ft.ThemeMode.DARK if th.is_dark() else ft.ThemeMode.LIGHT
@@ -523,7 +523,19 @@ def main(page: ft.Page) -> None:
         ],
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
-    page.add(ft.Column([header, body, nav], expand=True, spacing=8))
+    # 红米等机型会把内容画进状态栏。只留 12 像素时，右上角设置键被系统栏挡住，点不到。
+    mobile_os = "android" in platform.lower() or "ios" in platform.lower()
+    page.add(
+        ft.SafeArea(
+            content=ft.Container(
+                content=ft.Column([header, body, nav], expand=True, spacing=8),
+                padding=12,
+                expand=True,
+            ),
+            expand=True,
+            minimum_padding=ft.padding.only(top=48) if mobile_os else 0,
+        )
+    )
     scheduler.bind(page, show_status)
     render()
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import sys
 import unittest
 from datetime import date
@@ -11,6 +12,7 @@ from sqlalchemy import func, select
 from app.db.models import Account, Diary, Todo, Transaction
 from app.db.repo import create
 from app.db.session import session_scope
+from app.mobile import main as mobile_main
 from app.mobile import records
 from app.services import sync
 
@@ -86,3 +88,10 @@ class MobileRecordTests(unittest.TestCase):
             self.assertEqual(row.quadrant, "")
             self.assertEqual(row.pomodoro_count, 0)
             self.assertEqual(row.repeat_rule, "none")
+
+
+class MobileChromeTests(unittest.TestCase):
+    def test_settings_button_clears_the_status_bar(self) -> None:
+        source = inspect.getsource(mobile_main.main)
+        self.assertIn("ft.SafeArea(", source)
+        self.assertIn("minimum_padding=ft.padding.only(top=48)", source)
