@@ -87,7 +87,7 @@ def main(page: ft.Page) -> None:
         page.window.width = 400
         page.window.height = 800
 
-    state = {"tab": "todo", "settings": False, "note_id": "", "todo_id": "", "note_mode": "preview"}
+    state = {"tab": "todo", "settings": False, "note_id": "", "todo_id": ""}
     status = ft.Text(sync_client.status, size=th.FONT_CAPTION, color=th.TEXT_MUTED, expand=True)
     body = ft.Container(expand=True)
 
@@ -266,21 +266,6 @@ def main(page: ft.Page) -> None:
             ]
         )
 
-    def _set_note_mode(mode: str) -> None:
-        state["note_mode"] = "source" if mode == "source" else "preview"
-        render()
-
-    def _note_mode_button(label: str, mode: str) -> ft.Control:
-        active = state.get("note_mode", "preview") == mode
-        click = lambda _event, picked=mode: _set_note_mode(picked)
-        if active:
-            return ft.FilledButton(
-                label,
-                on_click=click,
-                style=ft.ButtonStyle(bgcolor=th.PRIMARY, color=th.ON_PRIMARY),
-            )
-        return ft.TextButton(label, on_click=click)
-
     def _notes_view() -> ft.Control:
         if state["note_id"]:
             note = records.read_note(state["note_id"])
@@ -290,35 +275,14 @@ def main(page: ft.Page) -> None:
                 from ..ui.notes import render_markdown
 
                 content = note["content"] or ""
-                if state.get("note_mode") == "source":
-                    body: ft.Control = ft.Column(
-                        [
-                            ft.Text(
-                                content or "（空）",
-                                selectable=True,
-                                size=14,
-                                color=th.TEXT,
-                                font_family="Consolas",
-                            )
-                        ],
-                        scroll=ft.ScrollMode.AUTO,
-                        expand=True,
-                    )
-                elif content.strip():
-                    body = render_markdown(content, page)
-                else:
-                    body = ft.Text("（空）", size=th.FONT_BODY, color=th.TEXT_MUTED)
+                body = (
+                    render_markdown(content, page)
+                    if content.strip()
+                    else ft.Text("（空）", size=th.FONT_BODY, color=th.TEXT_MUTED)
+                )
                 return ft.Column(
                     [
-                        ft.Row(
-                            [
-                                ft.TextButton("返回", on_click=lambda _event: _close_note()),
-                                ft.Container(expand=True),
-                                _note_mode_button("预览", "preview"),
-                                _note_mode_button("源码", "source"),
-                            ],
-                            spacing=4,
-                        ),
+                        ft.TextButton("返回", on_click=lambda _event: _close_note()),
                         ft.Text(note["title"], size=th.FONT_PAGE_TITLE, color=th.TEXT, weight="bold"),
                         body,
                     ],
