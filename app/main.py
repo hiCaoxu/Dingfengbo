@@ -116,8 +116,24 @@ DEFAULT_WINDOW_WIDTH = 1280
 DEFAULT_WINDOW_HEIGHT = 880
 MAX_WINDOW_WIDTH = 1440
 MAX_WINDOW_HEIGHT = 940
-# 顶栏座右铭：比栏目标题大两号，顺序固定为要事、练习、精进。
-SLOGAN = "要事第一  刻意练习  持续精进"
+# 顶栏座右铭。上行比栏目标题大两号；下行小一号，词距拉开后与上行等宽。
+# 微软雅黑 UI 的汉字宽度等于字号。上行两组词之间是两个 Segoe UI Bold 空格，
+# 17 号下量出来是 10px。
+SLOGAN_PARTS = ("要事第一", "刻意练习", "持续精进")
+SLOGAN = "  ".join(SLOGAN_PARTS)
+SLOGAN_DAILY = ("早起", "冥想", "阅读", "写作", "运动")
+_SLOGAN_TOP_GAP_AT_17 = 10.0
+
+
+def slogan_metrics() -> tuple[int, int, float, float]:
+    """上行字号、下行字号、上行词距、下行词距。下行总宽与上行对齐。"""
+    top_size = th.FONT_SECTION_TITLE + 2
+    sub_size = th.FONT_SECTION_TITLE
+    top_gap = _SLOGAN_TOP_GAP_AT_17 * top_size / 17
+    top_width = sum(len(part) for part in SLOGAN_PARTS) * top_size + top_gap * (len(SLOGAN_PARTS) - 1)
+    sub_glyphs = sum(len(part) for part in SLOGAN_DAILY) * sub_size
+    sub_gap = (top_width - sub_glyphs) / (len(SLOGAN_DAILY) - 1)
+    return top_size, sub_size, top_gap, sub_gap
 
 
 def _default_window_size(screen: tuple[int, int]) -> tuple[int, int]:
@@ -196,9 +212,23 @@ def main(page: ft.Page) -> None:
     )
     greeting_text = ft.Text(f"{_greeting()}，欢迎回来", size=th.FONT_PAGE_TITLE,
                             color=th.TEXT, weight="bold")
-    slogan_text = ft.Text(
-        SLOGAN, size=th.FONT_SECTION_TITLE + 2, color=th.PRIMARY, weight="bold",
-    )
+
+    def slogan_line(parts: tuple[str, ...], size: int, gap: float) -> tuple[ft.Row, list[ft.Text]]:
+        texts = [
+            ft.Text(part, size=size, color=th.PRIMARY, weight="bold")
+            for part in parts
+        ]
+        controls: list[ft.Control] = []
+        for index, text in enumerate(texts):
+            if index:
+                controls.append(ft.Container(width=gap))
+            controls.append(text)
+        return ft.Row(controls, spacing=0, tight=True), texts
+
+    top_size, sub_size, top_gap, sub_gap = slogan_metrics()
+    slogan_top, slogan_top_texts = slogan_line(SLOGAN_PARTS, top_size, top_gap)
+    slogan_sub, slogan_sub_texts = slogan_line(SLOGAN_DAILY, sub_size, sub_gap)
+    slogan_texts = slogan_top_texts + slogan_sub_texts
     dot = ft.Container(width=7, height=7, bgcolor=th.PRIMARY, border_radius=4)
 
     def toggle_maximize(_=None) -> None:
@@ -250,7 +280,12 @@ def main(page: ft.Page) -> None:
 
     # 座右铭单独放在左右两块之间，居中显示；窄窗口下自动隐藏，优先保证按钮完整。
     slogan_box = ft.Container(
-        content=slogan_text,
+        content=ft.Column(
+            [slogan_top, slogan_sub],
+            spacing=1,
+            tight=True,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
         expand=True,
         alignment=ft.Alignment.CENTER,
     )
@@ -325,7 +360,8 @@ def main(page: ft.Page) -> None:
         page.theme_mode = ft.ThemeMode.DARK if th.is_dark() else ft.ThemeMode.LIGHT
         header_box.bgcolor = th.BG
         greeting_text.color = th.TEXT
-        slogan_text.color = th.PRIMARY
+        for item in slogan_texts:
+            item.color = th.PRIMARY
         date_text.color = th.TEXT_MUTED
         dot.bgcolor = th.PRIMARY
         nav_box.bgcolor = th.CARD

@@ -11,7 +11,7 @@ import flet as ft
 
 from app import main as app_main
 from app import theme as th
-from app.main import SLOGAN
+from app.main import SLOGAN, SLOGAN_DAILY, slogan_metrics
 from app.services.focus import today_focus
 from app.ui import focus
 
@@ -125,8 +125,16 @@ class FocusActionTests(unittest.TestCase):
 
     def test_slogan_order_and_size(self) -> None:
         self.assertEqual(SLOGAN, "要事第一  刻意练习  持续精进")
-        source = inspect.getsource(app_main.main)
-        self.assertIn("size=th.FONT_SECTION_TITLE + 2", source)
+        self.assertEqual(SLOGAN_DAILY, ("早起", "冥想", "阅读", "写作", "运动"))
+        top_size, sub_size, top_gap, sub_gap = slogan_metrics()
+        self.assertLess(sub_size, top_size)
+        self.assertGreaterEqual(sub_size, th.FONT_MIN)
+        top_width = sum(len(part) * top_size for part in SLOGAN.split("  ")) + top_gap * 2
+        sub_width = sum(len(part) * sub_size for part in SLOGAN_DAILY) + sub_gap * (len(SLOGAN_DAILY) - 1)
+        self.assertAlmostEqual(top_width, sub_width)
+        source = inspect.getsource(app_main.slogan_metrics)
+        self.assertIn("th.FONT_SECTION_TITLE + 2", source)
+        self.assertIn("th.FONT_SECTION_TITLE", source)
 
     def test_go_todo_has_no_plus_icon(self) -> None:
         button = _button_labeled(self.control, "去任务")
