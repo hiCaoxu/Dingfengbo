@@ -54,7 +54,7 @@ class NullableColumnMigrationTests(unittest.TestCase):
             for name in ("note", "due_time", "tags", "pomodoro_count", "title"):
                 self.assertEqual(columns[name][3], 1, f"{name} 应为 NOT NULL")
             self.assertEqual(
-                int(connection.exec_driver_sql("PRAGMA user_version").scalar()), 7
+                int(connection.exec_driver_sql("PRAGMA user_version").scalar()), 8
             )
             row = connection.exec_driver_sql(
                 "SELECT title, note, due_time, tags, pomodoro_count FROM todos"
@@ -73,7 +73,7 @@ class NullableColumnMigrationTests(unittest.TestCase):
         initialize_schema(self.engine)
         with self.engine.connect() as connection:
             self.assertEqual(
-                int(connection.exec_driver_sql("PRAGMA user_version").scalar()), 7
+                int(connection.exec_driver_sql("PRAGMA user_version").scalar()), 8
             )
 
     def test_defaults_are_type_appropriate(self) -> None:

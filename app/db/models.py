@@ -26,35 +26,29 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from ..services.money import cents as to_cents
-from ..services.money import from_cents
+from ..services.money import to_float
 
 logger = logging.getLogger(__name__)
 
-class MoneyCents(TypeDecorator):
-    """金额列：库里存**整数分**，ORM 层仍暴露「元」的 float。
+class Money(TypeDecorator):
+    """金额列：库存「元」，写入和读出都四舍五入到分。
 
-    - 写：元 → 整数分（ROUND_HALF_UP），库里只有整数，SUM 精确；
-    - 读：整数分 → 元，业务代码与同步载荷继续用元，旧客户端不受影响。
-
-    这一点很关键：同步协议（JSON 载荷、CSV 导出）仍然是「元」的浮点数。若把协议
-    也改成整数分，老版本客户端推送的 12.34 会被新端当成分读成 ¥0.12，跨版本数据
-    直接写坏。换算只发生在数据库边界。
+    界面、同步载荷、CSV 和数据库用同一个单位。曾经把 12.34 元存成 1234 分，
+    再在读出时除以 100；只要有一条路径读到原始列，就会和界面差 100 倍。
     """
 
-    impl = Integer
+    impl = Float
     cache_ok = True
 
     def process_bind_param(self, value, dialect):
-        return None if value is None else to_cents(value)
+        return None if value is None else to_float(value)
 
     def process_result_value(self, value, dialect):
-        return None if value is None else float(from_cents(value))
+        return None if value is None else to_float(value)
 
     @property
     def python_type(self):
-        # 供 repo._parse / data_io._coerce 判断入站值类型：必须按「元」的 float 处理；
-        # 若沿用 impl 的 int，12.34 会先被截成 12 再乘 100。
+        # 供 repo._parse / data_io._coerce 判断入站值类型：按「元」的 float 处理。
         return float
 
 
@@ -263,14 +257,14 @@ class Account(SyncMixin, Base):
 
     name: Mapped[str] = mapped_column(String(80), nullable=False)
     kind: Mapped[str] = mapped_column(String(24), default="银行卡")
-    initial_balance: Mapped[float] = mapped_column(MoneyCents, default=0)
+    initial_balance: Mapped[float] = mapped_column(Money, default=0)
 
 
 class Transaction(SyncMixin, Base):
     __tablename__ = "transactions"
 
     kind: Mapped[str] = mapped_column(String(16), nullable=False)  # income/expense/transfer
-    amount: Mapped[float] = mapped_column(MoneyCents, nullable=False)
+    amount: Mapped[float] = mapped_column(Money, nullable=False)
     category: Mapped[str] = mapped_column(String(40), default="")
     account_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     to_account_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
@@ -285,7 +279,7 @@ class Budget(SyncMixin, Base):
 
     month: Mapped[str] = mapped_column(String(7), default="", index=True)  # YYYY-MM
     category: Mapped[str] = mapped_column(String(40), default="")
-    amount: Mapped[float] = mapped_column(MoneyCents, default=0)
+    amount: Mapped[float] = mapped_column(Money, default=0)
     note: Mapped[str] = mapped_column(Text, default="")
 
 
@@ -296,7 +290,7 @@ class RecurringRule(SyncMixin, Base):
 
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     kind: Mapped[str] = mapped_column(String(16), default="expense")  # income/expense
-    amount: Mapped[float] = mapped_column(MoneyCents, default=0)
+    amount: Mapped[float] = mapped_column(Money, default=0)
     category: Mapped[str] = mapped_column(String(40), default="")
     account_id: Mapped[str] = mapped_column(String(36), default="")
     period: Mapped[str] = mapped_column(String(8), default="month")  # month/week

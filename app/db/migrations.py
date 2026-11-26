@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime
-from decimal import Decimal
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
@@ -15,8 +14,10 @@ from .models import SYNC_MODELS, Base, Diary, column_fill_value, utcnow
 logger = logging.getLogger(__name__)
 
 # 库级单位/口径迁移的版本号，记录在 SQLite 自带的 ``PRAGMA user_version``：
-#   1 = 金额改为整数分（元 → 分）
+#   1 = 金额改为整数分（元 → 分）。版本 8 已把这笔换算撤掉，这里只保留历史标记：
+#       版本 >= 1 且 < 8 的库，金额列里仍是整数分。
 #   2 = 修正 created_at / updated_at 的历史倒挂（两者曾用不同的时钟）
+#   8 = 金额改回「元」（精确到分）。版本 1–7 的整数分要除以 100，只做一次。
 # 只看数值无法区分「100 元」和「100 分」，必须有显式版本标记，否则重复换算就是灾难。
 MONEY_COLUMNS: tuple[tuple[str, str], ...] = (
     ("transactions", "amount"),
@@ -32,6 +33,7 @@ DIARY_UNIQUE_SCHEMA_VERSION = 5
 INDEX_SCHEMA_VERSION = 6
 # 7 = 按模型定义重建「列可为 NULL」的表（补齐 NOT NULL），并把历史 NULL 回填成默认值
 NULLABLE_SCHEMA_VERSION = 7
+YUAN_SCHEMA_VERSION = 8
 
 # 只有本地意义的表：它们没有 owner_id / sync_seq，不该建同步复合索引。
 _LOCAL_ONLY_TABLES = ("foods", "sync_sequences", "sync_issues", "sync_conflicts", "todo_reminders")
@@ -180,10 +182,10 @@ def _schema_version(connection: Connection) -> int:
 
 
 def _migrate_money_to_cents(connection: Connection) -> None:
-    """把历史「元」的浮点金额就地换算成整数分（幂等，只执行一次）。
+    """历史步骤：把「元」换算成整数分，并留下版本标记（幂等，只执行一次）。
 
-    必须在任何 ORM 写入之前运行：``MoneyCents`` 类型装饰器会在写入时把元乘 100，
-    如果先写入再迁移，这批数据会被乘两次。
+    版本 8 会把整数分再除回元。版本 0 的库仍要先乘 100，这样「版本 >= 1 且 < 8」
+    才稳定地表示「列里是分」。乘和除都在同一次初始化里完成，中间不能插入业务写入。
     """
     if _schema_version(connection) >= MONEY_SCHEMA_VERSION:
         return
@@ -202,6 +204,33 @@ def _migrate_money_to_cents(connection: Connection) -> None:
     connection.exec_driver_sql(f"PRAGMA user_version = {MONEY_SCHEMA_VERSION}")
     if converted:
         logger.info("金额已迁移为整数分：%d 行", converted)
+
+
+def _migrate_cents_back_to_yuan(connection: Connection) -> None:
+    """把版本 1–7 库存的整数分换回元（幂等，只执行一次）。
+
+    界面和同步协议一直是元。列里再存分，原始值和界面就会差 100 倍。
+    版本 0 还没乘过 100，不能在这里除。
+    """
+    version = _schema_version(connection)
+    if version < MONEY_SCHEMA_VERSION or version >= YUAN_SCHEMA_VERSION:
+        return
+    existing = set(inspect(connection).get_table_names())
+    converted = 0
+    for table, column in MONEY_COLUMNS:
+        if table not in existing:
+            continue
+        columns = {item["name"] for item in inspect(connection).get_columns(table)}
+        if column not in columns:
+            continue
+        result = connection.exec_driver_sql(
+            f'UPDATE "{table}" SET "{column}" = "{column}" / 100.0 '
+            f'WHERE "{column}" IS NOT NULL'
+        )
+        converted += result.rowcount or 0
+    connection.exec_driver_sql(f"PRAGMA user_version = {YUAN_SCHEMA_VERSION}")
+    if converted:
+        logger.info("金额已从整数分换回元：%d 行", converted)
 
 
 def _normalize_timestamp_inversions(connection: Connection) -> None:
@@ -559,7 +588,8 @@ def initialize_schema(engine: Engine, *, assign_sequences: bool = True) -> None:
     （升级存量库时要先把计数器锚定到全表最大值）。
     """
     with engine.begin() as connection:
-        # 库级迁移必须最先做：后续所有写入都会经过 MoneyCents（元 → 分）。
+        # 先留下「这些列曾经是分」的版本标记，全部结构性迁移结束后再除回元。
+        # 除法必须放在最后：中途的 UUID 重建和表重建会按列里的原始数搬数据。
         _migrate_money_to_cents(connection)
         _normalize_timestamp_inversions(connection)
         _repair_template_flags(connection)
@@ -586,6 +616,7 @@ def initialize_schema(engine: Engine, *, assign_sequences: bool = True) -> None:
                 _ensure_indexes(connection)  # 重建表会带走复合索引，幂等补回
             if assign_sequences:
                 _assign_missing_sequences(connection)
+            _migrate_cents_back_to_yuan(connection)
             return
         if "transactions" in legacy_tables and "accounts" not in legacy_tables:
             raise RuntimeError("无法迁移交易引用：账户表未使用旧版整数主键")
@@ -621,13 +652,6 @@ def initialize_schema(engine: Engine, *, assign_sequences: bool = True) -> None:
                     if column.name != "id" and column.name in row
                 }
                 values["id"] = new_id
-                # 金额列上面已经换算成整数分；再走 ORM 绑定会被再乘 100，
-                # 因此先换回「元」交给类型装饰器重新换算。
-                for money_field in ("amount", "initial_balance"):
-                    if values.get(money_field) is not None:
-                        values[money_field] = float(
-                            Decimal(str(values[money_field])) / 100
-                        )
                 if table == "transactions":
                     # 旧库可能允许 account_id 为 NULL：直接 str(None) 会把空引用写成
                     # 字面量 "None"，而 to_account_id 分支已有同样保护，这里补齐。
@@ -653,3 +677,4 @@ def initialize_schema(engine: Engine, *, assign_sequences: bool = True) -> None:
         _ensure_indexes(connection)
         if assign_sequences:
             _assign_missing_sequences(connection)
+        _migrate_cents_back_to_yuan(connection)

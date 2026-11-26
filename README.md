@@ -140,7 +140,7 @@ tests/               单元测试（pytest）
   SQLite 怪癖这类反直觉处必须写），不复述代码在做什么；改到这些地方时顺手补一句，
   比事后集中补注释更省力。
 - 界面文案的字形由系统字体提供（Segoe UI / 微软雅黑 UI），不再有字体子集与随包字体。
-- 金额：库里存**整数分**（`models.MoneyCents` 类型装饰器，写元读元），同步载荷与 CSV/JSON 导出仍是「元」——旧客户端按元推送不会被读成 1/100；`app/services/money.py` 统一 Decimal 舍入与比较。迁移由 `PRAGMA user_version` 保证只执行一次。
+- 金额：库、界面、同步载荷和 CSV/JSON 都用「元」，精确到分（`models.Money`）。曾经把 12.34 元存成 1234 分，版本 1–7 的库会在启动时除回 100，且只做一次。`app/services/money.py` 统一 Decimal 舍入与比较。
 - 已知技术债：Caddy TLS 仅文档就绪，未在真实域名生产演练。
 
 ## 打包发布

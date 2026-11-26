@@ -102,7 +102,7 @@ def spending_by_category(session: Session, start: date, end: date) -> dict[str, 
         )
         .group_by(Transaction.category)
     )
-    # SUM 拿到的是整数分，必须换算回元
+    # 金额列读出来已经是元，再量化到分，避免二进制误差进进度条。
     return {str(category or "其他"): to_float(total) for category, total in rows}
 
 

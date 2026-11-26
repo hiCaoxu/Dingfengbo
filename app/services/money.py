@@ -1,17 +1,8 @@
-"""金额运算与格式化：库里存**整数分**，ORM 与同步协议仍以「元」暴露。
+"""金额运算与格式化。库存、界面、同步载荷和导出文件都用「元」，精确到分。
 
-两个口径必须分开：
-
-- **存储**：`transactions.amount` 等四列存整数分（12.34 元 → 1234），SUM 与比较
-  完全精确，不会再出现 `0.1 + 0.2 != 0.3`。
-- **协议**：同步载荷与导出文件仍是「元」的浮点数。旧版本客户端按元推送，若把线上
-  格式也改成整数分，老客户端的 `12.34` 会被新端当成分读成 1/100——跨版本数据直接
-  写坏。换算收敛在 `models.MoneyCents` 类型装饰器里，业务代码继续用元。
-
-关于 SQL 聚合：``func.sum(MoneyCents 列)`` 的结果**已经由类型装饰器的
-``process_result_value`` 换算回元**，业务代码直接 ``to_decimal`` / ``quantize`` 即可，
-**不要**再套一层 ``from_cents()``（那会再除以 100）。``from_cents()`` 只服务于
-``MoneyCents`` 内部「读库」这一步。
+比较和累加走 Decimal，四舍五入到分，避免 ``0.1 + 0.2 != 0.3``。
+``func.sum(金额列)`` 的结果会再走一遍类型装饰器，已经量化到分，业务代码用
+``to_decimal`` / ``to_float`` 即可。
 """
 
 from __future__ import annotations
@@ -81,18 +72,3 @@ def percent(part: object, whole: object) -> int:
 def format_money(value: object) -> str:
     """格式化成「¥1,234.50」。"""
     return f"¥{quantize(value):,.2f}"
-
-
-def cents(value: object) -> int:
-    """「元」→ 整数分（四舍五入到分），用于落库。"""
-    return int(quantize(value) * 100)
-
-
-def from_cents(value: object) -> Decimal:
-    """整数分 → Decimal「元」。
-
-    只给 ``MoneyCents.process_result_value`` 用：那里读到的是库里的原始整数分。
-    ``func.sum(金额列)`` 的结果会再走一遍类型装饰器，已经是「元」，业务代码用
-    ``to_decimal`` 即可，不要再套 ``from_cents``。
-    """
-    return Decimal(int(to_decimal(value))) / 100

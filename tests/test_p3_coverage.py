@@ -223,7 +223,7 @@ class CursorPersistenceTests(unittest.TestCase):
 
 
 class LegacyMoneyMigrationTests(unittest.TestCase):
-    """历史迁移：四张金额表都要换算成整数分，且只换算一次。"""
+    """历史迁移：版本 0 的四张金额表保持「元」，且不会被重复换算。"""
 
     def _legacy_engine(self):
         engine = create_engine("sqlite:///:memory:")
@@ -269,7 +269,7 @@ class LegacyMoneyMigrationTests(unittest.TestCase):
             connection.execute(text("PRAGMA user_version = 0"))
         return engine
 
-    def test_all_money_columns_become_cents_once(self) -> None:
+    def test_all_money_columns_stay_yuan(self) -> None:
         from app.db.migrations import initialize_schema
 
         engine = self._legacy_engine()
@@ -280,16 +280,27 @@ class LegacyMoneyMigrationTests(unittest.TestCase):
 
         initialize_schema(engine)
         with engine.connect() as connection:
-            self.assertEqual(connection.execute(text("SELECT amount FROM transactions")).scalar(), 1234)
-            self.assertEqual(connection.execute(text("SELECT initial_balance FROM accounts")).scalar(), 10050)
-            self.assertEqual(connection.execute(text("SELECT amount FROM budgets")).scalar(), 30025)
-            self.assertEqual(connection.execute(text("SELECT amount FROM recurring_rules")).scalar(), 150075)
+            self.assertAlmostEqual(
+                connection.execute(text("SELECT amount FROM transactions")).scalar(), 12.34, places=2
+            )
+            self.assertAlmostEqual(
+                connection.execute(text("SELECT initial_balance FROM accounts")).scalar(), 100.5, places=2
+            )
+            self.assertAlmostEqual(
+                connection.execute(text("SELECT amount FROM budgets")).scalar(), 300.25, places=2
+            )
+            self.assertAlmostEqual(
+                connection.execute(text("SELECT amount FROM recurring_rules")).scalar(), 1500.75, places=2
+            )
             version = connection.execute(text("PRAGMA user_version")).scalar()
+            self.assertGreaterEqual(version, 8)
 
-        # 二次初始化不能重复乘 100
+        # 二次初始化不能再除以 100
         initialize_schema(engine)
         with engine.connect() as connection:
-            self.assertEqual(connection.execute(text("SELECT amount FROM transactions")).scalar(), 1234)
+            self.assertAlmostEqual(
+                connection.execute(text("SELECT amount FROM transactions")).scalar(), 12.34, places=2
+            )
             self.assertEqual(connection.execute(text("PRAGMA user_version")).scalar(), version)
         engine.dispose()
 
