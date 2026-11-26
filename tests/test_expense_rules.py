@@ -17,6 +17,15 @@ class ParseAmountTests(unittest.TestCase):
         self.assertEqual(parse_amount("买水 10块5毛"), 10.5)
         self.assertEqual(parse_amount("花了 205 块"), 205.0)
 
+    def test_yuan_and_jiao_use_the_same_scale(self) -> None:
+        self.assertEqual(parse_amount("午饭 12元3角"), 12.3)
+        self.assertEqual(parse_amount("午饭 10元5角"), 10.5)
+        self.assertEqual(parse_amount("午饭 12元3毛"), 12.3)
+        self.assertEqual(parse_amount("找零 5角"), 0.5)
+        self.assertEqual(parse_amount("找零 5毛"), 0.5)
+        self.assertEqual(parse_amount("午饭 12元3角5分"), 12.35)
+        self.assertAlmostEqual(parse_amount("12.3元"), 12.3)
+
     def test_unit_multipliers(self) -> None:
         self.assertEqual(parse_amount("收入 10万"), 100_000.0)
         self.assertEqual(parse_amount("奖金 3千"), 3_000.0)

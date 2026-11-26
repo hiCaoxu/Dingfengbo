@@ -53,19 +53,43 @@ def _to_amount(number: str, sign: str | None, unit: str | None) -> float | None:
     return -value if sign else value
 
 
+def _signed(sign: str | None, value: float) -> float:
+    return -value if sign else value
+
+
 def parse_amount(text: str) -> float | None:
-    """提取金额：口语「N块M」→ 单位/货币符号 → 万/千倍数 → 最大数字兜底。
+    """提取金额：口语「N元M角 / N块M」→ 单位/货币符号 → 万/千倍数 → 最大数字兜底。
 
     兜底那一步必须排除年份/日期/次数：「2025年收入10万」旧实现会取到 2025（年份），
-    记成 2025 元；负号与「10块5」的小数位也一并按口语习惯处理。
+    记成 2025 元。负号按退款保留。
+
+    「元」和「角」必须同一套进位：「10块5」是 10.5 元，「12元3角」不能把角丢掉变成
+    12 元，「5角」也不能当成 5 元。一位小数就是角，不是另一个单位。
     """
     body = text or ""
-    # 1) 「10块5」「10块5毛」：口语里 块 后面跟一位数字表示角
-    match = re.search(r"(\d+)\s*块\s*(\d)\s*[毛角]?", body)
+    # 1) 「10块5」「12元3角」「12元3角5分」：块/元 后面的一位数字是角
+    match = re.search(
+        rf"([{_MINUS}])?\s*(\d+)\s*(?:块钱|块|元)\s*(\d)(?:\s*[毛角])?(?:\s*(\d)\s*分)?",
+        body,
+    )
     if match:
-        return float(match.group(1)) + float(match.group(2)) / 10
+        value = float(match.group(2)) + float(match.group(3)) / 10
+        if match.group(4):
+            value += float(match.group(4)) / 100
+        return _signed(match.group(1), round(value, 2))
 
-    # 2) 带货币符号 / 金额单位（允许 万元、千块 这类倍数）
+    # 2) 单独的「5角 / 5毛」是 0.5 元，不是 5 元
+    match = re.search(
+        rf"(?<![\d.])([{_MINUS}])?\s*(\d+)\s*[毛角](?:\s*(\d)\s*分)?",
+        body,
+    )
+    if match:
+        value = float(match.group(2)) / 10
+        if match.group(3):
+            value += float(match.group(3)) / 100
+        return _signed(match.group(1), round(value, 2))
+
+    # 3) 带货币符号 / 金额单位（允许 万元、千块 这类倍数）
     for pattern in (
         rf"(?:¥|￥)\s*([{_MINUS}])?\s*(\d+(?:\.\d+)?)\s*(万|千)?",
         rf"([{_MINUS}])?\s*(\d+(?:\.\d+)?)\s*(万|千)?\s*(?:元|块钱|块|rmb|RMB)",
@@ -76,14 +100,14 @@ def parse_amount(text: str) -> float | None:
             if amount is not None:
                 return amount
 
-    # 3) 光有倍数：「收入10万」「3千」
+    # 4) 光有倍数：「收入10万」「3千」
     match = re.search(rf"([{_MINUS}])?\s*(\d+(?:\.\d+)?)\s*(万|千)(?![年月日])", body)
     if match:
         amount = _to_amount(match.group(2), match.group(1), match.group(3))
         if amount is not None:
             return amount
 
-    # 4) 兜底：取最大的数字，但排除年份、日期、次数、折扣这类非金额数字。
+    # 5) 兜底：取最大的数字，但排除年份、日期、次数、折扣这类非金额数字。
     #    末尾的 (?![\d.]) 防止 `\d+` 回溯到长数字的一部分（"2025年" 曾回退成 202）。
     numbers = [
         float(found)
