@@ -86,10 +86,13 @@ def _calendar_card(
                 size=18, color=th.TEXT, text_align=ft.TextAlign.CENTER,
             ),
             ft.Container(expand=True),
-            ft.Text(
-                f"距今年结束还有 {days_left} 天",
-                size=th.FONT_CAPTION, color=th.TEXT_MUTED, text_align=ft.TextAlign.CENTER,
-                max_lines=2, overflow=ft.TextOverflow.ELLIPSIS,
+            ft.Container(
+                content=ft.Text(
+                    f"距今年结束还有 {days_left} 天",
+                    size=th.FONT_CAPTION, color=th.TEXT_MUTED, text_align=ft.TextAlign.CENTER,
+                    max_lines=2, overflow=ft.TextOverflow.ELLIPSIS,
+                ),
+                padding=ft.Padding.only(bottom=20),
             ),
         ],
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
