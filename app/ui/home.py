@@ -49,7 +49,13 @@ _HOME_STATE = state.home
 _HOME_TOKEN = RenderToken()
 
 
-def _calendar_card(selected: date, width: int | None = None, height: int | None = None) -> ft.Container:
+def _calendar_card(
+    selected: date,
+    width: int | None = None,
+    height: int | None = None,
+    *,
+    expand: int | None = None,
+) -> ft.Container:
     header = ft.Container(
         content=ft.Row(
             [
@@ -104,6 +110,7 @@ def _calendar_card(selected: date, width: int | None = None, height: int | None 
         clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
         width=width,
         height=height,
+        expand=expand,
     )
 
 

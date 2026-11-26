@@ -47,6 +47,25 @@ class FocusLayoutTests(unittest.TestCase):
         self.assertEqual([row.expand for row in rows], [4, 3, 3])
         self.assertTrue(all(row.height is None for row in rows))
 
+    def test_first_row_is_today_card_then_todos_then_diary(self) -> None:
+        """日期卡复制自数据概览，放在今日必做和日记的左边。"""
+        row = self.control.controls[0]
+        self.assertEqual(len(row.controls), 3)
+        self.assertEqual([card.expand for card in row.controls], [2, 3, 2])
+
+        def texts(control) -> list[str]:
+            return [
+                node.value for node in _walk(control)
+                if isinstance(node, ft.Text) and isinstance(node.value, str)
+            ]
+
+        today_texts = texts(row.controls[0])
+        self.assertTrue(any(value.endswith("月") for value in today_texts))
+        self.assertTrue(any("距今年结束还有" in value for value in today_texts))
+        self.assertIn(86, [node.size for node in _walk(row.controls[0]) if isinstance(node, ft.Text)])
+        self.assertIn("今日必做", texts(row.controls[1]))
+        self.assertIn("日记", texts(row.controls[2]))
+
     def test_cards_stretch_inside_rows(self) -> None:
         for row in self.control.controls:
             for card in row.controls:

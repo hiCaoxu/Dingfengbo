@@ -77,6 +77,7 @@ def render(
     navigate,
 ) -> ft.Control:
     """渲染今日聚焦视图（数据由首页后台加载后传入）。"""
+    from .home import _calendar_card
     from .todo import toggle as toggle_todo
     from .pomodoro import open_pomodoro_dialog
 
@@ -173,7 +174,7 @@ def render(
             expand=True,
         ),
         title="日记",
-        expand=1,
+        expand=2,
     )
 
     health_card = card(
@@ -331,10 +332,11 @@ def render(
     )
 
     # 高度按比例瓜分剩余空间（4:3:3），整页铺满窗口：不再需要整页上下滚动，
-    # 内容超出时在各卡片内部滚动。
+    # 内容超出时在各卡片内部滚动。首行左侧是数据概览那张日期卡。
+    today_card = _calendar_card(data["today"], expand=2)
     return ft.Column(
         [
-            equal_height_row([todo_card, diary_card], spacing=12, expand=4),
+            equal_height_row([today_card, todo_card, diary_card], spacing=12, expand=4),
             equal_height_row([health_card, finance_card, ai_card], spacing=12, expand=3),
             equal_height_row([habit_card, review_card], spacing=12, expand=3),
         ],
