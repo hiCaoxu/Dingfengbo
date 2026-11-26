@@ -533,7 +533,7 @@ def main(page: ft.Page) -> None:
                 expand=True,
             ),
             expand=True,
-            minimum_padding=ft.padding.only(top=48) if mobile_os else 0,
+            minimum_padding=ft.Padding.only(top=48) if mobile_os else 0,
         )
     )
     scheduler.bind(page, show_status)

@@ -94,4 +94,4 @@ class MobileChromeTests(unittest.TestCase):
     def test_settings_button_clears_the_status_bar(self) -> None:
         source = inspect.getsource(mobile_main.main)
         self.assertIn("ft.SafeArea(", source)
-        self.assertIn("minimum_padding=ft.padding.only(top=48)", source)
+        self.assertIn("minimum_padding=ft.Padding.only(top=48)", source)
