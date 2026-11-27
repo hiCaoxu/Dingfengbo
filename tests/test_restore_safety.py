@@ -9,7 +9,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from app.config import DEFAULT_DATA_DIR
 from app.db import backup as backup_module
+from tests.helpers import assert_disposable_database
 from app.db.backup import (
     RestoreError,
     RestoreIncomplete,
@@ -91,6 +93,19 @@ class RestoreSafetyTests(unittest.TestCase):
         # 库确实换成了备份内容，但调用方必须收到失败（不能提示成功、不能恢复自动同步）
         self.assertEqual(self._value(self.db), 99)
         self.assertIn("游标", str(ctx.exception))
+
+
+class DisposableDatabaseGuardTests(unittest.TestCase):
+    def test_real_data_dir_is_refused(self) -> None:
+        with self.assertRaises(RuntimeError):
+            assert_disposable_database(DEFAULT_DATA_DIR / "dingfengbo.db")
+
+    def test_temp_dir_is_allowed(self) -> None:
+        root = Path(tempfile.mkdtemp(prefix="dfb-guard-"))
+        try:
+            assert_disposable_database(root / "dingfengbo.db")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
 
 
 if __name__ == "__main__":

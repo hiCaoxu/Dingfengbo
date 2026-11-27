@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import tempfile
 from datetime import date, timedelta
+from pathlib import Path
 
 from app.db.models import (
     Account,
@@ -21,8 +23,27 @@ from app.db.session import engine, init_db, session_scope
 from app.db.models import Base
 
 
+def assert_disposable_database(path: Path) -> None:
+    """只允许清空临时目录里的库。
+
+    pytest 会在导入应用前把数据目录指到临时目录。``python -m unittest`` 不会
+    加载 conftest，引擎仍绑在 ``D:\\Data\\Dingfengbo\\dingfengbo.db`` 上，
+    ``drop_all`` 就会把正式数据删掉。
+    """
+    resolved = Path(path).resolve()
+    temp_root = Path(tempfile.gettempdir()).resolve()
+    if temp_root not in resolved.parents:
+        raise RuntimeError(
+            f"拒绝清空数据库 {resolved}：它不在临时目录里。"
+            "请用 pytest 运行测试，不要用 python -m unittest。"
+        )
+
+
 def reset_db() -> None:
     """清空临时库并重建结构，保证用例之间互不影响。"""
+    from app.config import DB_PATH
+
+    assert_disposable_database(DB_PATH)
     Base.metadata.drop_all(engine)
     init_db()
 
