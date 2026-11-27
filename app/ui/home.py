@@ -76,7 +76,7 @@ def _calendar_card(
     body = ft.Column(
         [
             ft.Container(expand=True),
-            ft.Text(str(selected.day), size=86, color=th.TEXT, weight="bold", text_align=ft.TextAlign.CENTER),
+            ft.Text(str(selected.day), size=86, color=th.DANGER, weight="bold", text_align=ft.TextAlign.CENTER),
             ft.Text(
                 f"第{day_of_year(selected)}天 · 第{iso_week(selected)}周",
                 size=13, color=th.TEXT_MUTED, text_align=ft.TextAlign.CENTER,

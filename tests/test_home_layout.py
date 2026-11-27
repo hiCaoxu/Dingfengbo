@@ -62,7 +62,8 @@ class FocusLayoutTests(unittest.TestCase):
         today_texts = texts(row.controls[0])
         self.assertTrue(any(value.endswith("月") for value in today_texts))
         self.assertTrue(any("距今年结束还有" in value for value in today_texts))
-        self.assertIn(86, [node.size for node in _walk(row.controls[0]) if isinstance(node, ft.Text)])
+        day_number = next(node for node in _walk(row.controls[0]) if isinstance(node, ft.Text) and node.size == 86)
+        self.assertEqual(day_number.color, th.DANGER)
         self.assertIn("今日必做", texts(row.controls[1]))
         self.assertIn("日记", texts(row.controls[2]))
 
