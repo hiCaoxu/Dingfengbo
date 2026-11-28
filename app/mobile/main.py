@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, timedelta
 
 import flet as ft
 
@@ -205,6 +205,16 @@ def main(page: ft.Page) -> None:
         )
         title = _field("标题", current["title"] if current else "")
         due = _field("日期 YYYY-MM-DD", current["due_date"] if current else date.today().isoformat())
+
+        def pick_due(offset: int):
+            def handler(_event) -> None:
+                due.value = (date.today() + timedelta(days=offset)).isoformat()
+                try:
+                    due.update()
+                except Exception:
+                    logger.debug("刷新日期框失败", exc_info=True)
+
+            return handler
         selected_priority = current["priority"] if current and current["priority"] else "none"
         priority = _dropdown(
             "优先级",
@@ -236,6 +246,13 @@ def main(page: ft.Page) -> None:
                 ft.Text("编辑任务" if current else "新建任务", size=th.FONT_PAGE_TITLE, color=th.TEXT, weight="bold"),
                 title,
                 due,
+                ft.Row(
+                    [
+                        ft.TextButton("今天", on_click=pick_due(0)),
+                        ft.TextButton("明天", on_click=pick_due(1)),
+                    ],
+                    spacing=4,
+                ),
                 priority,
                 ft.Row([_save_button("保存", save), ft.TextButton("取消", on_click=cancel)], spacing=8),
             ]

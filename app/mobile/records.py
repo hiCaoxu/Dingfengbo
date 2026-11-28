@@ -21,7 +21,7 @@ from ..db.models import (
 )
 from ..db.repo import create, update
 from ..db.session import session_scope
-from ..services.dates import diary_title, parse_hours
+from ..services.dates import diary_title, parse_hours, parse_relative_day
 from ..services.diary import ensure_diary
 from ..services.health import calorie_of, estimate_exercise_calories, latest_weight_kg
 from ..services.sync import mark_pending_write
@@ -324,6 +324,9 @@ def parse_day(raw: str | None) -> date:
     text = (raw or "").strip()
     if not text:
         return date.today()
+    relative = parse_relative_day(text)
+    if relative is not None:
+        return relative
     try:
         return date.fromisoformat(text)
     except ValueError as exc:

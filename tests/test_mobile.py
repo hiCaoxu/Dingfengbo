@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 import sys
 import unittest
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import func, select
 
@@ -77,6 +77,15 @@ class MobileRecordTests(unittest.TestCase):
             assert row is not None
             self.assertEqual(row.amount, 12.5)
             self.assertEqual(row.kind, "expense")
+
+    def test_parse_day_accepts_today_and_tomorrow(self) -> None:
+        self.assertEqual(records.parse_day("今天"), date.today())
+        self.assertEqual(records.parse_day("明天"), date.today() + timedelta(days=1))
+
+    def test_todo_form_offers_today_and_tomorrow(self) -> None:
+        source = inspect.getsource(mobile_main.main)
+        self.assertIn('ft.TextButton("今天"', source)
+        self.assertIn('ft.TextButton("明天"', source)
 
     def test_new_todo_skips_quadrant_and_pomodoro(self) -> None:
         record_id = records.create_todo("买菜", date.today(), "高")

@@ -15,6 +15,17 @@ logger = logging.getLogger(__name__)
 WEEKDAY_CN = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
 
 
+def parse_relative_day(value: str, today: date | None = None) -> date | None:
+    """「今天」「明天」换成公历日期。其他文字返回 None，交给调用方继续解析。"""
+    text = value.strip()
+    anchor = today or date.today()
+    if text == "今天":
+        return anchor
+    if text == "明天":
+        return anchor + timedelta(days=1)
+    return None
+
+
 def iso_week(value: date) -> int:
     return value.isocalendar()[1]
 

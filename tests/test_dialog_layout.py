@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import date, timedelta
 
 import flet as ft
 
@@ -95,6 +96,29 @@ class DialogLayoutTests(unittest.TestCase):
 
     def test_todo_dialog_inputs_fit(self) -> None:
         self._assert_fits(forms.open_todo_dialog(self.page))
+
+    def test_todo_dialog_picks_today_or_tomorrow(self) -> None:
+        dialog = forms.open_todo_dialog(self.page)
+
+        def click(label: str) -> None:
+            for node in _walk(dialog):
+                if not isinstance(node, ft.Container) or node.on_click is None:
+                    continue
+                texts = [item.value for item in _walk(node) if isinstance(item, ft.Text)]
+                if texts == [label]:
+                    node.on_click(None)
+                    return
+            self.fail(f"找不到「{label}」")
+
+        fields = [
+            node for node in _walk(dialog)
+            if isinstance(node, ft.TextField) and node.label and "到期日期" in node.label
+        ]
+        self.assertEqual(len(fields), 1)
+        click("明天")
+        self.assertEqual(fields[0].value, (date.today() + timedelta(days=1)).isoformat())
+        click("今天")
+        self.assertEqual(fields[0].value, date.today().isoformat())
 
 
 if __name__ == "__main__":

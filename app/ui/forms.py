@@ -7,7 +7,7 @@ import logging
 import math
 import os
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import flet as ft
 
@@ -55,6 +55,7 @@ from ..services.dates import (
     lunar_to_gregorian,
     parse_hours,
     parse_lunar,
+    parse_relative_day,
     valid_hm,
 )
 from ..services.reminders import parse_offsets as reminder_offsets
@@ -126,6 +127,9 @@ def _date(value: str | None, default: date | None = None) -> date | None:
     value = (value or "").strip()
     if not value:
         return default
+    relative = parse_relative_day(value)
+    if relative is not None:
+        return relative
     return date.fromisoformat(value)
 
 
@@ -456,10 +460,34 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
     render_remind_chips()
     remind_time = form_field("提醒时间 HH:MM（可选）", todo.remind_time if todo else "", width=190)
 
+    due_shortcut_row = ft.Row(spacing=6)
+
+    def render_due_shortcuts() -> None:
+        today = date.today()
+        tomorrow = today + timedelta(days=1)
+        current = (due.value or "").strip()
+        solar = due_type.value != "农历"
+        due_shortcut_row.controls = [
+            tag_chip("今天", solar and current == today.isoformat(), lambda e: apply_due_shortcut(0)),
+            tag_chip("明天", solar and current == tomorrow.isoformat(), lambda e: apply_due_shortcut(1)),
+        ]
+
+    def apply_due_shortcut(offset: int) -> None:
+        day = date.today() + timedelta(days=offset)
+        due_type.value = "公历"
+        due.label = "到期日期 YYYY-MM-DD"
+        due.hint_text = "2026-12-31"
+        due.value = day.isoformat()
+        render_due_shortcuts()
+        page.update()
+
+    render_due_shortcuts()
+
     def on_type_change(e):
         lunar = e.control.value == "农历"
         due.label = "农历日期（如 九月初九）" if lunar else "到期日期 YYYY-MM-DD"
         due.hint_text = "九月初九 / 9-9" if lunar else "2026-12-31"
+        render_due_shortcuts()
         due.update()
 
     due_type.on_select = on_type_change
@@ -584,6 +612,7 @@ def open_todo_dialog(page: ft.Page, todo: Todo | None = None, on_done: Callable 
                 title,
                 note,
                 ft.Row([due_type, due, due_time], spacing=12),
+                due_shortcut_row,
                 ft.Row([priority, tags], spacing=12),
                 repeat,
                 custom_panel,
