@@ -8,6 +8,7 @@ from datetime import date, timedelta
 import flet as ft
 
 from .. import theme as th
+from ..branding import logo_mark, window_icon_path
 from ..config import DEFAULT_SERVER_URL, LOGS_DIR, load_settings, save_settings
 from ..db.session import init_db
 from ..icons import ico
@@ -84,6 +85,9 @@ def main(page: ft.Page) -> None:
     page.theme_mode = ft.ThemeMode.DARK if th.is_dark() else ft.ThemeMode.LIGHT
     platform = str(getattr(page, "platform", "") or "")
     if "android" not in platform.lower() and "ios" not in platform.lower():
+        icon = window_icon_path()
+        if icon is not None:
+            page.window.icon = str(icon)
         page.window.width = 400
         page.window.height = 800
 
@@ -534,6 +538,7 @@ def main(page: ft.Page) -> None:
 
     header = ft.Row(
         [
+            logo_mark(28),
             ft.Text("定风波", size=th.FONT_PAGE_TITLE, color=th.TEXT, weight="bold"),
             status,
             ft.IconButton(icon=ico("SETTINGS"), tooltip="同步设置", icon_color=th.TEXT_MUTED, on_click=open_settings),

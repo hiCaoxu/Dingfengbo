@@ -10,6 +10,7 @@ from datetime import date, datetime
 import flet as ft
 
 from . import theme as th
+from .branding import logo_mark, window_icon_path
 from .config import DATA_DIR, LOGS_DIR, load_settings, save_settings
 from .db.backup import maybe_daily_backup
 from .db.session import init_db
@@ -164,6 +165,9 @@ def main(page: ft.Page) -> None:
     th.set_mode(settings.get("theme_mode", "light"))
 
     page.title = "定风波 · 个人工作台"
+    icon = window_icon_path()
+    if icon is not None:
+        page.window.icon = str(icon)
     page.bgcolor = th.BG
     page.padding = 0
     page.spacing = 0
@@ -431,9 +435,10 @@ def main(page: ft.Page) -> None:
         controls = [
             ft.Container(
                 content=ft.Row(
-                    [ft.Icon(ico("WINDSOCK_OUTLINED"), size=22, color=th.PRIMARY),
+                    [logo_mark(28),
                      ft.Text("定风波", size=th.FONT_SECTION_TITLE, color=th.TEXT, weight="bold")],
                     spacing=10,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 padding=ft.Padding.symmetric(vertical=20, horizontal=18),
             )

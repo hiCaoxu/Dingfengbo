@@ -100,6 +100,16 @@ _tray_ready = threading.Event()
 def _icon_image():
     from PIL import Image, ImageDraw
 
+    path = None
+    try:
+        from ..branding import logo_path
+
+        path = logo_path()
+    except Exception:
+        logger.debug("读取应用标志失败", exc_info=True)
+    if path is not None and path.is_file():
+        image = Image.open(path).convert("RGBA")
+        return image.resize((64, 64), Image.Resampling.LANCZOS)
     image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
     draw.ellipse((6, 6, 58, 58), fill=(74, 124, 89, 255))

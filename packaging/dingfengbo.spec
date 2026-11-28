@@ -27,6 +27,8 @@ for package in ("flet", "flet_desktop", "matplotlib", "zhdate"):
 # Flet 0.86 的 flet_desktop 运行时会从包内 app/ 目录解压客户端；
 # 内置压缩包后首次启动无需联网下载（onedir 下落进 _internal/flet_desktop/app/）。
 datas.append((os.path.join(SPEC_DIR, "flet-windows.zip"), "flet_desktop/app"))
+datas.append((os.path.join(ROOT, "app", "assets", "logo.png"), os.path.join("app", "assets")))
+datas.append((os.path.join(SPEC_DIR, "icon.ico"), "."))
 
 hiddenimports = []
 for package in ("app", "flet", "flet_desktop"):
