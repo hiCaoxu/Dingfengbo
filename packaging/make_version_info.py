@@ -51,7 +51,7 @@ VSVersionInfo(
          StringStruct('FileDescription', '{_PRODUCT}'),
          StringStruct('FileVersion', '{version}'),
          StringStruct('InternalName', 'Dingfengbo'),
-         StringStruct('OriginalFilename', 'Dingfengbo.exe'),
+         StringStruct('OriginalFilename', '定风波.exe'),
          StringStruct('ProductName', '{_PRODUCT}'),
          StringStruct('ProductVersion', '{version}')])
     ]),

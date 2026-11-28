@@ -151,7 +151,7 @@ tests/               单元测试（pytest）
 
 产物在 `dist\`：
 
-- `Dingfengbo\`：PyInstaller **onedir** 产物，含 `定风波.exe` / `Dingfengbo.exe`、`_internal\`（Python 运行时、Flet 客户端）与 `使用说明.txt`。
+- `Dingfengbo\`：PyInstaller **onedir** 产物，含 `定风波.exe`、`_internal\`（Python 运行时、Flet 客户端）与 `使用说明.txt`。
 - `定风波-v{版本号}.zip`：上面的整个文件夹，版本号读自 `app/__init__.py` 的 `__version__`。
 
 分发要点：

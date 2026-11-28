@@ -1,4 +1,4 @@
-﻿# Build Windows app: PyInstaller onedir -> dist\Dingfengbo\ (Dingfengbo.exe + 定风波.exe + _internal\)
+﻿# Build Windows app: PyInstaller onedir -> dist\Dingfengbo\ (定风波.exe + _internal\)
 $ErrorActionPreference = "Stop"
 # 本脚本可能在 Windows PowerShell 5.1 下运行，它会把「原生命令写到 stderr 的提示」
 # 当成终止错误——pip 一句「有新版本可用」就能让整个构建中断（历史踩过）。
@@ -33,10 +33,13 @@ Invoke-Native -What "PyInstaller" -Exe "python" `
 
 $appDir = Join-Path "$root\dist" "Dingfengbo"
 $built = Join-Path $appDir "Dingfengbo.exe"
-if (-not (Test-Path $built)) { throw "PyInstaller did not produce $built" }
+$shipped = Join-Path $appDir "定风波.exe"
+if (-not (Test-Path -LiteralPath $built)) { throw "PyInstaller did not produce $built" }
 
-# 中文名副本：与 Dingfengbo.exe 同目录，共用旁边的 _internal\，重命名不影响加载。
-Copy-Item -LiteralPath $built -Destination (Join-Path $appDir "定风波.exe") -Force
+# spec 的 name 保持英文，避免引导程序和中间路径碰到非 ASCII。
+# 发布只留一个 exe：改名不影响加载，仍共用旁边的 _internal\。
+if (Test-Path -LiteralPath $shipped) { Remove-Item -LiteralPath $shipped -Force }
+Move-Item -LiteralPath $built -Destination $shipped
 
 # 绿色分发包：整个程序文件夹 + 使用说明，文件名带版本号（版本号唯一来源 app\__init__.py）
 # 注意：这里不能用 Join-Path "$root\app\__init__.py"——Join-Path 需要两个参数，
