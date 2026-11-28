@@ -209,14 +209,15 @@ def _poem() -> ft.Control:
     return card(
         ft.Column(
             [
+                ft.Text(POEM_TITLE, size=th.FONT_CARD_TITLE, color=th.TEXT, weight="bold"),
+                ft.Text(POEM_AUTHOR, size=th.FONT_CAPTION, color=th.TEXT_MUTED),
+                ft.Container(height=6),
                 ft.Text(POEM_PREFACE, size=th.FONT_CAPTION, color=th.TEXT_MUTED),
                 ft.Column(lines, spacing=4, tight=True),
             ],
-            spacing=10,
+            spacing=2,
             tight=True,
         ),
-        title=POEM_TITLE,
-        trailing=ft.Text(POEM_AUTHOR, size=th.FONT_CAPTION, color=th.TEXT_MUTED),
     )
 
 

@@ -67,6 +67,8 @@ class HelpPageTests(unittest.TestCase):
         self.assertIn(help.POEM_PREFACE, texts)
         for line in help.POEM_LINES:
             self.assertIn(line, texts)
+        self.assertLess(texts.index(help.POEM_TITLE), texts.index(help.POEM_AUTHOR))
+        self.assertLess(texts.index(help.POEM_AUTHOR), texts.index(help.POEM_PREFACE))
         self.assertLess(texts.index(help.POEM_LINES[0]), texts.index("帮助与上手"))
         for _key, label in MODULES:
             self.assertIn(label, texts)
