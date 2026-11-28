@@ -26,6 +26,57 @@ def parse_relative_day(value: str, today: date | None = None) -> date | None:
     return None
 
 
+def _expand_short_year(year: int) -> int:
+    """两位年份：00–69 为 2000–2069，70–99 为 1970–1999。"""
+    if year <= 69:
+        return 2000 + year
+    return 1900 + year
+
+
+def _assemble_date(year: int, month: int, day: int) -> date:
+    try:
+        return date(year, month, day)
+    except ValueError as exc:
+        raise ValueError("日期不存在，请检查月份和日期") from exc
+
+
+_SEPARATED_FULL = re.compile(
+    r"^(?P<year>\d{4}|\d{2})(?P<sep>[-/])(?P<month>\d{1,2})(?P=sep)(?P<day>\d{1,2})$"
+)
+_SEPARATED_MONTH_DAY = re.compile(r"^(?P<month>\d{1,2})(?P<sep>[-/])(?P<day>\d{1,2})$")
+
+
+def parse_entry_date(value: str, today: date | None = None) -> date:
+    """解析手工录入的日期。
+
+    支持 ``YYYYMMDD``、``YYMMDD``、``MMDD``，以及用 ``-`` 或 ``/`` 分开的
+    ``YYYY-MM-DD``、``YY-MM-DD``、``MM-DD``（月、日可以不补零）。
+    没有年份时用 ``today`` 的年份。另外接受「今天」「明天」。
+    """
+    text = value.strip()
+    anchor = today or date.today()
+    relative = parse_relative_day(text, anchor)
+    if relative is not None:
+        return relative
+    if text.isdigit() and len(text) in (4, 6, 8):
+        if len(text) == 8:
+            year, month, day = int(text[0:4]), int(text[4:6]), int(text[6:8])
+        elif len(text) == 6:
+            year = _expand_short_year(int(text[0:2]))
+            month, day = int(text[2:4]), int(text[4:6])
+        else:
+            year, month, day = anchor.year, int(text[0:2]), int(text[2:4])
+        return _assemble_date(year, month, day)
+    matched = _SEPARATED_FULL.fullmatch(text) or _SEPARATED_MONTH_DAY.fullmatch(text)
+    if matched is None:
+        raise ValueError("日期无法识别，例如 2026-11-28、11-28 或 1128")
+    year_text = matched.groupdict().get("year")
+    year = anchor.year if year_text is None else (
+        int(year_text) if len(year_text) == 4 else _expand_short_year(int(year_text))
+    )
+    return _assemble_date(year, int(matched.group("month")), int(matched.group("day")))
+
+
 def iso_week(value: date) -> int:
     return value.isocalendar()[1]
 

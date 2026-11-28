@@ -7,8 +7,7 @@
 from __future__ import annotations
 
 import logging
-import re
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 from sqlalchemy import select
@@ -16,12 +15,12 @@ from sqlalchemy import select
 from ..db.models import LifeEvent
 from ..db.repo import create, soft_delete, update
 from ..db.session import session_scope
+from .dates import parse_entry_date
 from .sync import mark_pending_write
 
 logger = logging.getLogger(__name__)
 
 MAX_TITLE = 15  # 一行放下，不缩成两行
-_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _row(event: LifeEvent) -> dict[str, Any]:
@@ -34,20 +33,16 @@ def _row(event: LifeEvent) -> dict[str, Any]:
 
 
 def parse_target_date(text: str) -> date | None:
-    """把 ``YYYY-MM-DD`` 文本解析成日期。
+    """把手工录入的日期文本解析成日期。
 
-    空文本返回 ``None``（表示不填日期），格式或日期本身不合法时抛 ``ValueError``，
+    空文本返回 ``None``（表示不填日期）。接受 ``2026-11-21``、``26/11/21``、
+    ``11-21``、``20261121`` 这类写法；格式或日期本身不合法时抛 ``ValueError``，
     异常消息可以直接展示给用户。
     """
     text = (text or "").strip()
     if not text:
         return None
-    if not _DATE_PATTERN.match(text):
-        raise ValueError("日期格式应为 YYYY-MM-DD，例如 2026-11-21")
-    try:
-        return datetime.strptime(text, "%Y-%m-%d").date()
-    except ValueError as exc:
-        raise ValueError("日期不存在，请检查月份和日期") from exc
+    return parse_entry_date(text)
 
 
 def list_events() -> list[dict[str, Any]]:

@@ -55,7 +55,7 @@ from ..services.dates import (
     lunar_to_gregorian,
     parse_hours,
     parse_lunar,
-    parse_relative_day,
+    parse_entry_date,
     valid_hm,
 )
 from ..services.reminders import parse_offsets as reminder_offsets
@@ -127,10 +127,7 @@ def _date(value: str | None, default: date | None = None) -> date | None:
     value = (value or "").strip()
     if not value:
         return default
-    relative = parse_relative_day(value)
-    if relative is not None:
-        return relative
-    return date.fromisoformat(value)
+    return parse_entry_date(value)
 
 
 MAX_NUMBER = 1_000_000.0

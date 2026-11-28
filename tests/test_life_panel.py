@@ -89,7 +89,10 @@ class LifeServiceTests(unittest.TestCase):
         self.assertIsNone(life.parse_target_date(""))
         self.assertIsNone(life.parse_target_date("   "))
         self.assertEqual(life.parse_target_date("2026-11-21"), date(2026, 11, 21))
-        for bad in ("2026-1-1", "2026/11/21", "2026-13-01", "2026-02-30", "明天"):
+        self.assertEqual(life.parse_target_date("2026-1-1"), date(2026, 1, 1))
+        self.assertEqual(life.parse_target_date("2026/11/21"), date(2026, 11, 21))
+        self.assertEqual(life.parse_target_date("明天"), date.today() + timedelta(days=1))
+        for bad in ("2026-13-01", "2026-02-30", "不是日期"):
             with self.assertRaises(ValueError, msg=bad):
                 life.parse_target_date(bad)
 
@@ -206,13 +209,13 @@ class DiaryLayoutTests(unittest.TestCase):
         fields = [c for c in walk(dialog.content) if isinstance(c, ft.TextField)]
 
         fields[0].value = "带父母去旅行"
-        fields[1].value = "2026-5-1"
+        fields[1].value = "不是日期"
         dialog.actions[1].on_click(None)
 
         self.assertEqual(life.list_events(), [])
         self.assertTrue(dialog.open)
         texts = [c.value for c in walk(dialog.content) if isinstance(c, ft.Text)]
-        self.assertIn("日期格式应为 YYYY-MM-DD，例如 2026-11-21", texts)
+        self.assertTrue(any("日期无法识别" in (value or "") for value in texts))
 
     def test_life_row_gives_title_the_leftover_width(self) -> None:
         title = "带父母去旅行"
