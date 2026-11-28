@@ -64,6 +64,10 @@ class HelpPageTests(unittest.TestCase):
     def test_page_renders_all_sections(self) -> None:
         texts = [c.value for c in walk(self.view) if isinstance(c, ft.Text)]
         self.assertIn("帮助与上手", texts)
+        self.assertIn(help.POEM_PREFACE, texts)
+        for line in help.POEM_LINES:
+            self.assertIn(line, texts)
+        self.assertLess(texts.index(help.POEM_LINES[0]), texts.index("帮助与上手"))
         for _key, label in MODULES:
             self.assertIn(label, texts)
         for title in ("快速上手", "各模块能做什么", "快捷键与鼠标", "数据、备份与同步", "常见问题"):

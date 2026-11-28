@@ -15,6 +15,17 @@ from .widgets import card, divider, ghost_button, page_header
 
 logger = logging.getLogger(__name__)
 
+# 苏轼《定风波》。应用以此命名，帮助页标题上方放全词（含小序）。
+POEM_TITLE = "定风波"
+POEM_AUTHOR = "苏轼"
+POEM_PREFACE = "三月七日，沙湖道中遇雨。雨具先去，同行皆狼狈，余独不觉。已而遂晴，故作此词。"
+POEM_LINES: tuple[str, ...] = (
+    "莫听穿林打叶声，何妨吟啸且徐行。",
+    "竹杖芒鞋轻胜马，谁怕？一蓑烟雨任平生。",
+    "料峭春风吹酒醒，微冷，山头斜照却相迎。",
+    "回首向来萧瑟处，归去，也无风雨也无晴。",
+)
+
 QUICK_START: tuple[str, ...] = (
     "左侧导航切换模块；顶栏右侧依次是「立即同步」、搜索、主题和设置，最右是最小化/最大化/关闭。",
     "Ctrl+K 随时唤出搜索与命令面板：输入关键字搜任务、笔记、日记、娱乐等，回车执行第一条；也能直接触发「新增任务」「立即同步」这类命令。",
@@ -189,8 +200,28 @@ def _faq_row(question: str, answer: str) -> ft.Column:
     )
 
 
+def _poem() -> ft.Control:
+    lines: list[ft.Control] = []
+    for index, line in enumerate(POEM_LINES):
+        if index == 2:
+            lines.append(ft.Container(height=8))
+        lines.append(ft.Text(line, size=th.FONT_BODY, color=th.TEXT))
+    return card(
+        ft.Column(
+            [
+                ft.Text(POEM_PREFACE, size=th.FONT_CAPTION, color=th.TEXT_MUTED),
+                ft.Column(lines, spacing=4, tight=True),
+            ],
+            spacing=10,
+            tight=True,
+        ),
+        title=POEM_TITLE,
+        trailing=ft.Text(POEM_AUTHOR, size=th.FONT_CAPTION, color=th.TEXT_MUTED),
+    )
+
+
 def build(page: ft.Page, navigate) -> ft.Control:
-    """帮助页：快速上手 + 各模块说明 + 快捷键 + 数据与同步 + 常见问题。"""
+    """帮助页：词作在标题之上，其下是上手说明、模块、快捷键、数据与常见问题。"""
     from ..main import MODULE_LABELS  # 延迟导入：main 反过来依赖本模块
 
     heading = page_header(
@@ -202,6 +233,7 @@ def build(page: ft.Page, navigate) -> ft.Control:
     ]
     return ft.Column(
         [
+            _poem(),
             heading,
             card(_bullets(QUICK_START), title="快速上手"),
             ft.Text("各模块能做什么", size=th.FONT_SECTION_TITLE, color=th.TEXT,
