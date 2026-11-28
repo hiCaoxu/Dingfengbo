@@ -3,7 +3,7 @@
 
 [tool.flet.app]
 module = "mobile"
-exclude = ["data", "tests", "docker", "packaging", "server"]
+exclude = ["data", "tests", "docker", "packaging", "server", "dist", "build"]
 
 [tool.flet.android]
 split_per_abi = true
